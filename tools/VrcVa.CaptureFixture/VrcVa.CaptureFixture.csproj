@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>VRChat</AssemblyName>
+    <RootNamespace>VrcVa.CaptureFixture</RootNamespace>
+  </PropertyGroup>
+</Project>
+
