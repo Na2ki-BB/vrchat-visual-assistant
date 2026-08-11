@@ -58,7 +58,9 @@ internal static class OcrDiagnosticRunner
             return 64;
         }
 
-        WindowsOcrEngine ocrEngine = new();
+        IOcrEngine ocrEngine = new AdaptiveOcrEngine(
+            new WindowsOcrEngine(),
+            new WindowsOcrRegionSource());
         IReadOnlyList<string> languageTags = WindowsOcrEngine.GetAvailableLanguageTags();
         Console.WriteLine($"Available OCR languages: {string.Join(", ", languageTags)}");
 

@@ -49,7 +49,10 @@ public partial class MainWindow : Window
             .ToLowerInvariant()
             ?? "none";
         IAnalyzer analyzer;
-        WindowsOcrEngine ocrEngine = new();
+        WindowsOcrEngine windowsOcrEngine = new();
+        IOcrEngine ocrEngine = new AdaptiveOcrEngine(
+            windowsOcrEngine,
+            new WindowsOcrRegionSource());
         try
         {
             switch (providerId)

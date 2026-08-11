@@ -10,6 +10,13 @@ public interface IOcrEngine
     Task<OcrOutput> RecognizeAsync(CapturedFrame frame, CancellationToken cancellationToken);
 }
 
+public interface IOcrRegionSource
+{
+    Task<IReadOnlyList<CapturedFrame>> CreateRegionsAsync(
+        CapturedFrame frame,
+        CancellationToken cancellationToken);
+}
+
 public interface ITextTranslator
 {
     Task<TranslationOutput> TranslateToJapaneseAsync(
@@ -49,4 +56,3 @@ public interface IPrivacySafeLogger
         ScanFailureCode failureCode,
         Exception exception);
 }
-
