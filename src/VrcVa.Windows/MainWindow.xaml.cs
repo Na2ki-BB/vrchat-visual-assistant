@@ -14,10 +14,13 @@ namespace VrcVa.Windows;
 
 public partial class MainWindow : Window
 {
+    private const int ScanHotKeyIdentifier = 0x565243;
+    private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 1;
     private readonly HttpClient _httpClient = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
+    private readonly IXsOverlayNotificationSink _xsOverlayNotificationSink;
     private readonly ScanPipeline _vrChatPipeline;
     private readonly string _privacyNotice;
     private readonly OpenAiTextTranslator? _openAiTranslator;
@@ -26,6 +29,7 @@ public partial class MainWindow : Window
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
     private GlobalHotKey? _globalHotKey;
+    private GlobalHotKey? _modelToggleHotKey;
     private CancellationTokenSource? _activeScanCancellation;
     private int _uiScanRunning;
     private string? _startupWarning;
@@ -92,12 +96,13 @@ public partial class MainWindow : Window
         }
 
         _analyzer = analyzer;
+        _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
         _renderer = new CompositeResultRenderer(
             new WpfResultRenderer(
                 Dispatcher,
                 RenderProgress,
                 RenderOutcome),
-            new XsOverlayNotificationRenderer(new XsOverlayUdpNotificationSink()));
+            new XsOverlayNotificationRenderer(_xsOverlayNotificationSink));
         _vrChatPipeline = new ScanPipeline(
             new VrChatWindowCaptureSource(),
             _analyzer,
@@ -145,6 +150,7 @@ public partial class MainWindow : Window
             HotKeyDefinition definition = HotKeyDefinition.FromEnvironment();
             _globalHotKey = new GlobalHotKey(
                 new WindowInteropHelper(this).Handle,
+                ScanHotKeyIdentifier,
                 definition);
             _globalHotKey.Pressed += GlobalHotKey_Pressed;
             ScanButton.Content = $"SCAN  ({definition.DisplayText})";
@@ -161,11 +167,69 @@ public partial class MainWindow : Window
                 ScanFailureCode.Unexpected,
                 exception);
         }
+
+        if (_openAiTranslator is null)
+        {
+            return;
+        }
+
+        try
+        {
+            HotKeyDefinition definition = HotKeyDefinition.FromEnvironment(
+                "VRCVA_MODEL_TOGGLE_HOTKEY",
+                "Ctrl+Shift+G");
+            _modelToggleHotKey = new GlobalHotKey(
+                new WindowInteropHelper(this).Handle,
+                ModelToggleHotKeyIdentifier,
+                definition);
+            _modelToggleHotKey.Pressed += ModelToggleHotKey_Pressed;
+            TranslationModelHintText.Text = $"次回から反映 / 切替 {definition.DisplayText}";
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+        {
+            StatusText.Text = "モデル切替ホットキーを登録できませんでした。画面の選択欄は使用できます。";
+            _logger.Error(
+                "startup.model_toggle_hotkey_registration_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
     }
 
     private async void GlobalHotKey_Pressed(object? sender, EventArgs eventArgs)
     {
         await RunPipelineAsync(_vrChatPipeline, "global-hotkey", hideWindowBeforeCapture: false);
+    }
+
+    private async void ModelToggleHotKey_Pressed(object? sender, EventArgs eventArgs)
+    {
+        if (_uiScanRunning != 0)
+        {
+            await SendXsOverlayStatusAsync(
+                "モデル切替待ち",
+                "SCAN完了後にもう一度切り替えてください。",
+                isError: false);
+            return;
+        }
+
+        if (TranslationModelComboBox.Items.Count == 0)
+        {
+            return;
+        }
+
+        int nextIndex = (TranslationModelComboBox.SelectedIndex + 1)
+            % TranslationModelComboBox.Items.Count;
+        TranslationModelComboBox.SelectedIndex = nextIndex;
+        if (TranslationModelComboBox.SelectedItem is TranslationModelChoice choice)
+        {
+            await SendXsOverlayStatusAsync(
+                "翻訳モデル切替",
+                $"次回のSCAN: {choice.DisplayName}",
+                isError: false);
+        }
     }
 
     private async void ScanButton_Click(object sender, RoutedEventArgs eventArgs)
@@ -345,7 +409,34 @@ public partial class MainWindow : Window
         _activeScanCancellation?.Cancel();
         _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
+        _modelToggleHotKey?.Dispose();
         _httpClient.Dispose();
+    }
+
+    private async Task SendXsOverlayStatusAsync(
+        string title,
+        string content,
+        bool isError)
+    {
+        try
+        {
+            await _xsOverlayNotificationSink.SendAsync(
+                title,
+                content,
+                isError,
+                CancellationToken.None);
+        }
+        catch (Exception exception) when (
+            exception is System.Net.Sockets.SocketException
+                or InvalidOperationException)
+        {
+            _logger.Error(
+                "rendering.xsoverlay_notification_failed",
+                Guid.Empty,
+                ScanStage.Rendering,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
     }
 
     private void InitializeModelSelector()

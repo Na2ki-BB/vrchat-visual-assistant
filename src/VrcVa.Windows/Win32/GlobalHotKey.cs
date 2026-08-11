@@ -6,14 +6,23 @@ namespace VrcVa.Windows.Win32;
 
 internal sealed class GlobalHotKey : IDisposable
 {
-    private const int Identifier = 0x565243;
     private readonly IntPtr _windowHandle;
+    private readonly int _identifier;
     private readonly HwndSource _source;
     private bool _registered;
 
-    public GlobalHotKey(IntPtr windowHandle, HotKeyDefinition definition)
+    public GlobalHotKey(
+        IntPtr windowHandle,
+        int identifier,
+        HotKeyDefinition definition)
     {
+        if (identifier <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(identifier));
+        }
+
         _windowHandle = windowHandle;
+        _identifier = identifier;
         Definition = definition;
         _source = HwndSource.FromHwnd(windowHandle)
             ?? throw new InvalidOperationException("WPF window source is not available.");
@@ -21,14 +30,14 @@ internal sealed class GlobalHotKey : IDisposable
 
         _registered = NativeMethods.RegisterHotKey(
             windowHandle,
-            Identifier,
+            identifier,
             definition.Modifiers | NativeMethods.ModNoRepeat,
             definition.VirtualKey);
         if (!_registered)
         {
             _source.RemoveHook(WindowProcedure);
             throw new Win32Exception(
-                "The global SCAN hotkey is already in use or could not be registered.");
+                "The global hotkey is already in use or could not be registered.");
         }
     }
 
@@ -40,7 +49,7 @@ internal sealed class GlobalHotKey : IDisposable
     {
         if (_registered)
         {
-            NativeMethods.UnregisterHotKey(_windowHandle, Identifier);
+            NativeMethods.UnregisterHotKey(_windowHandle, _identifier);
             _registered = false;
         }
 
@@ -54,7 +63,7 @@ internal sealed class GlobalHotKey : IDisposable
         IntPtr longParameter,
         ref bool handled)
     {
-        if (message == NativeMethods.WmHotKey && wordParameter.ToInt32() == Identifier)
+        if (message == NativeMethods.WmHotKey && wordParameter.ToInt32() == _identifier)
         {
             handled = true;
             Pressed?.Invoke(this, EventArgs.Empty);
@@ -66,10 +75,15 @@ internal sealed class GlobalHotKey : IDisposable
 
 internal sealed record HotKeyDefinition(uint Modifiers, uint VirtualKey, string DisplayText)
 {
-    internal static HotKeyDefinition FromEnvironment()
+    internal static HotKeyDefinition FromEnvironment(
+        string variableName = "VRCVA_HOTKEY",
+        string defaultValue = "Ctrl+Shift+T")
     {
-        string configured = Environment.GetEnvironmentVariable("VRCVA_HOTKEY")?.Trim()
-            ?? "Ctrl+Shift+T";
+        ArgumentException.ThrowIfNullOrWhiteSpace(variableName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultValue);
+
+        string configured = Environment.GetEnvironmentVariable(variableName)?.Trim()
+            ?? defaultValue;
         return Parse(configured);
     }
 
@@ -127,4 +141,3 @@ internal sealed record HotKeyDefinition(uint Modifiers, uint VirtualKey, string 
             value);
     }
 }
-
