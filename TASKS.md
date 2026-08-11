@@ -51,7 +51,8 @@ Exit: fake adapters can drive Trigger → Capture → Analyzer → Result → Re
 ## Milestone 3 — Windows capture vertical slice
 
 - [x] Implement VRChat process/main-window discovery using Win32.
-- [x] Detect missing, hidden, or minimized capture targets with distinct messages.
+- [x] Detect missing or hidden capture targets with distinct messages.
+- [x] When VRChat is minimized, restore it only for capture, wait for rendering, and return it to the prior minimized state.
 - [x] Resolve the visible VRChat frame with DWM physical-pixel bounds, avoiding DPI virtualization.
 - [x] Capture one frame with GDI/`Graphics.CopyFromScreen` into an in-memory PNG.
 - [x] Reject invalid/empty dimensions and release GDI/bitmap resources deterministically.
@@ -68,7 +69,7 @@ Manual check:
 Failure split:
 
 - No process/window: verify `VRChat.exe` is running and has a desktop mirror window.
-- Minimized: restore the window.
+- Auto-restore failure: verify VRChat is responsive, restore it once manually, and retry.
 - Black/incorrect frame: disable HDR for the test, keep the mirror visible, and record whether GDI must be replaced by `Windows.Graphics.Capture`.
 - Wrong scaling/crop: inspect DPI and client-to-screen coordinate logs (numbers only).
 
@@ -100,7 +101,7 @@ Failure split:
 
 - [x] Compare recurring and time-limited free tiers from Azure, DeepL, Google Cloud, and AWS against an offline Argos/OPUS-MT option.
 - [x] Benchmark a GPU-based local translator and remove that path after observing about 3.7 GB additional VRAM use on the 8 GB PCVR GPU.
-- [x] Return the default state to `none` so provider evaluation never causes external sending or charges.
+- [x] Return the default state to `none` so provider evaluation never causes external sending or charges; return the local OCR text as a successful result.
 - [ ] Select a translation backend only after the owner explicitly approves one candidate.
 - [ ] Implement and test the selected backend after that approval.
 - [x] Implement `OpenAiTextTranslator` using `HttpClient` and the Responses API.
@@ -115,7 +116,7 @@ Failure split:
 
 Provider-selection acceptance:
 
-1. [ ] Start without provider variables and confirm the app reports that selection is pending.
+1. [x] Start without provider variables and confirm the app returns OCR text while clearly reporting that translation is not configured.
 2. [ ] Confirm the pending state performs no translation HTTP request in an end-to-end run.
 3. [ ] Record the owner's explicit provider decision before adding another adapter.
 
@@ -135,6 +136,8 @@ Optional OpenAI check:
 - [x] Disable SCAN while a request is running and provide cancellation semantics.
 - [x] Keep the app usable without VRChat by exposing local-image diagnostic mode.
 - [x] Add an accessible font size, selectable text, dark UI, and a window mode suitable for desktop debugging.
+- [x] Fan results out to the WPF diagnostic view and XSOverlay localhost notifications.
+- [x] Add an OpenAI-only model-toggle hotkey and report the selected nano/Luna model through XSOverlay.
 
 End-to-end acceptance:
 
@@ -142,7 +145,7 @@ End-to-end acceptance:
 2. Focus VRChat, look at English text, and press the global SCAN hotkey.
 3. Within the configured timeout, see recognized English and Japanese in the assistant window.
 4. Trigger again and confirm a fresh result with no persistent screenshot.
-5. In the default state, confirm the UI explains that the provider is unselected rather than sending or crashing.
+5. In the default state, confirm OCR text is shown and the UI explains that translation is unselected rather than sending or crashing.
 
 ## Milestone 7 — Verification and handoff
 
@@ -154,7 +157,7 @@ End-to-end acceptance:
 - [ ] Record actual capture, OCR, translation, and total latency for at least five scans.
 - [x] Confirm by unit test that logs omit exception messages; implementation never sends image/text/key content to the logger.
 - [x] Write `README.md` with prerequisites, exact commands, privacy behavior, normal use, local-image diagnostics, and stage-by-stage troubleshooting.
-- [x] Record known limitations: visible mirror, minimized/occluded window, OCR pack, cloud text, and no VR HUD yet.
+- [x] Record known limitations: temporary mirror restoration, occluded window, OCR pack, cloud text, and notification-only VR rendering.
 - [x] Update completed boxes and decision log based on observed results.
 
 Exit: the owner can reproduce the vertical slice and identify which stage failed without opening the source code.
@@ -176,25 +179,31 @@ Current state: publication, authentication, and the initial CI run are complete.
 
 ## Post-MVP Milestone A — Quest 3S + XSOverlay in-VR validation
 
-- [ ] Start Quest 3S PCVR, SteamVR, XSOverlay, VRChat, and VRChat Visual Assistant together.
-- [ ] Add the `VRChat Visual Assistant` window as an XSOverlay Window Capture.
-- [ ] Verify the XSOverlay controller pointer can press SCAN and the WPF window hides before desktop capture.
-- [ ] Place and scale the result panel for readable in-VR text; save the layout if supported.
+- [x] Start Quest 3S PCVR, SteamVR, XSOverlay, VRChat, and VRChat Visual Assistant together.
+- [x] Evaluate `VRChat Visual Assistant` as an XSOverlay Window Capture.
+- [x] Record device feedback: too many setup actions, oversized window, controller click failure, window hide/show, and unclear completion.
+- [x] Reject the persistent Window Capture route for normal use.
+- [x] Add a localhost XSOverlay notification renderer for SCAN start, OCR/translation result, and failure stage.
+- [x] Confirm from privacy-safe logs that two scans captured 1922×1041 frames and reached translation after OCR; the old no-provider behavior caused the missing result.
+- [x] Add a safe OVR Advanced Settings helper for SCAN and model-toggle keyboard actions; do not modify user settings unless `-Apply` is explicit.
+- [ ] Confirm the XSOverlay test notification and latest VRCVA result notification are visible in the headset.
+- [ ] Apply the OVRAS shortcut helper after SteamVR is closed and bind two unused Quest controller gestures.
 - [ ] Run five representative scans and record total latency, OCR accuracy, readability, and self-capture failures.
-- [ ] Decide whether XSOverlay Window Capture is sufficient or an XSOverlay notification/custom OpenVR renderer is justified.
 
 ## Post-MVP Milestone B — OCR/capture hardening
 
 - [ ] Collect representative test images with explicit consent and no unnecessary personal data.
 - [ ] Measure full-window versus center ROI OCR accuracy and latency.
 - [ ] Add optional ROI selection and 2x scaling/contrast preprocessing only if measurements improve results.
-- [ ] Implement `Windows.Graphics.Capture` as a second `ICaptureSource` if GDI failures are material.
+- [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) behind `ICaptureSource` so desktop visibility is unnecessary.
+- [ ] Evaluate `Windows.Graphics.Capture` as a second window capture source, without assuming it can render a minimized VRChat window.
 - [ ] Evaluate Tesseract as a local `IOcrEngine` fallback, including native packaging and notices.
 - [ ] Add provider selection UI with plain-language privacy impact; OpenAI nano/Luna model selection is already available.
 
 ## Post-MVP Milestone C — VRChat OSC trigger
 
-- [ ] Implement a localhost-bound OSC listener on the configured VRChat output port (default 9001).
+- [ ] Implement OSCQuery discovery and advertise a dynamic localhost receive port; do not claim fixed port 9001 because XSOverlay already uses it on this PC.
+- [ ] Implement a localhost-bound OSC listener on the discovered/configured port.
 - [ ] Parse only the configured address and expected Boolean/int value.
 - [ ] Trigger on a rising edge and debounce duplicate/menu-reset packets.
 - [ ] Handle avatar changes and explain generated OSC config behavior.
@@ -214,7 +223,8 @@ Current state: publication, authentication, and the initial CI run are complete.
 ## Post-MVP Milestone E — Analyzer expansion
 
 - [ ] Add analyzer capability metadata, typed inputs/outputs, and explicit data-boundary labels.
-- [ ] Add OCR-only and multilingual translation analyzers.
+- [x] Add the OCR-only analyzer used when no translation provider is selected.
+- [ ] Add multilingual translation analyzers.
 - [ ] Add opt-in vision/VQA and summarization providers.
 - [ ] Add puzzle-hint/object-recognition analyzers with clear uncertainty display.
 - [ ] Add web search only as a distinct opt-in capability with query preview and source links.

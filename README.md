@@ -2,20 +2,21 @@
 
 VRChat のデスクトップミラーに見えている英語を、明示的な SCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 1 MVPの途中** です。キャプチャとOCRは実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。SteamVR Overlay、手首HUD、VRChat OSCトリガーは設計済みですが、MVPの実機評価後に進めます。
+現在は **Phase 1.5の実機改善中** です。キャプチャ、OCR、XSOverlay通知は実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首HUDとVRChat OSCトリガーは後続です。
 
-確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay** です。XSOverlayが導入済みなので、専用Overlay実装を待たず、現在の結果ウィンドウをVR内へ表示するPhase 1.5を優先します。
+確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。現在は小さなXSOverlay通知だけを表示します。
 
 > 非公式プロジェクトです。VRChat Inc.、Valve Corporation、OpenAIの承認・提携を示すものではありません。
 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
-- 表示中かつ最小化されていない `VRChat.exe` ウィンドウを取得
+- `VRChat.exe` ウィンドウを1回だけ取得。最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
 - Windows内蔵OCRでローカル文字認識
-- 翻訳バックエンド未選定時は外部送信せず、設定不足として明示
+- 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
-- OpenAI利用時は、XSOverlay内の選択欄から`GPT-5.4 nano`と`GPT-5.6 Luna`を次回SCAN単位で切り替え
+- SCAN開始、OCR/翻訳結果、失敗段階をXSOverlay通知としてVR内表示
+- OpenAI利用時は`Ctrl+Shift+G`、またはOVR Advanced Settingsに割り当てたVR操作で`GPT-5.4 nano`と`GPT-5.6 Luna`を切り替え
 - 英語OCR、翻訳、処理時間、失敗段階、相関IDをWPF画面に表示
 - 任意のローカル画像からOCR/翻訳を診断
 - VRChatなしでキャプチャ→OCRを検証できる開発用fixture
@@ -36,7 +37,7 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 ## 費用
 
 - アプリ本体、Windows画面取得、Windows OCR、ローカルログには利用回数に応じた料金はありません。
-- 既に導入済みのXSOverlayへこのウィンドウを表示することについて、本アプリから追加料金は発生しません。
+- 既に導入済みのXSOverlayへローカル通知を出すことについて、本アプリから追加料金は発生しません。
 - **既定状態では翻訳サービスを呼ばないため、API料金は発生しません。** 採用サービスはまだ決定していません。
 - OpenAI翻訳は任意の従量課金フォールバックです。`VRCVA_TRANSLATION_PROVIDER=openai`と専用の`VRCVA_OPENAI_API_KEY`を両方設定しない限り呼ばれません。
 - アプリは一般的な`OPENAI_API_KEY`を自動利用しません。別ツール用のキーで意図せず課金されることを防ぎます。
@@ -48,10 +49,11 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 
 - Windows 10 version 2004 / build 19041 以降（Windows 11推奨）
 - .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
-- PC版VRChat。MVPではデスクトップミラーが画面上に見えている必要があります
+- PC版VRChat。デスクトップミラーは最小化したまま待機できますが、SCAN中だけ約0.3秒以上、自動的に復元されます
 - 翻訳バックエンドは未選定。現段階ではキャプチャとOCRだけを無料で検証可能
 - WindowsのOCR言語機能（この開発PCでは日本語OCRだけでも英語fixtureを認識できましたが、英語OCR追加を推奨）
-- VR内表示にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
+- VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
+- VRコントローラーからSCANする暫定経路にはOVR Advanced Settings（キーボードなら不要）
 
 このリポジトリの確認環境は、Windows build 26200 + WSL2 Ubuntu 24.04.4 + Windows .NET SDK 8.0.422です。Visual Studioは不要です。
 
@@ -128,25 +130,46 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 
 ## 通常の使い方
 
-1. VRChatを起動し、デスクトップミラーを表示したままにします。
+1. VRChatを起動します。PC側のVRChat窓は最小化して構いません。
 2. VRChat Visual Assistantを起動します。
-3. VR内で英語を見て、`Ctrl+Shift+T` を押します。
-4. デスクトップ結果窓に英語OCRと日本語訳が表示されます。
+3. アプリのデスクトップ窓は邪魔にならない位置へ置くか、最小化します。
+4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
+5. XSOverlay起動中は、SCAN開始と結果が小さなVR内通知で表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
 
 SCANボタンをクリックした場合、アプリ自身が写り込まないよう結果窓を一時的に隠します。グローバルホットキーではVRChatからフォーカスを奪いません。
 
-## Meta Quest 3S + XSOverlayでVR内表示する
+## Meta Quest 3S + XSOverlayでVR内通知を使う
 
-XSOverlayはOpenVR/SteamVR上で特定のWindowsアプリをWindow Captureとして表示できます。現在のMVPでは、まずこの機能で専用HUDの代わりにします。
+**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。VRCVAはXSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ、SCAN開始と結果だけを送ります。
 
 1. Quest 3SをPCVR接続し、SteamVR、XSOverlay、VRChat、VRChat Visual Assistantを起動します。
-2. XSOverlayで新しいWindow Captureを作り、`VRChat Visual Assistant`を選択します。
-3. 読みやすい大きさと位置に調整し、必要なら配置を保存します。
-4. OpenAI利用時は、VRコントローラーで「低料金 — GPT-5.4 nano」または「標準 — GPT-5.6 Luna」を選びます。
-5. VRコントローラーで結果窓のSCANボタンを押します。ボタン経由なら取得直前に窓が一時的に隠れるため、自分自身の写り込みを避けられます。
-6. 翻訳完了後、同じXSOverlay窓で日本語訳と実際に使用したモデルを確認します。
+2. `Ctrl+Shift+T`を1回押します。
+3. 「SCAN開始」に続いて「OCR結果（翻訳未設定）」または「日本語訳」が出ることを確認します。
 
-グローバルホットキーを使う場合は、Windowsデスクトップ上で結果窓がVRChatミラーに重ならないよう配置してください。XSOverlayでの位置固定、視認性、Questコントローラー操作は実機テストで調整します。
+XSOverlayが終了していてもSCANは失敗せず、結果はデスクトップ窓に残ります。通知本文は読み切れる長さを優先し、最大700文字です。
+
+### 一度だけ: QuestコントローラーへSCANを割り当てる
+
+導入済みのOVR Advanced Settingsには、VRコントローラー操作からキーボードショートカットを送る公式機能があります。VRCVAはこれを暫定のコントローラートリガーとして利用し、VRChatやXSOverlayへ入力を注入しません。
+
+1. SteamVRを終了し、タスクマネージャー上の`AdvancedSettings.exe`も終了したことを確認します。
+2. Windows PowerShellで、まず変更なしの確認を実行します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1
+```
+
+3. 表示内容を確認後、バックアップ付きでShortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1 -Apply
+```
+
+4. SteamVRを再起動し、Dashboard → Steam → Controller Bindings → `OVR Advanced Settings`を開きます。
+5. Quest Touchコントローラーを選び、未使用で誤操作しにくいジェスチャーへ`Keyboard Shortcut Two`を割り当てます。これがSCANです。
+6. OpenAI利用時だけ、別のジェスチャーへ`Keyboard Shortcut Three`を割り当てます。これがnano/Luna切替です。
+
+OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の2値だけを変更し、同じフォルダーに日時付きバックアップを作ります。SteamVR側のコントローラーバインドは自動変更しません。
 
 ### 設定用環境変数
 
@@ -158,6 +181,7 @@ XSOverlayはOpenVR/SteamVR上で特定のWindowsアプリをWindow Captureとし
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
 | `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
+| `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 
 例:
 
@@ -198,16 +222,18 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | 表示/症状 | 段階 | 確認すること |
 | --- | --- | --- |
 | `CaptureTargetNotFound` | Capture | Windows版 `VRChat.exe` が起動し、通常ウィンドウがあるか |
-| 最小化エラー | Capture | VRChatミラーを復元する |
+| 自動復元エラー | Capture | VRChatが応答しているか確認し、一度だけ手動復元して再試行 |
 | 黒い/別窓が写る | Capture | ミラーが見えているか、他の窓が覆っていないか、HDRを一時的に切ると変わるか |
 | 一部だけ写る | Capture | 最新ビルドか。DWM物理ピクセル境界を使うため、DPI修正前のビルドでは150%表示などで誤クロップする |
 | `OcrUnavailable` | OCR | Windowsの言語オプションにOCR機能があるか。診断コマンドが列挙する言語タグを確認 |
 | `NoTextDetected` | OCR | 文字を大きくする、ミラー解像度を上げる、画像診断で近い画像を試す |
-| 翻訳バックエンド未選定 | Translation | 現在の既定状態。候補決定まではキャプチャ/OCR診断を使用する |
+| `OCR結果（翻訳未設定）` | Completed | 正常です。無料・外部送信なしの既定状態では認識した英語を表示します |
 | OpenAI専用キー未設定 | Translation | OpenAIを使う場合だけ、同じPowerShellに`VRCVA_TRANSLATION_PROVIDER=openai`と`VRCVA_OPENAI_API_KEY`があるか |
 | 認証/レート制限 | Translation | APIキー権限、課金状態、利用上限。キー値自体はログに出ない |
 | タイムアウト | Translation | ネットワークと `VRCVA_OPENAI_TIMEOUT_SECONDS` |
 | ホットキー登録失敗 | Trigger | 他アプリとの競合。`VRCVA_HOTKEY` を変更して再起動 |
+| XSOverlay通知が出ない | Rendering | XSOverlayが起動中か確認。Window Captureは不要。デスクトップ窓に結果が出るならSCAN自体は成功 |
+| OVRAS操作が反応しない | Trigger | 補助スクリプト適用後にSteamVRを再起動したか、Shortcut Twoをコントローラーへバインドしたか |
 
 ログは次にあります。
 
@@ -220,9 +246,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 ## 現在の制約
 
 - 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatウィンドウ枠です。
-- GDIの可視画面コピーなので、最小化・画面外・他ウィンドウによる遮蔽に弱いです。実測で問題なら `Windows.Graphics.Capture` アダプタへ置き換えます。
-- 現在の結果表示はデスクトップだけです。VR内HUDではありません。
-- VRコントローラー/OSCトリガーはまだありません。
+- GDIの可視画面コピーなので、最小化中は一時復元が必要で、画面外・他ウィンドウによる遮蔽にも弱いです。デスクトップ表示に依存しないSteamVR compositor取得は次の調査項目です。
+- 現在のVR表示はXSOverlayの一時通知です。常設パネルや手首HUDではなく、長文は700文字で省略します。
+- VRコントローラーはOVR Advanced Settingsからキーボードショートカットへ橋渡しする暫定方式です。VRChat OSCはまだありません。
 - ローカルOCRは小さい文字、遠近、装飾フォント、発光、低コントラストで精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。
 - OpenAI APIの実通信は、リポジトリやCIに秘密を置かないため利用者が明示選択した場合だけ行います。自動テストは偽HTTP応答を使います。
@@ -232,7 +258,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 
-次の判断ゲートは翻訳バックエンドの選定です。決定後に実装し、代表的なVRChatワールドで5回以上計測してから、公式VRChat OSCトリガー、OpenVR Overlay、手首相対HUDの順に進みます。
+次の実機ゲートは、XSOverlay通知の視認性、OVR Advanced Settingsトリガー、最小化状態からの自動復元キャプチャです。その後、デスクトップミラーに依存しないSteamVR compositor取得を小さく検証します。翻訳バックエンドは引き続き所有者の明示判断待ちです。
 
 ## ライセンス
 

@@ -22,7 +22,7 @@ VRChat の海外製ワールドで看板、説明、ギミック、注意書き�
 | .NET | Windows .NET SDK 8.0.422 and Windows Desktop runtime installed; no Linux .NET SDK | Build and run through `dotnet.exe`/PowerShell; CI uses Windows runners |
 | Windows SDK / Visual Studio | Not installed as standalone components | Prefer SDK-style projects and the Windows-targeted .NET TFM's WinRT references; avoid requiring Visual Studio for MVP |
 | VR software | VRChat, Steam, SteamVR, and VRChat Creator Companion installed | Native capture and later OpenVR/OSC tests are possible on this PC |
-| Headset / overlay | Meta Quest 3S PCVR; XSOverlay already installed | Validate the WPF result window through XSOverlay before writing a custom OpenVR renderer |
+| Headset / overlay | Meta Quest 3S PCVR; XSOverlay and OVR Advanced Settings installed | Use XSOverlay's local notification endpoint for results and OVRAS keyboard actions for controller-trigger experiments; do not require a captured WPF panel |
 | GPU | NVIDIA RTX 4060 Laptop GPU plus Intel UHD | No NPU was detected; do not depend on Windows AI OCR APIs that require an NPU |
 | Translation load test | A GPU-resident local model added about 3.7 GB VRAM and took 4.54 s cold / about 1.05 s warm | Remove GPU-based local translation from the project; favor a capped cloud free tier for PCVR |
 | Windows OCR languages | Japanese recognizer available; English recognizer not currently installed | Detect recognizers at startup, prefer `en`, fall back to the user-profile engine, and explain how to install English OCR if needed |
@@ -47,11 +47,11 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 1. The user runs VRChat and VRChat Visual Assistant on Windows.
 2. The user looks at English text in the current VRChat view.
-3. The user presses the SCAN hotkey (or the visible SCAN button while testing).
-4. The assistant captures the visible VRChat desktop window frame once.
+3. The user presses the SCAN hotkey, or an OVR Advanced Settings controller binding sends that hotkey.
+4. The assistant captures the VRChat desktop window frame once. If it was minimized, the app restores it only for capture and returns it to minimized state afterward.
 5. Local OCR extracts text.
-6. A configured translation provider translates the extracted text to Japanese.
-7. The desktop result window displays the source and Japanese translation.
+6. With no provider, OCR text is the successful local-only result. A configured translation provider instead translates it to Japanese.
+7. The result is sent to both the desktop diagnostic view and a compact XSOverlay notification.
 
 ### Operational use cases
 
@@ -81,6 +81,8 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - WPF result view showing state, source text, Japanese text, and actionable errors
 - Cancellation/single-flight behavior so repeated triggers cannot create request storms
 - Privacy-conscious file logging without captured images, OCR text, translations, or secrets
+- Best-effort localhost XSOverlay notifications for progress, OCR/translation result, and failure stage
+- Automatic restore/capture/re-minimize behavior when the VRChat desktop window was minimized
 - Unit tests for the platform-neutral pipeline and HTTP translation response handling
 - Windows CI build/test and public-repository hygiene
 
@@ -101,15 +103,16 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### Trigger
 
 - **MVP: global hotkey.** Win32 `RegisterHotKey` works outside the focused WPF window and does not touch the VRChat process. It is the fastest way to validate the whole pipeline.
-- **Recommended next trigger: VRChat OSC avatar parameter.** VRChat officially supports OSC input/output. With OSC enabled, VRChat sends parameter changes to port 9001 by default. A custom unsaved/unsynced Boolean such as `VRCVA/Scan` can be exposed as an Expression Menu button and observed at `/avatar/parameters/VRCVA/Scan`. This is natural in VR but requires an uploaded/configured avatar.
+- **Phase 1.5 controller bridge: OVR Advanced Settings.** Its documented SteamVR actions can send configured keyboard shortcuts from a controller. `Keyboard Shortcut Two` maps to SCAN and `Keyboard Shortcut Three` maps to the nano/Luna toggle. This avoids the observed XSOverlay pointer failure and requires no VRChat/avatar modification.
+- **Recommended later trigger: VRChat OSC avatar parameter discovered through OSCQuery.** A custom unsaved/unsynced Boolean such as `VRCVA/Scan` can be exposed as an Expression Menu button. Do not bind the listener blindly to default port 9001: installed XSOverlay already occupies it, and VRChat documents OSCQuery for multiple receivers/dynamic ports.
 - **Later alternative: SteamVR/OpenVR input action.** It avoids avatar dependency and can be controller-bindable, but requires an OpenVR application manifest, action manifest, bindings, runtime lifecycle, and more device testing.
 - Do not emulate VRChat controls or modify its input pipeline.
 
 ### Capture
 
-- **MVP: capture the visible VRChat window frame from the Windows desktop.** DWM extended-frame bounds provide physical-pixel coordinates independent of display scaling, then `Graphics.CopyFromScreen`/GDI performs a one-shot bit-block copy. It is easy to diagnose and sufficient while the VRChat mirror window is visible and not minimized.
-- Known limits: a minimized, occluded, protected, or partially off-screen window cannot be captured reliably through the simple GDI path. HDR can also change expected colors.
-- **Upgrade path:** `Windows.Graphics.Capture` supports display/window capture and is the preferred robust Windows API, but requires Direct3D frame-pool plumbing and user/system capture affordances. Introduce it after OCR/translation UX is validated.
+- **MVP: capture the VRChat window frame from the Windows desktop.** DWM extended-frame bounds provide physical-pixel coordinates independent of display scaling, then `Graphics.CopyFromScreen`/GDI performs a one-shot bit-block copy. When the window is minimized, VRCVA temporarily restores and foregrounds it, waits for rendering, captures, and returns it to the minimized state.
+- Known limits: the restore is visible on the PC monitor and GDI still cannot reliably capture an occluded, protected, or partially off-screen window. HDR can also change expected colors.
+- **Upgrade path:** first spike Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) behind `ICaptureSource` so capture no longer depends on desktop visibility. It needs a D3D11/native interop boundary and device testing. Keep `Windows.Graphics.Capture` as a Windows-window adapter option, but do not assume it solves minimized rendering.
 - The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
 
 ### OCR
@@ -121,19 +124,20 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ### Translation
 
-- **Current default: unselected.** `VRCVA_TRANSLATION_PROVIDER` defaults to `none`; the app returns an actionable configuration failure and sends no OCR text externally.
+- **Current default: unselected.** `VRCVA_TRANSLATION_PROVIDER` defaults to `none`; OCR still completes successfully and its English text is shown locally, while no OCR text is sent externally.
 - Azure Translator F0, DeepL API Developer, Google Cloud Translation, Amazon Translate, and offline Argos/OPUS-MT have been researched but not selected or implemented as the default.
 - **Optional: OpenAI Responses API.** It is enabled only with `VRCVA_TRANSLATION_PROVIDER=openai` and reads only the application-specific `VRCVA_OPENAI_API_KEY`. The generic `OPENAI_API_KEY` fallback was removed to prevent accidental reuse and spend.
 - The OpenAI request sends OCR text only and uses `store: false`. The UI states both the external data boundary and metered usage.
-- When OpenAI is enabled, the WPF UI exposes runtime selection between the lower-cost `gpt-5.4-nano` and the default `gpt-5.6-luna`. XSOverlay makes the same selector controller-accessible in VR; a change applies to the next scan and is disabled during an active scan.
+- When OpenAI is enabled, the WPF UI exposes runtime selection between the lower-cost `gpt-5.4-nano` and the default `gpt-5.6-luna`. `Ctrl+Shift+G` or the OVRAS controller bridge toggles the same state and confirms it through an XSOverlay notification. A change applies to the next scan and is disabled during an active scan.
 - Model selection is session-only and contains no secret. Startup still follows `VRCVA_OPENAI_MODEL`, defaulting to Luna, while the API key remains process-scoped and is never displayed or persisted.
 - Provider responses and HTTP bodies are never logged. Tests use fake HTTP handlers and placeholder keys.
 
 ### Renderer
 
-- **Phase 1:** ordinary WPF window. This makes source text, translation, timing, and errors visible during development.
-- **Phase 1.5 (selected for this environment): XSOverlay Window Capture.** The installed XSOverlay can expose the existing WPF window inside SteamVR. This gives a testable Quest 3S in-VR panel without maintaining a second renderer.
-- **Phase 2:** validate optional XSOverlay notification integration or VRChat OSC triggering based on measured UX.
+- **Phase 1:** ordinary WPF window. This keeps full source text, translation, timing, and errors visible during development.
+- **Phase 1.5 (selected after device feedback): XSOverlay notifications.** A localhost UDP renderer sends only SCAN start, final text, or failure to the installed XSOverlay. This removes overlay creation/scaling and controller clicking from every session. The WPF view remains a parallel diagnostic renderer.
+- **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
+- **Phase 2:** validate OSCQuery-based VRChat triggering and direct SteamVR compositor capture based on measured UX.
 - **Phase 3 fallback:** implement a custom OpenVR overlay only if XSOverlay cannot provide acceptable placement or interaction. Valve's `IVROverlay` supports absolute or tracked-device-relative transforms.
 
 ## 6. Implementation alternatives
@@ -158,14 +162,15 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ```mermaid
 flowchart LR
-    T[Trigger<br/>button / global hotkey] --> P[ScanPipeline]
+    T[Trigger<br/>button / global hotkey<br/>OVRAS controller bridge] --> P[ScanPipeline]
     P --> C[ICaptureSource<br/>VRChat window]
     C --> F[CapturedFrame<br/>in-memory PNG]
     F --> A[IAnalyzer<br/>TranslateAnalyzer]
     A --> O[IOcrEngine<br/>Windows OCR]
-    A --> X[ITextTranslator<br/>unselected by default<br/>OpenAI opt-in]
+    A --> X[ITextTranslator<br/>OpenAI opt-in]
+    A --> N[OCR-only result<br/>default]
     A --> R[AnalysisResult]
-    R --> V[IResultRenderer<br/>WPF view]
+    R --> V[Composite renderer<br/>WPF + XSOverlay notification]
     P -. stage metadata only .-> L[Privacy-safe log]
 ```
 
@@ -199,10 +204,10 @@ The project count is deliberately small. OpenVR should initially be another rend
 
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
-3. Capture locates a non-minimized `VRChat.exe` main window, resolves its DWM physical-pixel frame, and copies visible pixels into memory.
+3. Capture locates the `VRChat.exe` main window. If minimized, it restores it temporarily; then resolves its DWM physical-pixel frame and copies visible pixels into memory before restoring the prior minimized state.
 4. OCR decodes the in-memory frame and extracts English-like text. Empty OCR is a typed, user-actionable failure.
-5. Translation receives normalized text only. It has a timeout, cancellation token, bounded output, and explicit provider errors.
-6. Renderer updates the WPF UI on the dispatcher thread.
+5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
+6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
 8. Logs record correlation ID, stage, duration, dimensions/text length, and sanitized errors—not content.
 
@@ -214,6 +219,7 @@ Failure categories are stable UI concepts: `Trigger`, `CaptureTargetNotFound`, `
 - Capture only after an explicit click/hotkey/OSC edge. There is no timer-based capture loop.
 - Keep frame bytes in memory and dispose them. Debug image export is disabled by default and, if later added, must require an explicit user action and write only to a documented local directory.
 - Capture and OCR are local. No OCR text leaves the PC in the default unselected state. Any future cloud provider or image-upload analyzer must have an unmistakable UI disclosure and explicit opt-in configuration.
+- XSOverlay notifications stay on the PC through `127.0.0.1`; their payload contains the displayed OCR or translation result, so another local process with access to that UDP endpoint is inside the local trust boundary.
 - Do not log images, OCR text, translations, Authorization headers, request bodies, environment variables, user IDs, avatar IDs, or world names.
 - Keep secrets in environment variables or OS secret storage. `.env`, local settings, captures, logs, dumps, publish output, and IDE metadata are ignored by Git.
 - CI never receives a production API key. Network-backed tests use fake HTTP handlers.
@@ -243,15 +249,15 @@ WPF SCAN button/global hotkey → visible VRChat window capture → local OCR �
 
 ### Phase 1.5 — Quest 3S + XSOverlay vertical slice
 
-Capture the existing WPF result window in XSOverlay, place it in VR, trigger SCAN through the overlay button, and measure readability and interaction. This is now the shortest route to the requested in-VR result because XSOverlay is already installed.
+Send compact results through XSOverlay's local notification endpoint instead of capturing the WPF window. Trigger the existing hotkeys from OVR Advanced Settings controller actions, preserving desktop diagnostics and avoiding XSOverlay pointer interaction.
 
 ### Phase 1.6 — real-device hardening
 
-Measure latency and OCR accuracy in representative worlds. Add selectable crop/center ROI, scaling/contrast preprocessing, capture-provider fallback, retry UX, and configurable hotkey only when measurements justify them.
+Measure latency and OCR accuracy in representative worlds. Validate automatic restore/re-minimize behavior, then spike direct SteamVR compositor capture. Add selectable crop/center ROI, preprocessing, and retry UX only when measurements justify them.
 
 ### Phase 2 — natural in-VR trigger
 
-Add a localhost-only OSC listener for an avatar parameter with rising-edge/debounce behavior. Document the required Expression Menu parameter. Keep the keyboard trigger as recovery path.
+Use OSCQuery discovery to coexist with XSOverlay and other OSC clients, then add a localhost-only avatar-parameter listener with rising-edge/debounce behavior. Document the Expression Menu parameter and keep the keyboard/OVRAS trigger as recovery path.
 
 ### Phase 3 — custom VR rendering fallback
 
@@ -272,19 +278,24 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Keep OCR local and send text only for translation | Strong privacy default without blocking translation quality |
 | 2026-08-11 | Use hotkey first, official VRChat OSC next | Proves value with no avatar work; OSC later gives native in-VR interaction through a supported interface |
 | 2026-08-11 | Defer OpenVR overlay until the desktop vertical slice is measured | Overlay work should not hide capture/OCR/translation failures |
-| 2026-08-11 | Use installed XSOverlay for the first Quest 3S in-VR result test | Its supported Window Capture can display the existing WPF app, avoiding custom OpenVR work before UX validation |
+| 2026-08-11 | Initially use installed XSOverlay Window Capture for the first Quest 3S test (superseded below) | It provided the quickest first visual test before real interaction evidence existed |
 | 2026-08-11 | Label OpenAI translation as metered API use | Local capture/OCR are free to run, but API translation is not; the user must not encounter surprise cost |
 | 2026-08-11 | Defer translation-provider selection and default to no external sending | The owner is still comparing cost, latency, privacy, and PCVR impact; implementation must wait for an explicit decision |
 | 2026-08-11 | Remove GPU-based local translation from the project | A local benchmark consumed about 3.7 GB additional VRAM on an 8 GB laptop GPU and risks PCVR contention |
 | 2026-08-11 | Require an app-specific key for optional OpenAI mode | Removing the generic `OPENAI_API_KEY` fallback prevents another tool's key from silently enabling paid calls |
-| 2026-08-11 | Allow runtime nano/Luna selection in the XSOverlay-visible WPF UI | The owner can trade cost against translation tolerance without leaving VR; changes apply only to later scans and do not persist secrets |
+| 2026-08-11 | Initially expose nano/Luna in the XSOverlay-visible WPF UI (superseded below) | The owner needed a runtime cost/quality choice before the Window Capture UX was evaluated |
 | 2026-08-11 | Do not add a license yet | License choice belongs to the repository owner |
+| 2026-08-11 | Replace XSOverlay Window Capture with localhost notifications | Device feedback showed high setup friction, excessive panel size, and broken controller clicking; notifications preserve VR visibility without a persistent window |
+| 2026-08-11 | Use OVR Advanced Settings as the interim controller bridge | It is already installed and officially supports controller-bound keyboard actions, so SCAN and model toggle do not depend on XSOverlay clicks or avatar edits |
+| 2026-08-11 | Auto-restore a minimized VRChat window for each GDI capture | Removes manual desktop-window management now while preserving an isolated path to compositor capture later |
+| 2026-08-11 | Require OSCQuery for a future OSC trigger | XSOverlay uses the usual 9001 receive port on this machine; discovery avoids fixed-port conflicts and supports multiple receivers |
 
 ## 13. Official sources reviewed
 
 All sources below were checked on 2026-08-11.
 
 - VRChat OSC overview and ports: <https://docs.vrchat.com/docs/osc-overview>
+- VRChat OSCQuery and multiple-receiver discovery: <https://docs.vrchat.com/docs/oscquery>
 - VRChat OSC avatar parameters and generated config behavior: <https://docs.vrchat.com/docs/osc-avatar-parameters>
 - VRChat Expression Menu controls: <https://creators.vrchat.com/avatars/expression-menu-and-controls/>
 - VRChat Terms of Service (effective 2026-02-09), including client modification restrictions: <https://hello.vrchat.com/legal>
@@ -292,6 +303,7 @@ All sources below were checked on 2026-08-11.
 - Microsoft Windows AI OCR guidance and NPU requirement: <https://learn.microsoft.com/en-us/windows/ai/apis/text-recognition>
 - Microsoft `Graphics.CopyFromScreen` API: <https://learn.microsoft.com/en-us/dotnet/api/system.drawing.graphics.copyfromscreen>
 - Valve OpenVR API overview: <https://github.com/ValveSoftware/openvr/wiki/API-Documentation>
+- Valve OpenVR source/bindings, including compositor mirror texture access: <https://github.com/ValveSoftware/openvr>
 - Valve `IVROverlay` overview: <https://github.com/ValveSoftware/openvr/wiki/IVROverlay_Overview>
 - Steamworks SteamVR overlay apps: <https://partner.steamgames.com/doc/features/steamvr/info>
 - Tesseract official repository and license: <https://github.com/tesseract-ocr/tesseract>
@@ -309,4 +321,5 @@ All sources below were checked on 2026-08-11.
 - Argos Translate offline engine: <https://github.com/argosopentech/argos-translate>
 - OPUS-MT English-to-Japanese model: <https://huggingface.co/Helsinki-NLP/opus-mt-en-jap>
 - XSOverlay Steam page and Window Capture capability: <https://store.steampowered.com/app/1173510/XSOverlay/>
+- OVR Advanced Settings controller actions and keyboard-input guide: <https://github.com/OpenVR-Advanced-Settings/OpenVR-AdvancedSettings>
 - Microsoft guidance for calling WinRT APIs from .NET desktop apps: <https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/winrt-apis-desktop-apps>

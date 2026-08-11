@@ -22,6 +22,8 @@ This app must remain an external Windows utility. Reports proposing or depending
 
 Runtime logs intentionally exclude images, recognized/translated text, API keys, HTTP bodies, and VRChat identifiers.
 
+XSOverlay result notifications are sent only to `127.0.0.1` over its local External Message API. Their payload necessarily contains the OCR or translated text being displayed; it is not written to the project log or sent to an internet host by this renderer.
+
 No translation backend is selected by default, so OCR text is not sent externally. Optional OpenAI mode must be explicitly selected and reads only the process-scoped `VRCVA_OPENAI_API_KEY`; the app deliberately does not fall back to generic key variables used by other tools.
 
 Provider keys must never be committed, logged, shown in screenshots, or pasted into issues or chat. A newly researched provider must not be implemented or enabled until the owner makes an explicit decision.
