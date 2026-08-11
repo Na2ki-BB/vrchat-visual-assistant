@@ -201,7 +201,7 @@ public partial class MainWindow : Window
 
     private async void GlobalHotKey_Pressed(object? sender, EventArgs eventArgs)
     {
-        await RunPipelineAsync(_vrChatPipeline, "global-hotkey", hideWindowBeforeCapture: false);
+        await RunPipelineAsync(_vrChatPipeline, "global-hotkey");
     }
 
     private async void ModelToggleHotKey_Pressed(object? sender, EventArgs eventArgs)
@@ -234,10 +234,7 @@ public partial class MainWindow : Window
 
     private async void ScanButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        await RunPipelineAsync(
-            _vrChatPipeline,
-            "scan-button",
-            hideWindowBeforeCapture: IsActive);
+        await RunPipelineAsync(_vrChatPipeline, "scan-button");
     }
 
     private async void ImageButton_Click(object sender, RoutedEventArgs eventArgs)
@@ -259,7 +256,7 @@ public partial class MainWindow : Window
             _analyzer,
             _renderer,
             _logger);
-        await RunPipelineAsync(imagePipeline, "explicit-image", hideWindowBeforeCapture: false);
+        await RunPipelineAsync(imagePipeline, "explicit-image");
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs eventArgs) =>
@@ -319,8 +316,7 @@ public partial class MainWindow : Window
 
     private async Task RunPipelineAsync(
         ScanPipeline pipeline,
-        string triggerName,
-        bool hideWindowBeforeCapture)
+        string triggerName)
     {
         if (Interlocked.CompareExchange(ref _uiScanRunning, 1, 0) != 0)
         {
@@ -328,19 +324,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        bool hidden = false;
         _activeScanCancellation = new CancellationTokenSource();
         SetScanControls(isRunning: true);
 
         try
         {
-            if (hideWindowBeforeCapture)
-            {
-                Hide();
-                hidden = true;
-                await Task.Delay(180, _activeScanCancellation.Token);
-            }
-
             await pipeline.RunAsync(
                 ScanRequest.Create(triggerName),
                 _activeScanCancellation.Token);
@@ -351,12 +339,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (hidden)
-            {
-                Show();
-                Activate();
-            }
-
             _activeScanCancellation.Dispose();
             _activeScanCancellation = null;
             SetScanControls(isRunning: false);
