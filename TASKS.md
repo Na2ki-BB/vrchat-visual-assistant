@@ -166,11 +166,12 @@ Exit: the owner can reproduce the vertical slice and identify which stage failed
 - [x] Confirm owner/account and public repository name before the external write.
 - [x] Create the public `vrchat-visual-assistant` repository without conflicting auto-generated files.
 - [x] Push `main` and configure it to track `origin/main`.
-- [ ] Confirm the initial GitHub Actions run passes, then enable branch protection/repository rules if account permissions support it.
+- [x] Confirm the initial GitHub Actions build-and-test run passes.
+- [ ] Enable branch protection/repository rules if account permissions support it.
 - [ ] Create labels/milestones for `mvp`, `osc-trigger`, `openvr-overlay`, `privacy`, and `provider` work.
 - [ ] Keep all API-backed tests secret-free; add repository secrets only if a later opt-in integration test is designed.
 
-Current state: publication and authentication are complete. The initial CI and Dependabot runs are in progress; repository rules and labels remain pending.
+Current state: publication, authentication, and the initial CI run are complete. Dependabot is active; repository rules and labels remain pending.
 
 ## Post-MVP Milestone A — Quest 3S + XSOverlay in-VR validation
 
