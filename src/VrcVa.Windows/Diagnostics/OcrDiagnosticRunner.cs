@@ -9,6 +9,21 @@ internal static class OcrDiagnosticRunner
 {
     internal static async Task<int> RunAsync(string[] arguments)
     {
+        if (arguments.Length == 1
+            && arguments[0].Equals(
+                "--capture-vrchat-check",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            using CapturedFrame captured = await new VrChatWindowCaptureSource().CaptureAsync(
+                ScanRequest.Create("capture-diagnostic"),
+                CancellationToken.None);
+            Console.WriteLine(
+                $"Capture OK: {captured.Width}x{captured.Height}, "
+                + $"{captured.EncodedImage.Length} bytes, source: {captured.SourceKind}");
+            Console.WriteLine("No image was saved and no OCR text was printed.");
+            return 0;
+        }
+
         ICaptureSource captureSource;
         string? explicitCapturePath = null;
         if (arguments.Length == 2
@@ -38,7 +53,8 @@ internal static class OcrDiagnosticRunner
         {
             Console.Error.WriteLine(
                 "Usage: VrcVa.exe --ocr-file <image-path> | "
-                + "--capture-vrchat-ocr [--save-capture <png-path>]");
+                + "--capture-vrchat-ocr [--save-capture <png-path>] | "
+                + "--capture-vrchat-check");
             return 64;
         }
 

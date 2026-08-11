@@ -1,7 +1,4 @@
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 using VrcVa.Core;
 using VrcVa.Windows.Win32;
@@ -31,47 +28,25 @@ internal sealed class VrChatWindowCaptureSource : ICaptureSource
                 await RestoreForCaptureAsync(handle, cancellationToken).ConfigureAwait(false);
             }
 
-            (int width, int height, int x, int y) = GetCaptureBounds(handle);
-
-            using System.Drawing.Bitmap bitmap = new(
-                width,
-                height,
-                PixelFormat.Format32bppArgb);
-            using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap))
-            {
-                graphics.CopyFromScreen(
-                    x,
-                    y,
-                    0,
-                    0,
-                    new System.Drawing.Size(width, height),
-                    System.Drawing.CopyPixelOperation.SourceCopy);
-            }
-
-            using MemoryStream encoded = new();
-            bitmap.Save(encoded, ImageFormat.Png);
-            return new CapturedFrame(
-                encoded.ToArray(),
-                width,
-                height,
-                "image/png",
-                restoreMinimizedState
-                    ? "vrchat-window-auto-restored"
-                    : "vrchat-window");
+            return await WindowsGraphicsCapture
+                .CaptureWindowAsync(handle, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (ScanException)
         {
             throw;
         }
         catch (Exception exception) when (
-            exception is Win32Exception
-                or ExternalException
-                or ArgumentException)
+            exception is ExternalException
+                or ArgumentException
+                or InvalidOperationException
+                or NotSupportedException
+                or UnauthorizedAccessException)
         {
             throw new ScanException(
                 ScanFailureCode.CaptureUnavailable,
                 ScanStage.Capture,
-                "VRChat画面を取得できませんでした。VRChatが実行中で、PC画面に表示できる状態か確認してください。",
+                "VRChatウィンドウを直接取得できませんでした。VRChatが応答しているか確認してください。",
                 exception);
         }
         finally
@@ -133,55 +108,7 @@ internal sealed class VrChatWindowCaptureSource : ICaptureSource
                 "最小化中のVRChatウィンドウを自動復元できませんでした。");
         }
 
-        _ = NativeMethods.SetForegroundWindow(handle);
         await Task.Delay(RenderSettleDelay, cancellationToken).ConfigureAwait(false);
     }
 
-    private static (int Width, int Height, int X, int Y) GetCaptureBounds(IntPtr handle)
-    {
-        NativeMethods.Rect bounds;
-        int hresult = NativeMethods.DwmGetWindowAttribute(
-            handle,
-            NativeMethods.DwmwaExtendedFrameBounds,
-            out bounds,
-            (uint)Marshal.SizeOf<NativeMethods.Rect>());
-        if (hresult != 0)
-        {
-            bounds = GetClientBoundsFallback(handle);
-        }
-
-        int width = bounds.Right - bounds.Left;
-        int height = bounds.Bottom - bounds.Top;
-        if (width <= 0 || height <= 0)
-        {
-            throw new ScanException(
-                ScanFailureCode.CaptureUnavailable,
-                ScanStage.Capture,
-                "VRChatウィンドウの表示範囲を取得できませんでした。");
-        }
-
-        return (width, height, bounds.Left, bounds.Top);
-    }
-
-    private static NativeMethods.Rect GetClientBoundsFallback(IntPtr handle)
-    {
-        if (!NativeMethods.GetClientRect(handle, out NativeMethods.Rect client))
-        {
-            throw new Win32Exception();
-        }
-
-        NativeMethods.Point origin = new();
-        if (!NativeMethods.ClientToScreen(handle, ref origin))
-        {
-            throw new Win32Exception();
-        }
-
-        return new NativeMethods.Rect
-        {
-            Left = origin.X,
-            Top = origin.Y,
-            Right = origin.X + client.Right - client.Left,
-            Bottom = origin.Y + client.Bottom - client.Top,
-        };
-    }
 }

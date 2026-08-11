@@ -17,6 +17,9 @@ public partial class App : System.Windows.Application
             && (eventArgs.Args[0].Equals("--ocr-file", StringComparison.OrdinalIgnoreCase)
                 || eventArgs.Args[0].Equals(
                     "--capture-vrchat-ocr",
+                    StringComparison.OrdinalIgnoreCase)
+                || eventArgs.Args[0].Equals(
+                    "--capture-vrchat-check",
                     StringComparison.OrdinalIgnoreCase)))
         {
             NativeMethods.AttachConsole(unchecked((uint)-1));
