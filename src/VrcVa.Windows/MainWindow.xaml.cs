@@ -44,24 +44,23 @@ public partial class MainWindow : Window
             .Trim()
             .ToLowerInvariant()
             ?? "none";
-        ITextTranslator translator;
+        IAnalyzer analyzer;
+        WindowsOcrEngine ocrEngine = new();
         try
         {
             switch (providerId)
             {
                 case "none":
-                    const string selectionRequired =
-                        "翻訳バックエンドは未選定です。候補の評価が完了するまで外部送信しません。";
-                    translator = new ConfigurationFailureTranslator(selectionRequired);
+                    analyzer = new OcrAnalyzer(ocrEngine);
                     _privacyNotice =
-                        "画像とOCRはWindows内で処理し、保存しません。翻訳バックエンド未選定のため外部送信しません。";
-                    _translationStatus = "翻訳: バックエンド未選定";
+                        "画像とOCRはWindows内で処理し、保存しません。OCR結果は表示しますが、翻訳未設定のため外部送信しません。";
+                    _translationStatus = "OCRのみ / 翻訳バックエンド未選定";
                     break;
                 case "openai":
                     string? apiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
                     OpenAiTranslatorOptions openAiOptions = OpenAiTranslatorOptions.FromEnvironment();
                     _openAiTranslator = new OpenAiTextTranslator(_httpClient, openAiOptions, apiKey);
-                    translator = _openAiTranslator;
+                    analyzer = new TranslateAnalyzer(ocrEngine, _openAiTranslator);
                     _hasOpenAiApiKey = !string.IsNullOrWhiteSpace(apiKey);
                     _privacyNotice = _hasOpenAiApiKey
                         ? "画像はWindows内でOCRし、保存しません。翻訳時はOCRテキストだけをOpenAIへ送信します（API従量課金）。"
@@ -87,10 +86,12 @@ public partial class MainWindow : Window
                 ScanStage.Translation,
                 ScanFailureCode.TranslationNotConfigured,
                 exception);
-            translator = new ConfigurationFailureTranslator(_startupWarning);
+            analyzer = new TranslateAnalyzer(
+                ocrEngine,
+                new ConfigurationFailureTranslator(_startupWarning));
         }
 
-        _analyzer = new TranslateAnalyzer(new WindowsOcrEngine(), translator);
+        _analyzer = analyzer;
         _renderer = new WpfResultRenderer(
             Dispatcher,
             RenderProgress,
@@ -321,10 +322,15 @@ public partial class MainWindow : Window
         }
 
         SourceTextBox.Text = outcome.Result.SourceText;
-        TranslationTextBox.Text = outcome.Result.JapaneseText;
-        StatusText.Text = outcome.Result.Warning is null
-            ? "翻訳が完了しました。"
-            : $"翻訳が完了しました。注意: {outcome.Result.Warning}";
+        bool ocrOnly = string.IsNullOrWhiteSpace(outcome.Result.JapaneseText);
+        TranslationTextBox.Text = ocrOnly
+            ? "翻訳サービスは未設定です。上のOCR結果を確認してください。"
+            : outcome.Result.JapaneseText;
+        StatusText.Text = ocrOnly
+            ? outcome.Result.Warning ?? "OCRが完了しました。"
+            : outcome.Result.Warning is null
+                ? "翻訳が完了しました。"
+                : $"翻訳が完了しました。注意: {outcome.Result.Warning}";
         DetailText.Text =
             $"合計 {outcome.TotalDuration.TotalSeconds:0.0}秒 "
             + $"(OCR {outcome.Result.OcrDuration.TotalSeconds:0.0}秒 / 翻訳 {outcome.Result.TranslationDuration.TotalSeconds:0.0}秒) "
