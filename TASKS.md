@@ -29,7 +29,7 @@ Exit: a reviewer can explain why the MVP uses an external C# Windows app, local 
 - [x] Pin .NET SDK expectations with `global.json` compatible with installed .NET 8.
 - [x] Add `Directory.Build.props` with nullable references, warnings, deterministic builds, and analyzers appropriate for CI.
 - [x] Add Windows GitHub Actions CI with restore, build, and tests and no secret use.
-- [x] Add weekly Dependabot checks for NuGet and GitHub Actions.
+- [x] Keep GitHub vulnerability alerts and Dependabot security updates enabled; disable routine version-update PRs.
 - [x] Add `SECURITY.md`, `CONTRIBUTING.md`, issue templates, and PR template.
 - [x] Add an explicit unofficial/non-affiliation notice.
 - [-] Add an open-source license only after the repository owner selects one.
@@ -171,7 +171,7 @@ Exit: the owner can reproduce the vertical slice and identify which stage failed
 - [ ] Create labels/milestones for `mvp`, `osc-trigger`, `openvr-overlay`, `privacy`, and `provider` work.
 - [ ] Keep all API-backed tests secret-free; add repository secrets only if a later opt-in integration test is designed.
 
-Current state: publication, authentication, and the initial CI run are complete. Dependabot is active; repository rules and labels remain pending.
+Current state: publication, authentication, and the initial CI run are complete. GitHub vulnerability alerts and Dependabot security updates are active, while routine version-update PRs are disabled; repository rules and labels remain pending.
 
 ## Post-MVP Milestone A — Quest 3S + XSOverlay in-VR validation
 

@@ -224,7 +224,7 @@ Failure categories are stable UI concepts: `Trigger`, `CaptureTargetNotFound`, `
 - Default branch: `main`.
 - Public repository: `Na2ki-BB/vrchat-visual-assistant`; local `main` tracks `origin/main`.
 - CI: Windows runner, restore/build/test with no secrets.
-- Dependabot: weekly NuGet and GitHub Actions checks.
+- Dependency security: GitHub vulnerability alerts and Dependabot security updates are enabled. Routine Dependabot version-update PRs are disabled to avoid update noise.
 - Include `SECURITY.md`, contribution guidance, issue templates, and a pull-request template.
 - Do not choose an open-source license silently. Public visibility does not itself grant reuse rights; add a license only after the owner selects one.
 - Use feature branches and draft PRs once the remote exists; protect `main` after the first successful CI run.
