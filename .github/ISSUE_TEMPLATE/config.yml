@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Na2ki-BB/vrchat-visual-assistant/security/advisories/new
+    about: Use a private security advisory; do not open a public issue for secrets or vulnerabilities.
+

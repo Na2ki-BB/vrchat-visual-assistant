@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible failure without attaching sensitive captures by default.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste API keys, OCR text containing private information, world/user identifiers, or screenshots unless they are necessary and safe to publish.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Failure stage
+      options:
+        - Trigger
+        - Capture
+        - OCR
+        - Translation
+        - Rendering
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: failure-code
+    attributes:
+      label: Failure code and correlation ID
+      description: Copy these from the app. They contain no OCR or translation content.
+  - type: input
+    id: environment
+    attributes:
+      label: Windows, VR runtime, and headset
+      placeholder: Windows 11 build ..., SteamVR ..., headset ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+
