@@ -106,6 +106,7 @@ Failure split:
 - [x] Implement `OpenAiTextTranslator` using `HttpClient` and the Responses API.
 - [x] Enable OpenAI only through `VRCVA_TRANSLATION_PROVIDER=openai` and read only `VRCVA_OPENAI_API_KEY`; never print it or reuse generic `OPENAI_API_KEY`.
 - [x] Make model, endpoint, and timeout configurable through documented environment variables.
+- [x] Add an XSOverlay-accessible runtime selector for `gpt-5.4-nano` and `gpt-5.6-luna`; apply changes to the next scan and lock it during active scans.
 - [x] Send only normalized OCR text, set `store: false`, bound output size, and request Japanese-only translation.
 - [x] Parse output items defensively and surface HTTP status/request ID without response bodies that may echo user text.
 - [x] Distinguish missing key, authentication, rate limit, timeout, cancellation, invalid response, and provider failure.
@@ -189,7 +190,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [ ] Add optional ROI selection and 2x scaling/contrast preprocessing only if measurements improve results.
 - [ ] Implement `Windows.Graphics.Capture` as a second `ICaptureSource` if GDI failures are material.
 - [ ] Evaluate Tesseract as a local `IOcrEngine` fallback, including native packaging and notices.
-- [ ] Add a provider/quality selection UI with plain-language privacy impact.
+- [ ] Add provider selection UI with plain-language privacy impact; OpenAI nano/Luna model selection is already available.
 
 ## Post-MVP Milestone C — VRChat OSC trigger
 

@@ -125,6 +125,8 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - Azure Translator F0, DeepL API Developer, Google Cloud Translation, Amazon Translate, and offline Argos/OPUS-MT have been researched but not selected or implemented as the default.
 - **Optional: OpenAI Responses API.** It is enabled only with `VRCVA_TRANSLATION_PROVIDER=openai` and reads only the application-specific `VRCVA_OPENAI_API_KEY`. The generic `OPENAI_API_KEY` fallback was removed to prevent accidental reuse and spend.
 - The OpenAI request sends OCR text only and uses `store: false`. The UI states both the external data boundary and metered usage.
+- When OpenAI is enabled, the WPF UI exposes runtime selection between the lower-cost `gpt-5.4-nano` and the default `gpt-5.6-luna`. XSOverlay makes the same selector controller-accessible in VR; a change applies to the next scan and is disabled during an active scan.
+- Model selection is session-only and contains no secret. Startup still follows `VRCVA_OPENAI_MODEL`, defaulting to Luna, while the API key remains process-scoped and is never displayed or persisted.
 - Provider responses and HTTP bodies are never logged. Tests use fake HTTP handlers and placeholder keys.
 
 ### Renderer
@@ -275,6 +277,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Defer translation-provider selection and default to no external sending | The owner is still comparing cost, latency, privacy, and PCVR impact; implementation must wait for an explicit decision |
 | 2026-08-11 | Remove GPU-based local translation from the project | A local benchmark consumed about 3.7 GB additional VRAM on an 8 GB laptop GPU and risks PCVR contention |
 | 2026-08-11 | Require an app-specific key for optional OpenAI mode | Removing the generic `OPENAI_API_KEY` fallback prevents another tool's key from silently enabling paid calls |
+| 2026-08-11 | Allow runtime nano/Luna selection in the XSOverlay-visible WPF UI | The owner can trade cost against translation tolerance without leaving VR; changes apply only to later scans and do not persist secrets |
 | 2026-08-11 | Do not add a license yet | License choice belongs to the repository owner |
 
 ## 13. Official sources reviewed

@@ -15,6 +15,7 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 - Windows内蔵OCRでローカル文字認識
 - 翻訳バックエンド未選定時は外部送信せず、設定不足として明示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
+- OpenAI利用時は、XSOverlay内の選択欄から`GPT-5.4 nano`と`GPT-5.6 Luna`を次回SCAN単位で切り替え
 - 英語OCR、翻訳、処理時間、失敗段階、相関IDをWPF画面に表示
 - 任意のローカル画像からOCR/翻訳を診断
 - VRChatなしでキャプチャ→OCRを検証できる開発用fixture
@@ -39,7 +40,7 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 - **既定状態では翻訳サービスを呼ばないため、API料金は発生しません。** 採用サービスはまだ決定していません。
 - OpenAI翻訳は任意の従量課金フォールバックです。`VRCVA_TRANSLATION_PROVIDER=openai`と専用の`VRCVA_OPENAI_API_KEY`を両方設定しない限り呼ばれません。
 - アプリは一般的な`OPENAI_API_KEY`を自動利用しません。別ツール用のキーで意図せず課金されることを防ぎます。
-- OpenAIを選んだ場合の価格は変わり得るため、[公式モデルページ](https://developers.openai.com/api/docs/models/gpt-5.6-luna)を確認してください。
+- OpenAI利用時は、低料金の[`gpt-5.4-nano`](https://developers.openai.com/api/docs/models/gpt-5.4-nano)と標準の[`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)を画面から選べます。価格は変わり得るため、利用前に各公式ページを確認してください。
 
 OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https://platform.openai.com/usage)で確認します。
 
@@ -114,6 +115,8 @@ $env:VRCVA_TRANSLATION_PROVIDER = "openai"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
 ```
 
+起動後は画面上部の「翻訳モデル」で`GPT-5.4 nano`または`GPT-5.6 Luna`を選びます。変更は次回のSCANから反映され、SCAN処理中は切り替えられません。選択はAPIキーと一緒に保存されず、アプリを再起動すると`VRCVA_OPENAI_MODEL`（未設定ならLuna）へ戻ります。
+
 終了後、必要なら現在のPowerShellからキーを消します。
 
 ```powershell
@@ -139,8 +142,9 @@ XSOverlayはOpenVR/SteamVR上で特定のWindowsアプリをWindow Captureとし
 1. Quest 3SをPCVR接続し、SteamVR、XSOverlay、VRChat、VRChat Visual Assistantを起動します。
 2. XSOverlayで新しいWindow Captureを作り、`VRChat Visual Assistant`を選択します。
 3. 読みやすい大きさと位置に調整し、必要なら配置を保存します。
-4. VRコントローラーで結果窓のSCANボタンを押します。ボタン経由なら取得直前に窓が一時的に隠れるため、自分自身の写り込みを避けられます。
-5. 翻訳完了後、同じXSOverlay窓で日本語訳を確認します。
+4. OpenAI利用時は、VRコントローラーで「低料金 — GPT-5.4 nano」または「標準 — GPT-5.6 Luna」を選びます。
+5. VRコントローラーで結果窓のSCANボタンを押します。ボタン経由なら取得直前に窓が一時的に隠れるため、自分自身の写り込みを避けられます。
+6. 翻訳完了後、同じXSOverlay窓で日本語訳と実際に使用したモデルを確認します。
 
 グローバルホットキーを使う場合は、Windowsデスクトップ上で結果窓がVRChatミラーに重ならないよう配置してください。XSOverlayでの位置固定、視認性、Questコントローラー操作は実機テストで調整します。
 
@@ -150,7 +154,7 @@ XSOverlayはOpenVR/SteamVR上で特定のWindowsアプリをWindow Captureとし
 | --- | --- | --- |
 | `VRCVA_TRANSLATION_PROVIDER` | `none` | 未選定。現在実装済みの任意値は`openai`のみ |
 | `VRCVA_OPENAI_API_KEY` | none | OpenAIを明示選択した場合だけ読む専用APIキー |
-| `VRCVA_OPENAI_MODEL` | `gpt-5.6-luna` | 翻訳モデル |
+| `VRCVA_OPENAI_MODEL` | `gpt-5.6-luna` | 起動時の翻訳モデル。OpenAI利用中は画面からnano/Lunaへ一時変更可能 |
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
 | `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
