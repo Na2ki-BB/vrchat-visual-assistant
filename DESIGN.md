@@ -2,7 +2,7 @@
 
 Status: MVP implementation baseline
 
-Last updated: 2026-08-11 (Asia/Tokyo)
+Last updated: 2026-08-12 (Asia/Tokyo)
 
 ## 1. Problem
 
@@ -74,7 +74,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - Visible SCAN button and a configurable global keyboard hotkey
 - One-shot HWND-targeted capture using Windows Graphics Capture; occluding desktop windows are excluded
 - In-memory PNG frame; no image is written by default
-- Local OCR using `Windows.Media.Ocr`
+- Local OCR using `Windows.Media.Ocr`, with a conditional full-view multi-band retry
 - English-to-Japanese translation behind an `ITextTranslator` interface
 - No default translation backend while provider evaluation is in progress; external sending is disabled
 - Optional OpenAI Responses API text translator behind explicit provider selection
@@ -118,6 +118,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
+- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, recognize each band, remove duplicate lines, and use the enhanced candidate only when it scores materially better. This preserves the one-action UX for long text outside the gaze center while avoiding extra passes on already-strong results.
 - The newer Windows App SDK AI Text Recognition API is not selected because Microsoft documents that it runs only on devices with an NPU, and this development machine has no detected NPU.
 - A Tesseract backend remains a viable plug-in if Windows OCR accuracy is insufficient. It adds a native engine, trained-data distribution, license inventory, and preprocessing work.
 - A cloud Vision OCR backend may improve difficult in-world text, but it would upload the captured image and therefore must be an explicit opt-in provider with a clear data boundary.
@@ -135,7 +136,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### Renderer
 
 - **Phase 1:** ordinary WPF window. This keeps full source text, translation, timing, and errors visible during development.
-- **Phase 1.5 (selected after device feedback): XSOverlay notifications.** A localhost UDP renderer sends only SCAN start, final text, or failure to the installed XSOverlay. This removes overlay creation/scaling and controller clicking from every session. The WPF view remains a parallel diagnostic renderer.
+- **Phase 1.5 (selected after device feedback): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification, then the final text or failure to the installed XSOverlay. The former 12-second start notification queued and delayed the result despite sub-second processing. The WPF view remains a parallel diagnostic renderer.
 - **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
 - **Phase 2:** validate OSCQuery-based VRChat triggering and direct SteamVR compositor capture based on measured UX.
 - **Phase 3 fallback:** implement a custom OpenVR overlay only if XSOverlay cannot provide acceptable placement or interaction. Valve's `IVROverlay` supports absolute or tracked-device-relative transforms.
@@ -166,7 +167,8 @@ flowchart LR
     P --> C[ICaptureSource<br/>VRChat window]
     C --> F[CapturedFrame<br/>in-memory PNG]
     F --> A[IAnalyzer<br/>TranslateAnalyzer]
-    A --> O[IOcrEngine<br/>Windows OCR]
+    A --> O[AdaptiveOcrEngine<br/>full frame, then conditional bands]
+    O --> W[Windows OCR]
     A --> X[ITextTranslator<br/>OpenAI opt-in]
     A --> N[OCR-only result<br/>default]
     A --> R[AnalysisResult]
@@ -194,6 +196,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 - `ICaptureSource`: returns one `CapturedFrame`; implementations own platform APIs.
 - `IAnalyzer`: turns one frame and request context into an `AnalysisResult`.
 - `IOcrEngine`: extracts source text from a frame.
+- `IOcrRegionSource`: creates temporary in-memory views used only by the conditional OCR retry.
 - `ITextTranslator`: translates text without knowing about images or renderers.
 - `IResultRenderer`: renders progress, success, or failure.
 - `ScanPipeline`: enforces stage order, cancellation, correlation ID, timings, and error classification.
@@ -205,7 +208,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
 3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture then copies that window's composed Direct3D surface into an in-memory PNG before restoring the prior minimized state.
-4. OCR decodes the in-memory frame and extracts English-like text. Empty OCR is a typed, user-actionable failure.
+4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; temporary band buffers are disposed immediately. The better normalized result continues, while an empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
 6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
@@ -290,6 +293,8 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Auto-restore a minimized VRChat window for capture | Removes manual desktop-window management while preserving an isolated path to compositor capture later |
 | 2026-08-11 | Require OSCQuery for a future OSC trigger | XSOverlay uses the usual 9001 receive port on this machine; discovery avoids fixed-port conflicts and supports multiple receivers |
 | 2026-08-11 | Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture | Real-device use showed that an occluding PC window was OCRed instead of VRChat; direct window-surface capture fixes the root cause and removes the need to hide or foreground VRCVA |
+| 2026-08-12 | Shorten the XSOverlay start notification from 12 seconds to 1 second | Logs showed capture and OCR usually completed in about one second, but XSOverlay queued the result behind the long progress notification |
+| 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
 
 ## 13. Official sources reviewed
 

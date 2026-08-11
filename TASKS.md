@@ -85,6 +85,7 @@ Failure split:
 - [x] Return `NoTextDetected` instead of sending empty input to translation.
 - [x] Add an OCR smoke command that accepts an explicitly provided image.
 - [x] Test on generated high-contrast English image and captured `VRChat.exe` fixture; Japanese OCR fallback recognized all fixture words.
+- [x] Add a conditional, full-view three-band OCR retry with scaling, duplicate-line removal, candidate scoring, buffer disposal, and unit tests.
 - [ ] Test OCR on at least three real VRChat screenshots supplied or captured during the owner's headset session.
 
 Manual check:
@@ -189,14 +190,15 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Confirm from privacy-safe logs that two scans captured 1922×1041 frames and reached translation after OCR; the old no-provider behavior caused the missing result.
 - [x] Add a safe OVR Advanced Settings helper for SCAN and model-toggle keyboard actions; do not modify user settings unless `-Apply` is explicit.
 - [x] Confirm the XSOverlay test notification and latest VRCVA result notification are visible in the headset.
-- [ ] Apply the OVRAS shortcut helper after SteamVR is closed and bind two unused Quest controller gestures.
+- [x] Apply the OVRAS shortcut helper and validate `KeyboardTwo` from a left-grip + right-grip chord on Quest controllers.
+- [x] Reduce the SCAN progress notification to one second so the completed result is not queued behind it.
 - [ ] Run five representative scans and record total latency, OCR accuracy, readability, and self-capture failures.
 
 ## Post-MVP Milestone B — OCR/capture hardening
 
 - [ ] Collect representative test images with explicit consent and no unnecessary personal data.
-- [ ] Measure full-window versus center ROI OCR accuracy and latency.
-- [ ] Add optional ROI selection and 2x scaling/contrast preprocessing only if measurements improve results.
+- [>] Measure single-pass versus conditional full-view band OCR accuracy and latency on real VRChat text.
+- [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
 - [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) only if temporary desktop-window restoration remains disruptive.
 - [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
