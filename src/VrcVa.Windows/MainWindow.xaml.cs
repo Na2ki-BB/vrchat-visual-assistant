@@ -211,7 +211,7 @@ public partial class MainWindow : Window
             await SendXsOverlayStatusAsync(
                 "モデル切替待ち",
                 "SCAN完了後にもう一度切り替えてください。",
-                isError: false);
+                XsOverlayNotificationKind.Result);
             return;
         }
 
@@ -228,7 +228,7 @@ public partial class MainWindow : Window
             await SendXsOverlayStatusAsync(
                 "翻訳モデル切替",
                 $"次回のSCAN: {choice.DisplayName}",
-                isError: false);
+                XsOverlayNotificationKind.Result);
         }
     }
 
@@ -398,14 +398,14 @@ public partial class MainWindow : Window
     private async Task SendXsOverlayStatusAsync(
         string title,
         string content,
-        bool isError)
+        XsOverlayNotificationKind kind)
     {
         try
         {
             await _xsOverlayNotificationSink.SendAsync(
                 title,
                 content,
-                isError,
+                kind,
                 CancellationToken.None);
         }
         catch (Exception exception) when (

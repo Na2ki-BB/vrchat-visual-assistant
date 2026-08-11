@@ -10,8 +10,15 @@ public interface IXsOverlayNotificationSink
     Task SendAsync(
         string title,
         string content,
-        bool isError,
+        XsOverlayNotificationKind kind,
         CancellationToken cancellationToken);
+}
+
+public enum XsOverlayNotificationKind
+{
+    Progress,
+    Result,
+    Error,
 }
 
 public sealed class XsOverlayUdpNotificationSink(int port = 42069)
@@ -29,18 +36,25 @@ public sealed class XsOverlayUdpNotificationSink(int port = 42069)
     public async Task SendAsync(
         string title,
         string content,
-        bool isError,
+        XsOverlayNotificationKind kind,
         CancellationToken cancellationToken)
     {
+        (int timeout, int height, double volume, string audioPath) = kind switch
+        {
+            XsOverlayNotificationKind.Progress => (1, 90, 0.08, "default"),
+            XsOverlayNotificationKind.Result => (12, 180, 0.15, "default"),
+            XsOverlayNotificationKind.Error => (15, 180, 0.35, "error"),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
         XsOverlayNotification message = new(
             MessageType: 1,
             Title: title,
             Content: content,
-            Timeout: isError ? 15 : 12,
-            Height: 180,
+            Timeout: timeout,
+            Height: height,
             Opacity: 1,
-            Volume: isError ? 0.35 : 0.15,
-            AudioPath: isError ? "error" : "default",
+            Volume: volume,
+            AudioPath: audioPath,
             UseBase64Icon: false,
             Icon: "default",
             SourceApp: "VRChat Visual Assistant");
@@ -77,9 +91,9 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
         CancellationToken cancellationToken) =>
         progress.Stage == ScanStage.Trigger
             ? sink.SendAsync(
-                "SCAN開始",
-                "視界を1回だけ取得して解析します。",
-                isError: false,
+                "SCAN中…",
+                "画面を取得しています。",
+                XsOverlayNotificationKind.Progress,
                 cancellationToken)
             : Task.CompletedTask;
 
@@ -94,7 +108,7 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
             return sink.SendAsync(
                 $"SCAN失敗 — {stage}",
                 Clip(failure?.Message ?? "不明なエラーが発生しました。"),
-                isError: true,
+                XsOverlayNotificationKind.Error,
                 cancellationToken);
         }
 
@@ -106,7 +120,7 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
         return sink.SendAsync(
             title,
             Clip(content),
-            isError: false,
+            XsOverlayNotificationKind.Result,
             cancellationToken);
     }
 

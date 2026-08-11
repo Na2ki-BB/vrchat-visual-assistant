@@ -19,8 +19,9 @@ public sealed class XsOverlayNotificationRendererTests
             CancellationToken.None);
 
         Notification notification = Assert.Single(sink.Notifications);
-        Assert.Equal("SCAN開始", notification.Title);
-        Assert.False(notification.IsError);
+        Assert.Equal("SCAN中…", notification.Title);
+        Assert.Equal("画面を取得しています。", notification.Content);
+        Assert.Equal(XsOverlayNotificationKind.Progress, notification.Kind);
     }
 
     [Fact]
@@ -44,6 +45,7 @@ public sealed class XsOverlayNotificationRendererTests
         Notification notification = Assert.Single(sink.Notifications);
         Assert.Equal("OCR結果（翻訳未設定）", notification.Title);
         Assert.Equal("EMERGENCY EXIT", notification.Content);
+        Assert.Equal(XsOverlayNotificationKind.Result, notification.Kind);
     }
 
     [Fact]
@@ -64,7 +66,7 @@ public sealed class XsOverlayNotificationRendererTests
         Notification notification = Assert.Single(sink.Notifications);
         Assert.Equal("SCAN失敗 — Capture", notification.Title);
         Assert.Equal("画面を取得できませんでした。", notification.Content);
-        Assert.True(notification.IsError);
+        Assert.Equal(XsOverlayNotificationKind.Error, notification.Kind);
     }
 
     private sealed class RecordingSink : IXsOverlayNotificationSink
@@ -74,13 +76,16 @@ public sealed class XsOverlayNotificationRendererTests
         public Task SendAsync(
             string title,
             string content,
-            bool isError,
+            XsOverlayNotificationKind kind,
             CancellationToken cancellationToken)
         {
-            Notifications.Add(new Notification(title, content, isError));
+            Notifications.Add(new Notification(title, content, kind));
             return Task.CompletedTask;
         }
     }
 
-    private sealed record Notification(string Title, string Content, bool IsError);
+    private sealed record Notification(
+        string Title,
+        string Content,
+        XsOverlayNotificationKind Kind);
 }
