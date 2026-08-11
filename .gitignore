@@ -1,0 +1,43 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+*.secrets.json
+*.user
+*.suo
+
+# Captured or user-derived content
+captures/
+screenshots/
+logs/
+*.dmp
+*.dump
+
+# .NET build and package output
+**/bin/
+**/obj/
+artifacts/
+publish/
+packages/
+TestResults/
+*.trx
+coverage/
+coverage.*
+
+# IDE and OS metadata
+.vs/
+.vscode/
+.idea/
+*.userprefs
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
