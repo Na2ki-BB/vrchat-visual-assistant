@@ -30,7 +30,7 @@ VRChat の海外製ワールドで看板、説明、ギミック、注意書き�
 
 ### WSL / Windows boundary
 
-WSL is appropriate for source management, review, Git, and Markdown. The following must be run on Windows because they use HWND, GDI, WPF, WinRT OCR, global hotkeys, or SteamVR/OpenVR:
+WSL is appropriate for source management, review, Git, and Markdown. The following must be run on Windows because they use HWND, Direct3D/Windows Graphics Capture, WPF, WinRT OCR, global hotkeys, or SteamVR/OpenVR:
 
 - VRChat window discovery and capture
 - Windows OCR smoke tests
@@ -72,7 +72,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 - Windows desktop application targeting .NET 8
 - Visible SCAN button and a configurable global keyboard hotkey
-- One-shot capture of the visible VRChat window frame using DWM physical-pixel bounds
+- One-shot HWND-targeted capture using Windows Graphics Capture; occluding desktop windows are excluded
 - In-memory PNG frame; no image is written by default
 - Local OCR using `Windows.Media.Ocr`
 - English-to-Japanese translation behind an `ITextTranslator` interface
@@ -110,9 +110,9 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ### Capture
 
-- **MVP: capture the VRChat window frame from the Windows desktop.** DWM extended-frame bounds provide physical-pixel coordinates independent of display scaling, then `Graphics.CopyFromScreen`/GDI performs a one-shot bit-block copy. When the window is minimized, VRCVA temporarily restores and foregrounds it, waits for rendering, captures, and returns it to the minimized state.
-- Known limits: the restore is visible on the PC monitor and GDI still cannot reliably capture an occluded, protected, or partially off-screen window. HDR can also change expected colors.
-- **Upgrade path:** first spike Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) behind `ICaptureSource` so capture no longer depends on desktop visibility. It needs a D3D11/native interop boundary and device testing. Keep `Windows.Graphics.Capture` as a Windows-window adapter option, but do not assume it solves minimized rendering.
+- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Desktop windows in front of VRChat are not part of that surface.
+- When VRChat is minimized, VRCVA temporarily restores it without forcing it to the foreground, waits for rendering, captures, and returns it to the minimized state. The brief restore can still be visible on the PC monitor. Protected content and some GPU/driver failures may still return an unusable frame; there is deliberately no silent screen-coordinate fallback.
+- **Optional later path:** Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) could capture an eye texture without restoring the desktop window. It is no longer required merely to solve occlusion, and should be attempted only if restore behavior remains materially disruptive.
 - The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
 
 ### OCR
@@ -154,8 +154,8 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 | Variant | Capture | OCR | Privacy | Complexity | Use |
 | --- | --- | --- | --- | --- | --- |
-| Provider pending | GDI visible window | Windows OCR; translation disabled | Pixels and OCR text stay local | Low | **Now** |
-| Robust Windows | Windows.Graphics.Capture | Windows OCR or Tesseract | Local unless cloud explicitly enabled | Medium | After vertical slice |
+| Provider pending | Windows Graphics Capture | Windows OCR; translation disabled | Pixels and OCR text stay local | Medium | **Now** |
+| SteamVR-native | OpenVR compositor mirror | Windows OCR or Tesseract | Local unless cloud explicitly enabled | High | Only if desktop restore remains disruptive |
 | Vision cloud | Windows.Graphics.Capture | Cloud vision/LLM | Image leaves device | Low code, higher policy/cost burden | Opt-in fallback only |
 
 ## 7. Recommended architecture
@@ -204,7 +204,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
-3. Capture locates the `VRChat.exe` main window. If minimized, it restores it temporarily; then resolves its DWM physical-pixel frame and copies visible pixels into memory before restoring the prior minimized state.
+3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture then copies that window's composed Direct3D surface into an in-memory PNG before restoring the prior minimized state.
 4. OCR decodes the in-memory frame and extracts English-like text. Empty OCR is a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
 6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
@@ -245,7 +245,7 @@ Environment inventory, official API review, design, task plan, Git/public hygien
 
 ### Phase 1 — testable vertical slice
 
-WPF SCAN button/global hotkey → visible VRChat window capture → local OCR → explicit provider boundary → desktop result. Provider selection remains a gate; keep file-input OCR diagnostics and automated tests usable meanwhile.
+WPF SCAN button/global hotkey → HWND-targeted VRChat window capture → local OCR → explicit provider boundary → desktop result. Provider selection remains a gate; keep file-input OCR diagnostics and automated tests usable meanwhile.
 
 ### Phase 1.5 — Quest 3S + XSOverlay vertical slice
 
@@ -253,7 +253,7 @@ Send compact results through XSOverlay's local notification endpoint instead of 
 
 ### Phase 1.6 — real-device hardening
 
-Measure latency and OCR accuracy in representative worlds. Validate automatic restore/re-minimize behavior, then spike direct SteamVR compositor capture. Add selectable crop/center ROI, preprocessing, and retry UX only when measurements justify them.
+Measure latency and OCR accuracy in representative worlds. Validate occluded-window capture and automatic restore/re-minimize behavior. Consider direct SteamVR compositor capture only if restore remains disruptive; add ROI, preprocessing, and retry UX only when measurements justify them.
 
 ### Phase 2 — natural in-VR trigger
 
@@ -273,8 +273,8 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | --- | --- | --- |
 | 2026-08-11 | Start with an external Windows app, not a VRChat mod | Complies with the non-invasive requirement and avoids client/EAC risk |
 | 2026-08-11 | Select C#/.NET 8 + WPF | Best total fit for installed environment, Win32/WinRT, GUI, HTTP, tests, and maintainability |
-| 2026-08-11 | Use visible-window GDI capture before Windows.Graphics.Capture | Smallest diagnosable one-shot capture path; upgrade boundary is isolated |
-| 2026-08-11 | Resolve capture bounds with DWM rather than DPI-virtualized client coordinates | A 150%+ display-scale fixture proved that logical client coordinates crop the frame; DWM returned the correct physical 2564×1504 bounds |
+| 2026-08-11 | Initially use visible-window GDI capture (superseded below) | It was the smallest diagnosable one-shot capture path before real-device occlusion feedback |
+| 2026-08-11 | Initially resolve GDI bounds with DWM (superseded below) | A 150%+ display-scale fixture proved that logical client coordinates cropped the frame |
 | 2026-08-11 | Keep OCR local and send text only for translation | Strong privacy default without blocking translation quality |
 | 2026-08-11 | Use hotkey first, official VRChat OSC next | Proves value with no avatar work; OSC later gives native in-VR interaction through a supported interface |
 | 2026-08-11 | Defer OpenVR overlay until the desktop vertical slice is measured | Overlay work should not hide capture/OCR/translation failures |
@@ -287,8 +287,9 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Do not add a license yet | License choice belongs to the repository owner |
 | 2026-08-11 | Replace XSOverlay Window Capture with localhost notifications | Device feedback showed high setup friction, excessive panel size, and broken controller clicking; notifications preserve VR visibility without a persistent window |
 | 2026-08-11 | Use OVR Advanced Settings as the interim controller bridge | It is already installed and officially supports controller-bound keyboard actions, so SCAN and model toggle do not depend on XSOverlay clicks or avatar edits |
-| 2026-08-11 | Auto-restore a minimized VRChat window for each GDI capture | Removes manual desktop-window management now while preserving an isolated path to compositor capture later |
+| 2026-08-11 | Auto-restore a minimized VRChat window for capture | Removes manual desktop-window management while preserving an isolated path to compositor capture later |
 | 2026-08-11 | Require OSCQuery for a future OSC trigger | XSOverlay uses the usual 9001 receive port on this machine; discovery avoids fixed-port conflicts and supports multiple receivers |
+| 2026-08-11 | Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture | Real-device use showed that an occluding PC window was OCRed instead of VRChat; direct window-surface capture fixes the root cause and removes the need to hide or foreground VRCVA |
 
 ## 13. Official sources reviewed
 
@@ -300,6 +301,7 @@ All sources below were checked on 2026-08-11.
 - VRChat Expression Menu controls: <https://creators.vrchat.com/avatars/expression-menu-and-controls/>
 - VRChat Terms of Service (effective 2026-02-09), including client modification restrictions: <https://hello.vrchat.com/legal>
 - Microsoft screen capture guidance: <https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture>
+- Microsoft `IGraphicsCaptureItemInterop.CreateForWindow`: <https://learn.microsoft.com/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow>
 - Microsoft Windows AI OCR guidance and NPU requirement: <https://learn.microsoft.com/en-us/windows/ai/apis/text-recognition>
 - Microsoft `Graphics.CopyFromScreen` API: <https://learn.microsoft.com/en-us/dotnet/api/system.drawing.graphics.copyfromscreen>
 - Valve OpenVR API overview: <https://github.com/ValveSoftware/openvr/wiki/API-Documentation>

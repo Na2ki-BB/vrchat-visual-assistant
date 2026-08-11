@@ -11,7 +11,8 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
-- `VRChat.exe` ウィンドウを1回だけ取得。最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
+- Windows Graphics Captureで`VRChat.exe`のウィンドウサーフェスを1回だけ取得。別のPCウィンドウに覆われていても混ざらない
+- 最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
 - Windows内蔵OCRでローカル文字認識
 - 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
@@ -49,7 +50,7 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 
 - Windows 10 version 2004 / build 19041 以降（Windows 11推奨）
 - .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
-- PC版VRChat。デスクトップミラーは最小化したまま待機できますが、SCAN中だけ約0.3秒以上、自動的に復元されます
+- PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
 - 翻訳バックエンドは未選定。現段階ではキャプチャとOCRだけを無料で検証可能
 - WindowsのOCR言語機能（この開発PCでは日本語OCRだけでも英語fixtureを認識できましたが、英語OCR追加を推奨）
 - VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
@@ -132,11 +133,11 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 
 1. VRChatを起動します。PC側のVRChat窓は最小化して構いません。
 2. VRChat Visual Assistantを起動します。
-3. アプリのデスクトップ窓は邪魔にならない位置へ置くか、最小化します。
+3. アプリのデスクトップ窓はそのままでも、最小化しても構いません。VRChat窓と重なってもキャプチャへ混ざりません。
 4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
 5. XSOverlay起動中は、SCAN開始と結果が小さなVR内通知で表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
 
-SCANボタンをクリックした場合、アプリ自身が写り込まないよう結果窓を一時的に隠します。グローバルホットキーではVRChatからフォーカスを奪いません。
+SCAN中もVRCVAの窓は消えたり再表示されたりしません。対象ウィンドウを直接取得するため、VRChatを前面化する必要もありません。
 
 ## Meta Quest 3S + XSOverlayでVR内通知を使う
 
@@ -150,7 +151,7 @@ XSOverlayが終了していてもSCANは失敗せず、結果はデスクトッ�
 
 ### 一度だけ: QuestコントローラーへSCANを割り当てる
 
-導入済みのOVR Advanced Settingsには、VRコントローラー操作からキーボードショートカットを送る公式機能があります。VRCVAはこれを暫定のコントローラートリガーとして利用し、VRChatやXSOverlayへ入力を注入しません。
+導入済みのOVR Advanced Settingsには、VRコントローラー操作からキーボードショートカットを送る公式機能があります。VRCVAはこれを暫定のコントローラートリガーとして利用し、VRChatやXSOverlayへ入力を注入しません。以下を一度設定すれば、VRプレイ中に物理キーボードへ触れる必要はありません。
 
 1. SteamVRを終了し、タスクマネージャー上の`AdvancedSettings.exe`も終了したことを確認します。
 2. Windows PowerShellで、まず変更なしの確認を実行します。
@@ -210,6 +211,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-capture.ps1
 
 このスクリプトは開発用の英語テスト窓（プロセス名 `VRChat.exe`）だけを一時起動し、実際のWin32キャプチャとWindows OCRを通してから終了します。実際のVRChatが起動中なら、安全のため実行を拒否します。
 
+実際のVRChatからウィンドウ単体キャプチャが利用できるか、画像保存・OCR本文表示なしで確認できます。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --capture-vrchat-check
+```
+
+成功時は寸法、PNGのバイト数、`source: windows-graphics-capture`だけを表示します。
+
 明示的にキャプチャ内容を調べるときだけ、次の診断オプションでPNGを保存できます。これは通常動作では使いません。保存先の画像には画面内容が含まれるため、確認後に自分で削除してください。
 
 ```powershell
@@ -223,8 +233,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | --- | --- | --- |
 | `CaptureTargetNotFound` | Capture | Windows版 `VRChat.exe` が起動し、通常ウィンドウがあるか |
 | 自動復元エラー | Capture | VRChatが応答しているか確認し、一度だけ手動復元して再試行 |
-| 黒い/別窓が写る | Capture | ミラーが見えているか、他の窓が覆っていないか、HDRを一時的に切ると変わるか |
-| 一部だけ写る | Capture | 最新ビルドか。DWM物理ピクセル境界を使うため、DPI修正前のビルドでは150%表示などで誤クロップする |
+| 別窓が写る | Capture | 旧GDI版です。最新版をビルド・再起動し、`--capture-vrchat-check`のsourceが`windows-graphics-capture`か確認 |
+| 黒い/一部だけ写る | Capture | `--capture-vrchat-check`を実行し、VRChatが応答しているか、HDRを一時的に切ると変わるか確認 |
 | `OcrUnavailable` | OCR | Windowsの言語オプションにOCR機能があるか。診断コマンドが列挙する言語タグを確認 |
 | `NoTextDetected` | OCR | 文字を大きくする、ミラー解像度を上げる、画像診断で近い画像を試す |
 | `OCR結果（翻訳未設定）` | Completed | 正常です。無料・外部送信なしの既定状態では認識した英語を表示します |
@@ -246,9 +256,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 ## 現在の制約
 
 - 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatウィンドウ枠です。
-- GDIの可視画面コピーなので、最小化中は一時復元が必要で、画面外・他ウィンドウによる遮蔽にも弱いです。デスクトップ表示に依存しないSteamVR compositor取得は次の調査項目です。
+- Windows Graphics Captureで対象ウィンドウを直接取得するため、他ウィンドウの遮蔽には依存しません。ただしVRChatを最小化した場合は描画再開のため短時間だけ自動復元します。
 - 現在のVR表示はXSOverlayの一時通知です。常設パネルや手首HUDではなく、長文は700文字で省略します。
-- VRコントローラーはOVR Advanced Settingsからキーボードショートカットへ橋渡しする暫定方式です。VRChat OSCはまだありません。
+- VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
 - ローカルOCRは小さい文字、遠近、装飾フォント、発光、低コントラストで精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。
 - OpenAI APIの実通信は、リポジトリやCIに秘密を置かないため利用者が明示選択した場合だけ行います。自動テストは偽HTTP応答を使います。
@@ -258,7 +268,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 
-次の実機ゲートは、XSOverlay通知の視認性、OVR Advanced Settingsトリガー、最小化状態からの自動復元キャプチャです。その後、デスクトップミラーに依存しないSteamVR compositor取得を小さく検証します。翻訳バックエンドは引き続き所有者の明示判断待ちです。
+次の実機ゲートは、PCで別ウィンドウを前面表示した状態の直接キャプチャ、OVR Advanced Settingsのコントローラートリガー、最小化状態からの自動復元です。内部のキー橋渡しをなくすSteamVR入力/OSCQueryはその後です。翻訳バックエンドは引き続き所有者の明示判断待ちです。
 
 ## ライセンス
 
