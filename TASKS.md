@@ -161,15 +161,16 @@ Exit: the owner can reproduce the vertical slice and identify which stage failed
 ## Milestone 8 — Git/GitHub publication
 
 - [x] Read the publication workflow.
-- [ ] Create an intentional initial commit after GitHub authentication and commit identity are available.
-- [ ] Re-authenticate GitHub CLI (`gh auth login -h github.com`) outside committed files.
-- [ ] Confirm owner/account and public repository name before the external write.
-- [ ] Create the public `vrchat-visual-assistant` repository without auto-generated files that conflict with local history.
-- [ ] Push `main`, confirm Actions passes, then enable branch protection/repository rules if account permissions support it.
+- [x] Create granular initial commits with a GitHub-provided noreply author address.
+- [x] Re-authenticate GitHub CLI outside committed files.
+- [x] Confirm owner/account and public repository name before the external write.
+- [x] Create the public `vrchat-visual-assistant` repository without conflicting auto-generated files.
+- [x] Push `main` and configure it to track `origin/main`.
+- [ ] Confirm the initial GitHub Actions run passes, then enable branch protection/repository rules if account permissions support it.
 - [ ] Create labels/milestones for `mvp`, `osc-trigger`, `openvr-overlay`, `privacy`, and `provider` work.
 - [ ] Keep all API-backed tests secret-free; add repository secrets only if a later opt-in integration test is designed.
 
-Current blockers: local Git currently uses a regular, non-noreply author email, and the saved GitHub CLI token for `Na2ki-BB` is invalid. Do not create the initial commit until the owner copies the exact GitHub-provided noreply address from Settings → Emails, configures it locally, and `gh auth login -h github.com` succeeds.
+Current state: publication and authentication are complete. The initial CI and Dependabot runs are in progress; repository rules and labels remain pending.
 
 ## Post-MVP Milestone A — Quest 3S + XSOverlay in-VR validation
 

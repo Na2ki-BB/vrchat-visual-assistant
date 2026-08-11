@@ -14,7 +14,7 @@ After the public GitHub repository exists, use a private GitHub Security Advisor
 - world, avatar, or user identifiers
 - exploit details before a fix is available
 
-The remote repository is not created yet because GitHub CLI authentication is currently invalid. Until private advisories are available, do not publish sensitive reports in this repository's issue tracker.
+Use a private GitHub Security Advisory for sensitive reports. Do not publish vulnerability details or private captured content in the public issue tracker.
 
 ## Security boundaries
 

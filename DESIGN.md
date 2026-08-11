@@ -16,7 +16,7 @@ VRChat の海外製ワールドで看板、説明、ギミック、注意書き�
 
 | Item | Confirmed state | Consequence |
 | --- | --- | --- |
-| Repository | New Git repository on `main`; initial commit not yet created | Review public scope and author privacy before the first commit |
+| Repository | Public GitHub repository on `main` with granular initial commits | Continue using small commits and inspect every public push |
 | Linux side | WSL2, Ubuntu 24.04.4 LTS | Documentation, Git, text editing, and platform-neutral tests can be managed from WSL |
 | Windows side | 64-bit Windows build 26200 | The shipping process must run natively on Windows |
 | .NET | Windows .NET SDK 8.0.422 and Windows Desktop runtime installed; no Linux .NET SDK | Build and run through `dotnet.exe`/PowerShell; CI uses Windows runners |
@@ -26,7 +26,7 @@ VRChat の海外製ワールドで看板、説明、ギミック、注意書き�
 | GPU | NVIDIA RTX 4060 Laptop GPU plus Intel UHD | No NPU was detected; do not depend on Windows AI OCR APIs that require an NPU |
 | Translation load test | A GPU-resident local model added about 3.7 GB VRAM and took 4.54 s cold / about 1.05 s warm | Remove GPU-based local translation from the project; favor a capped cloud free tier for PCVR |
 | Windows OCR languages | Japanese recognizer available; English recognizer not currently installed | Detect recognizers at startup, prefer `en`, fall back to the user-profile engine, and explain how to install English OCR if needed |
-| GitHub CLI | Installed; a regular Git author email is configured and the saved `Na2ki-BB` token is invalid | Do not create the first commit until a GitHub-provided noreply email is configured and CLI authentication is restored |
+| GitHub CLI | Authenticated as `Na2ki-BB`; Git uses a GitHub-provided noreply author address | Public pushes can proceed without exposing the owner's regular email |
 
 ### WSL / Windows boundary
 
@@ -222,7 +222,7 @@ Failure categories are stable UI concepts: `Trigger`, `CaptureTargetNotFound`, `
 ## 10. GitHub management baseline
 
 - Default branch: `main`.
-- Public repository target name: `vrchat-visual-assistant` (remote creation pending authentication).
+- Public repository: `Na2ki-BB/vrchat-visual-assistant`; local `main` tracks `origin/main`.
 - CI: Windows runner, restore/build/test with no secrets.
 - Dependabot: weekly NuGet and GitHub Actions checks.
 - Include `SECURITY.md`, contribution guidance, issue templates, and a pull-request template.
