@@ -11,6 +11,8 @@ internal static partial class NativeMethods
     internal const uint ModWin = 0x0008;
     internal const uint ModNoRepeat = 0x4000;
     internal const uint DwmwaExtendedFrameBounds = 9;
+    internal const int SwRestore = 9;
+    internal const int SwShowMinNoActive = 7;
 
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -35,6 +37,14 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool IsIconic(IntPtr windowHandle);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ShowWindowAsync(IntPtr windowHandle, int command);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetForegroundWindow(IntPtr windowHandle);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
