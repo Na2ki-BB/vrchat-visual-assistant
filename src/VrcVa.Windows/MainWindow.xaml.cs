@@ -92,10 +92,12 @@ public partial class MainWindow : Window
         }
 
         _analyzer = analyzer;
-        _renderer = new WpfResultRenderer(
-            Dispatcher,
-            RenderProgress,
-            RenderOutcome);
+        _renderer = new CompositeResultRenderer(
+            new WpfResultRenderer(
+                Dispatcher,
+                RenderProgress,
+                RenderOutcome),
+            new XsOverlayNotificationRenderer(new XsOverlayUdpNotificationSink()));
         _vrChatPipeline = new ScanPipeline(
             new VrChatWindowCaptureSource(),
             _analyzer,
