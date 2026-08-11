@@ -3,13 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="VRChat Visual Assistant"
         Width="780"
-        Height="720"
+        Height="780"
         MinWidth="620"
-        MinHeight="580"
+        MinHeight="640"
         Background="{StaticResource WindowBackground}"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="22">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -42,7 +43,40 @@
       </StackPanel>
     </Border>
 
-    <Grid Grid.Row="2" Margin="0,16,0,12">
+    <Border Grid.Row="2"
+            Margin="0,12,0,0"
+            Padding="12"
+            Background="#1C252B"
+            BorderBrush="#3B4850"
+            BorderThickness="1"
+            CornerRadius="6">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0"
+                   Margin="0,0,12,0"
+                   VerticalAlignment="Center"
+                   FontWeight="SemiBold"
+                   Text="翻訳モデル" />
+        <ComboBox x:Name="TranslationModelComboBox"
+                  Grid.Column="1"
+                  Width="260"
+                  MinHeight="40"
+                  DisplayMemberPath="DisplayName"
+                  SelectionChanged="TranslationModelComboBox_SelectionChanged" />
+        <TextBlock x:Name="TranslationModelHintText"
+                   Grid.Column="2"
+                   Margin="12,0,0,0"
+                   VerticalAlignment="Center"
+                   Foreground="{StaticResource TextSecondary}"
+                   Text="次回のSCANから反映" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="3" Margin="0,12,0,12">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
@@ -75,7 +109,7 @@
                 Content="常に手前" />
     </Grid>
 
-    <GroupBox Grid.Row="3"
+    <GroupBox Grid.Row="4"
               Margin="0,0,0,12"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
@@ -87,7 +121,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <GroupBox Grid.Row="4"
+    <GroupBox Grid.Row="5"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
               Header="日本語訳">
@@ -99,7 +133,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <Grid Grid.Row="5" Margin="0,14,0,0">
+    <Grid Grid.Row="6" Margin="0,14,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -121,4 +155,3 @@
     </Grid>
   </Grid>
 </Window>
-

@@ -20,7 +20,11 @@ public partial class MainWindow : Window
     private readonly IResultRenderer _renderer;
     private readonly ScanPipeline _vrChatPipeline;
     private readonly string _privacyNotice;
-    private readonly string _translationStatus;
+    private readonly OpenAiTextTranslator? _openAiTranslator;
+    private readonly bool _hasOpenAiApiKey;
+    private string _translationStatus;
+    private string _ocrInfo = "OCR言語: 確認中";
+    private bool _modelSelectorInitializing = true;
     private GlobalHotKey? _globalHotKey;
     private CancellationTokenSource? _activeScanCancellation;
     private int _uiScanRunning;
@@ -56,12 +60,13 @@ public partial class MainWindow : Window
                 case "openai":
                     string? apiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
                     OpenAiTranslatorOptions openAiOptions = OpenAiTranslatorOptions.FromEnvironment();
-                    translator = new OpenAiTextTranslator(_httpClient, openAiOptions, apiKey);
-                    bool hasApiKey = !string.IsNullOrWhiteSpace(apiKey);
-                    _privacyNotice = hasApiKey
+                    _openAiTranslator = new OpenAiTextTranslator(_httpClient, openAiOptions, apiKey);
+                    translator = _openAiTranslator;
+                    _hasOpenAiApiKey = !string.IsNullOrWhiteSpace(apiKey);
+                    _privacyNotice = _hasOpenAiApiKey
                         ? "画像はWindows内でOCRし、保存しません。翻訳時はOCRテキストだけをOpenAIへ送信します（API従量課金）。"
                         : "画像はWindows内でOCRし、保存しません。OpenAIが選択されていますが、専用APIキー未設定のため外部送信しません。";
-                    _translationStatus = hasApiKey
+                    _translationStatus = _hasOpenAiApiKey
                         ? $"翻訳API: OpenAI / {openAiOptions.Model}（従量課金）"
                         : "翻訳API: OpenAI / 専用キー未設定";
                     break;
@@ -96,6 +101,7 @@ public partial class MainWindow : Window
             _renderer,
             _logger);
 
+        InitializeModelSelector();
         PrivacyText.Text = _privacyNotice;
 
         Loaded += MainWindow_Loaded;
@@ -121,12 +127,12 @@ public partial class MainWindow : Window
                 exception);
         }
 
-        string ocrInfo = languageTags.Count == 0
+        _ocrInfo = languageTags.Count == 0
             ? "OCR言語: 検出できません"
             : $"OCR言語: {string.Join(", ", languageTags)}";
 
         StatusText.Text = _startupWarning ?? "準備完了。VRChatを表示してSCANしてください。";
-        DetailText.Text = $"{ocrInfo} / {_translationStatus} / ログ: {_logger.LogDirectory}";
+        UpdateEnvironmentDetails();
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs eventArgs)
@@ -225,6 +231,25 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TranslationModelComboBox_SelectionChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs eventArgs)
+    {
+        if (_modelSelectorInitializing
+            || _openAiTranslator is null
+            || TranslationModelComboBox.SelectedItem is not TranslationModelChoice choice)
+        {
+            return;
+        }
+
+        _openAiTranslator.SelectModel(choice.ModelId);
+        _translationStatus = _hasOpenAiApiKey
+            ? $"翻訳API: OpenAI / {choice.ModelId}（従量課金）"
+            : $"翻訳API: OpenAI / {choice.ModelId} / 専用キー未設定";
+        StatusText.Text = $"翻訳モデルを {choice.DisplayName} に変更しました。次回のSCANから使います。";
+        UpdateEnvironmentDetails();
+    }
+
     private async Task RunPipelineAsync(
         ScanPipeline pipeline,
         string triggerName,
@@ -277,6 +302,7 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = !isRunning;
         ImageButton.IsEnabled = !isRunning;
         CancelButton.IsEnabled = isRunning;
+        TranslationModelComboBox.IsEnabled = !isRunning && _openAiTranslator is not null;
     }
 
     private void RenderProgress(ScanProgress progress)
@@ -313,6 +339,37 @@ public partial class MainWindow : Window
         _globalHotKey?.Dispose();
         _httpClient.Dispose();
     }
+
+    private void InitializeModelSelector()
+    {
+        List<TranslationModelChoice> choices =
+        [
+            new("低料金 — GPT-5.4 nano", OpenAiTranslatorOptions.BudgetModel),
+            new("標準 — GPT-5.6 Luna", OpenAiTranslatorOptions.QualityModel),
+        ];
+
+        string selectedModel = _openAiTranslator?.Model ?? OpenAiTranslatorOptions.DefaultModel;
+        TranslationModelChoice? selectedChoice = choices.FirstOrDefault(
+            choice => string.Equals(choice.ModelId, selectedModel, StringComparison.Ordinal));
+        if (selectedChoice is null)
+        {
+            selectedChoice = new($"環境設定 — {selectedModel}", selectedModel);
+            choices.Add(selectedChoice);
+        }
+
+        TranslationModelComboBox.ItemsSource = choices;
+        TranslationModelComboBox.SelectedItem = selectedChoice;
+        TranslationModelComboBox.IsEnabled = _openAiTranslator is not null;
+        TranslationModelHintText.Text = _openAiTranslator is null
+            ? "OpenAIを有効にした場合に選択できます"
+            : "次回のSCANから反映（従量課金）";
+        _modelSelectorInitializing = false;
+    }
+
+    private void UpdateEnvironmentDetails() =>
+        DetailText.Text = $"{_ocrInfo} / {_translationStatus} / ログ: {_logger.LogDirectory}";
+
+    private sealed record TranslationModelChoice(string DisplayName, string ModelId);
 
     private sealed class ConfigurationFailureTranslator(string message) : ITextTranslator
     {

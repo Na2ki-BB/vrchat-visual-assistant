@@ -18,6 +18,7 @@ public sealed class OpenAiTextTranslator : ITextTranslator
     private readonly HttpClient _httpClient;
     private readonly OpenAiTranslatorOptions _options;
     private readonly string? _apiKey;
+    private string _model;
 
     public OpenAiTextTranslator(
         HttpClient httpClient,
@@ -27,6 +28,19 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         _httpClient = httpClient;
         _options = options;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        _model = options.Model;
+    }
+
+    public string Model => Volatile.Read(ref _model);
+
+    public void SelectModel(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            throw new ArgumentException("An OpenAI model ID is required.", nameof(model));
+        }
+
+        Volatile.Write(ref _model, model.Trim());
     }
 
     public async Task<TranslationOutput> TranslateToJapaneseAsync(
@@ -49,7 +63,8 @@ public sealed class OpenAiTextTranslator : ITextTranslator
                 "翻訳APIキーが未設定です。VRCVA_OPENAI_API_KEY を現在のPowerShellプロセスに設定してください。");
         }
 
-        using HttpRequestMessage request = CreateRequest(sourceText);
+        string model = Model;
+        using HttpRequestMessage request = CreateRequest(sourceText, model);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.Timeout);
 
@@ -110,7 +125,7 @@ public sealed class OpenAiTextTranslator : ITextTranslator
                 return new TranslationOutput(
                     translatedText.Trim(),
                     ProviderName,
-                    _options.Model);
+                    model);
             }
             catch (JsonException exception)
             {
@@ -123,11 +138,11 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         }
     }
 
-    private HttpRequestMessage CreateRequest(string sourceText)
+    private HttpRequestMessage CreateRequest(string sourceText, string model)
     {
         var payload = new
         {
-            model = _options.Model,
+            model,
             store = false,
             reasoning = new
             {

@@ -37,8 +37,39 @@ public sealed class OpenAiTextTranslatorTests
         Assert.Equal("test-api-key", handler.AuthorizationParameter);
         using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
         Assert.False(request.RootElement.GetProperty("store").GetBoolean());
+        Assert.Equal("test-model", request.RootElement.GetProperty("model").GetString());
         Assert.Equal("Emergency exit", request.RootElement.GetProperty("input").GetString());
         Assert.False(handler.RequestBody!.Contains("input_image", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SelectModel_AppliesToNextTranslationAndResult()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, """
+            {
+              "output": [
+                {
+                  "type": "message",
+                  "content": [
+                    { "type": "output_text", "text": "ようこそ" }
+                  ]
+                }
+              ]
+            }
+            """);
+        using HttpClient client = new(handler);
+        OpenAiTextTranslator translator = new(client, CreateOptions(), "test-api-key");
+
+        translator.SelectModel(OpenAiTranslatorOptions.BudgetModel);
+        TranslationOutput result = await translator.TranslateToJapaneseAsync(
+            "Welcome",
+            CancellationToken.None);
+
+        using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(
+            OpenAiTranslatorOptions.BudgetModel,
+            request.RootElement.GetProperty("model").GetString());
+        Assert.Equal(OpenAiTranslatorOptions.BudgetModel, result.Model);
     }
 
     [Fact]

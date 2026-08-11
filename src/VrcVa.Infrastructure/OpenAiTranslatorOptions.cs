@@ -2,7 +2,9 @@ namespace VrcVa.Infrastructure;
 
 public sealed record OpenAiTranslatorOptions
 {
-    public const string DefaultModel = "gpt-5.6-luna";
+    public const string BudgetModel = "gpt-5.4-nano";
+    public const string QualityModel = "gpt-5.6-luna";
+    public const string DefaultModel = QualityModel;
     public const string DefaultEndpoint = "https://api.openai.com/v1/responses";
 
     public string Model { get; init; } = DefaultModel;
@@ -42,4 +44,3 @@ public sealed record OpenAiTranslatorOptions
         };
     }
 }
-
