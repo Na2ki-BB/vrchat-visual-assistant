@@ -110,7 +110,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ### Capture
 
-- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Desktop windows in front of VRChat are not part of that surface.
+- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Before encoding, the frame is cropped to the Win32 client rectangle so the Windows title bar is not sent to OCR. Desktop windows in front of VRChat are not part of that surface.
 - When VRChat is minimized, VRCVA temporarily restores it without forcing it to the foreground, waits for rendering, captures, and returns it to the minimized state. The brief restore can still be visible on the PC monitor. Protected content and some GPU/driver failures may still return an unusable frame; there is deliberately no silent screen-coordinate fallback.
 - **Optional later path:** Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) could capture an eye texture without restoring the desktop window. It is no longer required merely to solve occlusion, and should be attempted only if restore behavior remains materially disruptive.
 - The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
@@ -207,7 +207,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
-3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture then copies that window's composed Direct3D surface into an in-memory PNG before restoring the prior minimized state.
+3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture copies that window's composed Direct3D surface, crops it to the DPI-aware client rectangle, and encodes one in-memory PNG before restoring the prior minimized state.
 4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
 6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
@@ -296,6 +296,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Shorten the XSOverlay start notification from 12 seconds to 1 second | Logs showed capture and OCR usually completed in about one second, but XSOverlay queued the result behind the long progress notification |
 | 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
 | 2026-08-12 | Union primary and band OCR with conservative approximate deduplication | Preserve primary-only lines while preventing overlap variations from duplicating translation input; occurrence-aware matching retains legitimate repeated lines |
+| 2026-08-12 | Crop window capture to the Win32 client rectangle | Real-device OCR included the Windows title-bar text `VRChat`; geometric exclusion fixes the capture boundary without suppressing legitimate in-world words |
 
 ## 13. Official sources reviewed
 

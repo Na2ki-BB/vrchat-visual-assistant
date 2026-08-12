@@ -56,6 +56,7 @@ Exit: fake adapters can drive Trigger → Capture → Analyzer → Result → Re
 - [x] Initially resolve the visible VRChat frame with DWM bounds and capture it with GDI; retain this only as superseded implementation history.
 - [x] Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture after real use showed occluding desktop windows were included.
 - [x] Create a free-threaded Direct3D11 frame pool, copy one window surface to an in-memory PNG, and release frame/session/pool resources deterministically.
+- [x] Crop the captured surface to the DPI-aware Win32 client rectangle before OCR so title-bar text is excluded without word filtering.
 - [x] Do not silently fall back to desktop pixels when direct window capture fails.
 - [x] Implement an explicit local-image input path for OCR diagnostics; never enable implicit image persistence.
 - [x] Add an isolated `VRChat.exe` fixture and repeatable script that verifies discovery, capture, and OCR without launching VRChat.
@@ -72,7 +73,7 @@ Failure split:
 
 - No process/window: verify `VRChat.exe` is running and has a desktop mirror window.
 - Auto-restore failure: verify VRChat is responsive, restore it once manually, and retry.
-- Black/incorrect frame: verify `source: windows-graphics-capture`, check VRChat responsiveness, and compare HDR on/off before adding a provider fallback.
+- Black/incorrect frame: verify `source: windows-graphics-capture-client-area`, check VRChat responsiveness, and compare HDR on/off before adding a provider fallback.
 - Wrong scaling/crop: record the Windows Graphics Capture frame dimensions and display scaling without saving content.
 
 ## Milestone 4 — Local OCR
@@ -201,6 +202,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
 - [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) only if temporary desktop-window restoration remains disruptive.
 - [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
+- [>] Verify on the owner's VRChat window that client-area capture removes the Windows `VRChat` title while preserving in-world text.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
 - [ ] Evaluate Tesseract as a local `IOcrEngine` fallback, including native packaging and notices.
 - [ ] Add provider selection UI with plain-language privacy impact; OpenAI nano/Luna model selection is already available.
