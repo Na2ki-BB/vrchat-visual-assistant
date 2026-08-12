@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Windows.Foundation;
 using Windows.Graphics.Capture;
@@ -7,6 +8,7 @@ using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 using WinRT;
 using VrcVa.Core;
+using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows.Capture;
 
@@ -87,14 +89,21 @@ internal static partial class WindowsGraphicsCapture
                 .AsTask(cancellationToken)
                 .ConfigureAwait(false))
             {
-                byte[] encoded = await EncodePngAsync(bitmap, cancellationToken)
+                BitmapBounds clientBounds = GetClientCaptureBounds(
+                    windowHandle,
+                    bitmap.PixelWidth,
+                    bitmap.PixelHeight);
+                byte[] encoded = await EncodePngAsync(
+                        bitmap,
+                        clientBounds,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 return new CapturedFrame(
                     encoded,
-                    bitmap.PixelWidth,
-                    bitmap.PixelHeight,
+                    checked((int)clientBounds.Width),
+                    checked((int)clientBounds.Height),
                     "image/png",
-                    "windows-graphics-capture");
+                    "windows-graphics-capture-client-area");
             }
         }
         finally
@@ -160,8 +169,98 @@ internal static partial class WindowsGraphicsCapture
         }
     }
 
+    private static BitmapBounds GetClientCaptureBounds(
+        IntPtr windowHandle,
+        int captureWidth,
+        int captureHeight)
+    {
+        if (!NativeMethods.GetClientRect(windowHandle, out NativeMethods.Rect clientRect))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        NativeMethods.Point clientOrigin = new()
+        {
+            X = clientRect.Left,
+            Y = clientRect.Top,
+        };
+        if (!NativeMethods.ClientToScreen(windowHandle, ref clientOrigin))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        int hresult = NativeMethods.DwmGetWindowAttribute(
+            windowHandle,
+            NativeMethods.DwmwaExtendedFrameBounds,
+            out NativeMethods.Rect windowRect,
+            (uint)Marshal.SizeOf<NativeMethods.Rect>());
+        if (hresult != 0 && !NativeMethods.GetWindowRect(windowHandle, out windowRect))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        int windowWidth = windowRect.Right - windowRect.Left;
+        int windowHeight = windowRect.Bottom - windowRect.Top;
+        int clientWidth = clientRect.Right - clientRect.Left;
+        int clientHeight = clientRect.Bottom - clientRect.Top;
+        if (windowWidth <= 0
+            || windowHeight <= 0
+            || clientWidth <= 0
+            || clientHeight <= 0
+            || captureWidth <= 0
+            || captureHeight <= 0)
+        {
+            throw new ScanException(
+                ScanFailureCode.CaptureUnavailable,
+                ScanStage.Capture,
+                "VRChatの描画領域を特定できませんでした。");
+        }
+
+        double scaleX = captureWidth / (double)windowWidth;
+        double scaleY = captureHeight / (double)windowHeight;
+        int left = ScaleAndClamp(
+            clientOrigin.X - windowRect.Left,
+            scaleX,
+            0,
+            captureWidth - 1);
+        int top = ScaleAndClamp(
+            clientOrigin.Y - windowRect.Top,
+            scaleY,
+            0,
+            captureHeight - 1);
+        int right = ScaleAndClamp(
+            clientOrigin.X + clientWidth - windowRect.Left,
+            scaleX,
+            left + 1,
+            captureWidth);
+        int bottom = ScaleAndClamp(
+            clientOrigin.Y + clientHeight - windowRect.Top,
+            scaleY,
+            top + 1,
+            captureHeight);
+
+        return new BitmapBounds
+        {
+            X = checked((uint)left),
+            Y = checked((uint)top),
+            Width = checked((uint)(right - left)),
+            Height = checked((uint)(bottom - top)),
+        };
+    }
+
+    private static int ScaleAndClamp(
+        int value,
+        double scale,
+        int minimum,
+        int maximum) =>
+        Math.Clamp(
+            checked((int)Math.Round(value * scale, MidpointRounding.AwayFromZero)),
+            minimum,
+            maximum);
+
     private static async Task<byte[]> EncodePngAsync(
         SoftwareBitmap bitmap,
+        BitmapBounds bounds,
         CancellationToken cancellationToken)
     {
         using InMemoryRandomAccessStream stream = new();
@@ -169,6 +268,7 @@ internal static partial class WindowsGraphicsCapture
             .CreateAsync(BitmapEncoder.PngEncoderId, stream)
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
+        encoder.BitmapTransform.Bounds = bounds;
         encoder.SetSoftwareBitmap(bitmap);
         await encoder.FlushAsync()
             .AsTask(cancellationToken)
