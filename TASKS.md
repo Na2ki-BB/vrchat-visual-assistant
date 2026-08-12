@@ -217,12 +217,18 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [ ] Document an unsaved/unsynced Expression Parameter and Button setup.
 - [ ] Keep OSC disabled by default until explicitly enabled in both apps.
 
-## Post-MVP Milestone D — Custom SteamVR overlay fallback
+## Post-MVP Milestone D — Interactive SteamVR result panel
 
-- [ ] Spike OpenVR initialization as `VRApplication_Overlay` without starting or modifying VRChat.
+- [>] Initialize OpenVR as `VRApplication_Overlay` only when SteamVR is already running; never start or modify VRChat.
 - [ ] Render a static test texture and verify it appears over VRChat.
 - [ ] Feed a text texture from the existing `IResultRenderer` contract.
-- [ ] Implement dashboard/head-locked placement before tracked-device-relative placement.
+- [ ] Keep the latest result visible until explicit close or the next scan.
+- [ ] Handle OpenVR pointer click and scroll events for close and long-text navigation.
+- [ ] Implement HMD-relative placement before tracked-device-relative placement.
+- [ ] Keep the WPF renderer and short XSOverlay progress/fallback notifications when SteamVR is unavailable.
+- [ ] Stop sending successful long-form results as fixed-duration XSOverlay notifications.
+- [ ] Verify that overlay rendering never logs or persists OCR/translation content.
+- [ ] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
 - [ ] Add controller-relative transform and user calibration for a wrist-like position.
 - [ ] Test compositor restarts, headset disconnects, overlay cleanup, and WPF fallback.
 - [ ] Add optional SteamVR input actions only after overlay stability is proven.
