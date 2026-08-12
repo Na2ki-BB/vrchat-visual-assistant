@@ -203,7 +203,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Compare unscaled, Fant 2x, and Cubic 2x OCR on the same self-authored image; use the better Cubic result for full-frame and band paths.
 - [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
 - [x] Document OpenVR compositor mirror feasibility, required APIs, overlay-exclusion invariant, window-capture fallback, and implementation size without implementing it.
-- [>] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR: automated Quest 3S acquisition, format/timing, GPU sample, shared lifetime, and overlay-exclusion checks pass; explicit-save FOV/eye-choice review remains.
+- [x] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR: Quest 3S acquisition, format/timing, coarse GPU sample, shared lifetime, overlay exclusion, explicit-save FOV comparison, and left-eye choice are complete; normal SCAN remains unchanged pending Stage 2 approval.
 - [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
 - [>] Verify on the owner's VRChat window that client-area capture removes the Windows `VRChat` title while preserving in-world text.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
