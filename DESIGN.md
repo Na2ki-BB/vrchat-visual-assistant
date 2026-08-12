@@ -116,7 +116,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - **Optional later path:** Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) could capture an eye texture without restoring the desktop window. It is no longer required merely to solve occlusion, and should be attempted only if restore behavior remains materially disruptive.
 - The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
 
-#### OpenVR compositor eye-mirror feasibility (research only; not implemented)
+#### OpenVR compositor eye-mirror feasibility and Stage 1 diagnostic
 
 The path is technically feasible on the current Windows + SteamVR architecture, but it is a medium-sized capture backend rather than a small change to `OpenVrInterop`.
 
@@ -129,6 +129,20 @@ The path is technically feasible on the current Windows + SteamVR architecture, 
 - Estimated implementation size: 4–7 production files plus diagnostics/tests, roughly 350–650 lines. Estimate 2–4 engineering days for interop, D3D11 readback, fallback, and automated coverage, plus a separate Quest 3S device-validation session for FOV, eye choice, overlay exclusion, latency, and GPU impact.
 
 Required official APIs: `IVRSystem.GetOutputDevice` (or legacy `GetDXGIOutputInfo`), `IVRCompositor.GetMirrorTextureD3D11`, `IVRCompositor.ReleaseMirrorTextureD3D11`, `IVROverlay.HideOverlay`, `IVROverlay.IsOverlayVisible`, and `IVROverlay.WaitFrameSync`.
+
+##### Stage 1 feasibility spike (2026-08-12)
+
+The diagnostic-only spike succeeds on the owner's Quest 3S + SteamVR + RTX 4060 Laptop system without entering `ICaptureSource` or changing normal SCAN behavior. `IVRSystem_026.GetOutputDevice(TextureType_DirectX)` returned adapter LUID `0x0000000000012F22`; a D3D11 device on that adapter acquired both `IVRCompositor_029` eye mirrors. Each eye was `3072×3352`, exposed as a `Texture2D` SRV with `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB`. An initial no-save run measured the cropped VRChat window at `2560×1299`, so the eye source had 1.20× the horizontal pixels and 2.58× the vertical pixels in that run.
+
+Single-eye `GetMirrorTextureD3D11` plus GPU staging readback was typically 24–28 ms in repeated no-save runs. The current window diagnostic took about 2.4 seconds including window capture and PNG encoding, so that number is not a like-for-like raw GPU-copy comparison. A coarse whole-GPU sample at 250 ms intervals measured 39.3% average GPU and 4193 MiB VRAM before the diagnostic versus 35.5% and 4193 MiB while it ran; this establishes no observed short-sample regression, not a final performance guarantee.
+
+The overlay-exclusion test found an important runtime behavior: after `HideOverlay`, `IsOverlayVisible == false`, and three `WaitFrameSync` boundaries, the first mirror acquisition still contained the distinctive test panel. Discarding that acquisition, crossing one more compositor boundary, and acquiring again returned zero marker signal for both eyes. The capture invariant therefore includes a mandatory throwaway mirror acquisition after hiding; analyzing the first acquisition would permit a self-OCR loop. The mirror view is released only with `ReleaseMirrorTextureD3D11`, while the separately obtained D3D resource follows normal COM ownership.
+
+The owner-supervised, controller-triggered visual run completed while the HMD reported `UserInteraction`. It again returned `3072×3352` for each eye; the current window was `2560×1600`, giving the eye source 1.20× the horizontal and 2.10× the vertical pixels. Left and right acquisition plus staging readback took 48.9 ms and 33.2 ms respectively in this sequential run. These individual values include ordering and warm-up effects and are not used to choose an eye.
+
+The current window image clipped both the heading and a substantial lower block of the tall test sign. Both eye images contained the sign from its upper heading through its lower end, confirming the intended vertical-FOV improvement. The left eye placed the target text closer to the image center, so Stage 2 should use the left eye by default while keeping the choice configurable. The distinctive overlay marker was absent from both adopted frames (`hidden=0` for each eye), confirming the discard-and-wait exclusion contract on this device. The explicitly approved diagnostic images were inspected only for these properties and then permanently deleted; no image or scene text was copied into the repository or logs.
+
+The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` export remains an owner-controlled troubleshooting option. Stage 1 is complete; normal SCAN still uses `VrChatWindowCaptureSource`, and Stage 2 fallback/backend integration remains deliberately unimplemented until this result is reviewed and approved.
 
 ### OCR
 
@@ -323,6 +337,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Upscale full-frame and band OCR with a shared 2x-bounded Cubic transform | On the same synthetic six-line image, exact recognized lines were 4/6 without scaling, 3/6 with Fant, and 5/6 with Cubic; Cubic was selected from actual recognition output |
 | 2026-08-12 | Keep the result overlay non-interactive until an explicit hotkey/OVRAS toggle | Always-on interaction captures controller input from VRChat; explicit temporary interaction preserves movement while retaining persistent, scrollable results |
 | 2026-08-12 | Keep OpenVR eye-mirror capture at research status | The API is feasible, but correct GPU selection, D3D11 readback, shared OpenVR lifetime, overlay exclusion, fallback, and Quest 3S validation make it a separate medium-sized vertical slice |
+| 2026-08-12 | Complete the OpenVR eye-mirror diagnostic with the left eye as the Stage 2 default candidate | Quest 3S returned 3072×3352 per eye; both eyes restored the tall sign's missing vertical content, the left kept the target nearer center, and adopted frames excluded the result overlay after a mandatory throwaway acquisition |
 
 ## 13. Official sources reviewed
 

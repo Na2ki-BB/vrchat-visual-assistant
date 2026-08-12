@@ -182,6 +182,33 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --st
 
 ヘッドセット内でパネルを上下にスクロールし、右上の「閉じる」を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
 
+### OpenVRアイミラー取得を診断する（第1段階スパイク）
+
+これは開発用診断であり、通常のSCANはまだ従来のVRChatウィンドウを取得します。SteamVRとVRChatを起動した状態で次を実行すると、左右のアイミラーをメモリ上で1回ずつ取得し、寸法、DXGI形式、取得時間、現行ウィンドウとの解像度差を表示します。SteamVRを自動起動せず、画像も自動保存しません。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --openvr-eye-mirror-check
+```
+
+診断中は識別色のテストパネルが短時間だけ表示されます。診断は、パネル非表示を確認してコンポジタ境界を跨ぎ、遅延して返る旧合成フレームを破棄してから、採用フレームに識別色が残っていないことを自動判定します。
+
+Questコントローラーで撮影タイミングを決める場合は`--wait-for-scan`を追加します。初期化後は最大3分待機し、OVR Advanced Settingsへ設定済みのSCAN操作（既定では`Ctrl+Shift+T`）を受信した瞬間から診断します。完了後はXSOverlayへ「ヘッドセットを外して構いません」と通知します。完了通知はキャプチャ後に送るため、取得画像へは写り込みません。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --openvr-eye-mirror-check --wait-for-scan
+```
+
+視野や左右差を目視するときだけ、空の保存先フォルダーを明示します。`eye-left.png`、`eye-right.png`、`window-current.png`が作成されます。既存ファイルは上書きしません。画像にはVRChatの表示内容が含まれるため、確認後に削除し、Gitへ追加しないでください。
+
+```powershell
+New-Item -ItemType Directory C:\Temp\vrcva-eye-check
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --openvr-eye-mirror-check --wait-for-scan `
+  --save-eye-mirror C:\Temp\vrcva-eye-check
+```
+
 ### 一度だけ: QuestコントローラーへSCANを割り当てる
 
 導入済みのOVR Advanced Settingsには、VRコントローラー操作からキーボードショートカットを送る公式機能があります。VRCVAはこれを暫定のコントローラートリガーとして利用し、VRChatやXSOverlayへ入力を注入しません。以下を一度設定すれば、VRプレイ中に物理キーボードへ触れる必要はありません。
