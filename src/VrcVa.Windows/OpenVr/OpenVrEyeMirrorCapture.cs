@@ -91,28 +91,14 @@ internal sealed class OpenVrEyeMirrorCapture : IDisposable
     }
 
     public OpenVrEyeMirrorFrame CaptureAfterOverlayHidden(
-        OpenVrInterop overlay,
+        IOpenVrOverlayCaptureGate overlay,
         OpenVrEye eye,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(overlay);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        overlay.HideAndConfirmInvisible(cancellationToken);
-        // The compositor can have more than one queued eye image. Cross three
-        // boundaries so a pre-hide composite cannot remain in the mirror view.
-        overlay.WaitFrameSync();
-        overlay.WaitFrameSync();
-        overlay.WaitFrameSync();
-        cancellationToken.ThrowIfCancellationRequested();
-        using (CaptureForDiagnostic(eye, cancellationToken))
-        {
-            // GetMirrorTextureD3D11 can expose the previous composite on its first
-            // acquisition after an overlay transition. Never analyze that frame.
-        }
-
-        overlay.WaitFrameSync();
-        return CaptureForDiagnostic(eye, cancellationToken);
+        return OpenVrOverlayCaptureSequence.CaptureAfterOverlayHidden(
+            overlay,
+            () => CaptureForDiagnostic(eye, cancellationToken),
+            cancellationToken);
     }
 
     public OpenVrEyeMirrorFrame CaptureForDiagnostic(

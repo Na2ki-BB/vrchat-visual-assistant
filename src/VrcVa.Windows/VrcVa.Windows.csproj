@@ -16,4 +16,8 @@
     <ProjectReference Include="..\VrcVa.Infrastructure\VrcVa.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="VrcVa.Windows.Tests" />
+  </ItemGroup>
+
 </Project>

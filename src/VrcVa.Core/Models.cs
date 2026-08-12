@@ -46,7 +46,9 @@ public sealed class CapturedFrame : IDisposable
         int width,
         int height,
         string mediaType,
-        string sourceKind)
+        string sourceKind,
+        int? ocrScaleReferenceWidth = null,
+        int? ocrScaleReferenceHeight = null)
     {
         ArgumentNullException.ThrowIfNull(encodedImage);
 
@@ -60,11 +62,26 @@ public sealed class CapturedFrame : IDisposable
             throw new ArgumentOutOfRangeException(nameof(width), "Frame dimensions must be positive.");
         }
 
+        if (ocrScaleReferenceWidth is <= 0 || ocrScaleReferenceHeight is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ocrScaleReferenceWidth),
+                "OCR scale-reference dimensions must be positive.");
+        }
+
+        if (ocrScaleReferenceWidth.HasValue != ocrScaleReferenceHeight.HasValue)
+        {
+            throw new ArgumentException(
+                "Both OCR scale-reference dimensions must be supplied together.");
+        }
+
         _encodedImage = encodedImage;
         Width = width;
         Height = height;
         MediaType = mediaType;
         SourceKind = sourceKind;
+        OcrScaleReferenceWidth = ocrScaleReferenceWidth ?? width;
+        OcrScaleReferenceHeight = ocrScaleReferenceHeight ?? height;
     }
 
     public int Width { get; }
@@ -74,6 +91,10 @@ public sealed class CapturedFrame : IDisposable
     public string MediaType { get; }
 
     public string SourceKind { get; }
+
+    public int OcrScaleReferenceWidth { get; }
+
+    public int OcrScaleReferenceHeight { get; }
 
     public ReadOnlyMemory<byte> EncodedImage =>
         _encodedImage ?? throw new ObjectDisposedException(nameof(CapturedFrame));
@@ -108,7 +129,8 @@ public sealed record AnalysisResult(
     string TranslationModel,
     TimeSpan OcrDuration,
     TimeSpan TranslationDuration,
-    string? Warning = null);
+    string? Warning = null,
+    string CaptureSourceKind = "unknown");
 
 public sealed record ScanProgress(
     Guid CorrelationId,
@@ -140,4 +162,3 @@ public sealed record ScanOutcome(
         TimeSpan totalDuration) =>
         new(correlationId, false, null, failure, totalDuration);
 }
-

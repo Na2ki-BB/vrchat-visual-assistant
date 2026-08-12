@@ -7,6 +7,13 @@ namespace VrcVa.Windows.Diagnostics;
 
 internal static class OcrDiagnosticRunner
 {
+    private static readonly Action<WindowCaptureDiagnostics> PrintCaptureDiagnostics = value =>
+        Console.WriteLine(
+            $"WGC dimensions: item={value.ItemWidth}x{value.ItemHeight}, "
+            + $"content={value.ContentWidth}x{value.ContentHeight}, "
+            + $"bitmap={value.BitmapWidth}x{value.BitmapHeight}, "
+            + $"client={value.ClientWidth}x{value.ClientHeight}");
+
     internal static async Task<int> RunAsync(string[] arguments)
     {
         if (arguments.Length == 1
@@ -14,7 +21,8 @@ internal static class OcrDiagnosticRunner
                 "--capture-vrchat-check",
                 StringComparison.OrdinalIgnoreCase))
         {
-            using CapturedFrame captured = await new VrChatWindowCaptureSource().CaptureAsync(
+            using CapturedFrame captured = await new VrChatWindowCaptureSource(
+                PrintCaptureDiagnostics).CaptureAsync(
                 ScanRequest.Create("capture-diagnostic"),
                 CancellationToken.None);
             Console.WriteLine(
@@ -35,7 +43,7 @@ internal static class OcrDiagnosticRunner
         else if ((arguments.Length == 1 || arguments.Length == 3)
             && arguments[0].Equals("--capture-vrchat-ocr", StringComparison.OrdinalIgnoreCase))
         {
-            captureSource = new VrChatWindowCaptureSource();
+            captureSource = new VrChatWindowCaptureSource(PrintCaptureDiagnostics);
             if (arguments.Length == 3)
             {
                 if (!arguments[1].Equals("--save-capture", StringComparison.OrdinalIgnoreCase)

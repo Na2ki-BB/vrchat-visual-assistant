@@ -42,12 +42,13 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
                     sourceWidth,
                     sourceHeight,
                     new BitmapBounds
-                {
-                    X = 0,
-                    Y = startY,
-                    Width = sourceWidth,
-                    Height = regionHeight,
-                });
+                    {
+                        X = 0,
+                        Y = startY,
+                        Width = sourceWidth,
+                        Height = regionHeight,
+                    },
+                    OcrBitmapScaleMode.Unscaled);
                 using SoftwareBitmap bitmap = await decoder
                     .GetSoftwareBitmapAsync(
                         BitmapPixelFormat.Bgra8,
@@ -60,10 +61,12 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
                 byte[] encoded = await EncodePngAsync(bitmap, cancellationToken);
                 regions.Add(new CapturedFrame(
                     encoded,
-                    checked((int)transform.ScaledWidth),
-                    checked((int)transform.ScaledHeight),
+                    checked((int)transform.Bounds.Width),
+                    checked((int)transform.Bounds.Height),
                     "image/png",
-                    $"{frame.SourceKind}:ocr-band-{index + 1}"));
+                    $"{frame.SourceKind}:ocr-band-{index + 1}",
+                    frame.OcrScaleReferenceWidth,
+                    frame.OcrScaleReferenceHeight));
             }
 
             return regions;

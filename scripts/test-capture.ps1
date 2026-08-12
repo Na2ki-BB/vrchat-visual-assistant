@@ -10,10 +10,11 @@ $solution = Join-Path $repositoryRoot "VRChatVisualAssistant.sln"
 $fixtureFramework = "net8.0-windows"
 $appFramework = "net8.0-windows10.0.19041.0"
 $fixtureDirectory = Join-Path $repositoryRoot "tools\VrcVa.CaptureFixture\bin\$Configuration\$fixtureFramework"
-$fixtureExecutable = Join-Path $fixtureDirectory "VRChat.exe"
+$localFixtureDirectory = Join-Path `
+    $env:TEMP `
+    ("vrcva-capture-fixture-" + [Guid]::NewGuid().ToString("N"))
+$fixtureExecutable = Join-Path $localFixtureDirectory "VRChat.exe"
 $appDll = Join-Path $repositoryRoot "src\VrcVa.Windows\bin\$Configuration\$appFramework\VrcVa.dll"
-$fixtureOutput = Join-Path $env:TEMP "vrcva-fixture-out.txt"
-$fixtureError = Join-Path $env:TEMP "vrcva-fixture-err.txt"
 
 $existingVrChat = Get-Process VRChat -ErrorAction SilentlyContinue
 if ($null -ne $existingVrChat) {
@@ -25,13 +26,54 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
 
 $fixtureProcess = $null
 try {
+    New-Item -ItemType Directory -Path $localFixtureDirectory | Out-Null
+    Copy-Item -Path (Join-Path $fixtureDirectory "*") -Destination $localFixtureDirectory
     $fixtureProcess = Start-Process `
         -FilePath $fixtureExecutable `
-        -WorkingDirectory $fixtureDirectory `
-        -RedirectStandardOutput $fixtureOutput `
-        -RedirectStandardError $fixtureError `
+        -WorkingDirectory $localFixtureDirectory `
         -PassThru
-    Start-Sleep -Seconds 2
+    $fixtureReady = $false
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        $fixtureProcess.Refresh()
+        if ($fixtureProcess.MainWindowHandle -ne [IntPtr]::Zero `
+            -and $fixtureProcess.MainWindowTitle -eq "VRChat Capture Fixture") {
+            $fixtureReady = $true
+            break
+        }
+    }
+    if (-not $fixtureReady) {
+        throw "Capture fixture window did not become ready."
+    }
+    Start-Sleep -Seconds 1
+
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class VrcVaFixtureWindowGeometry
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetClientRect(IntPtr windowHandle, out Rect rectangle);
+}
+"@
+    $clientRect = New-Object VrcVaFixtureWindowGeometry+Rect
+    if (-not [VrcVaFixtureWindowGeometry]::GetClientRect(
+        $fixtureProcess.MainWindowHandle,
+        [ref]$clientRect)) {
+        throw "Could not read the capture fixture client rectangle."
+    }
+    $expectedWidth = $clientRect.Right - $clientRect.Left
+    $expectedHeight = $clientRect.Bottom - $clientRect.Top
 
     $diagnosticOutput = @(dotnet $appDll --capture-vrchat-ocr)
     $diagnosticExitCode = $LASTEXITCODE
@@ -40,9 +82,9 @@ try {
         throw "Capture/OCR diagnostic failed with exit code $diagnosticExitCode."
     }
 
-    $expectedFrameLine = "Frame: 1280x720,"
+    $expectedFrameLine = "Frame: ${expectedWidth}x${expectedHeight},"
     if (-not ($diagnosticOutput | Where-Object { $_.StartsWith($expectedFrameLine) })) {
-        throw "Capture included non-client window chrome. Expected a 1280x720 client frame."
+        throw "Capture did not match the fixture client rectangle. Expected ${expectedWidth}x${expectedHeight}."
     }
 }
 finally {
@@ -51,18 +93,7 @@ finally {
         $fixtureProcess.WaitForExit(5000) | Out-Null
     }
 
-    foreach ($path in @($fixtureOutput, $fixtureError)) {
-        for ($attempt = 0; $attempt -lt 10; $attempt++) {
-            if (-not (Test-Path -LiteralPath $path)) { break }
-
-            try {
-                Remove-Item -LiteralPath $path -Force
-                break
-            }
-            catch [System.IO.IOException] {
-                if ($attempt -eq 9) { throw }
-                Start-Sleep -Milliseconds 100
-            }
-        }
+    if (Test-Path -LiteralPath $localFixtureDirectory) {
+        Remove-Item -LiteralPath $localFixtureDirectory -Recurse -Force
     }
 }

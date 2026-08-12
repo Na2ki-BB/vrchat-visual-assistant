@@ -97,6 +97,19 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
     }
 
+    internal bool TryGetCaptureOverlay(out IOpenVrOverlayCaptureGate? overlay)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!EnsureConnected())
+        {
+            overlay = null;
+            return false;
+        }
+
+        overlay = _interop;
+        return true;
+    }
+
     public void Dispose()
     {
         if (_disposed)

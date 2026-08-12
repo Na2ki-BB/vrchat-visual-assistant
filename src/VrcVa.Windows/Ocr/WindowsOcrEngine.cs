@@ -6,7 +6,8 @@ using Windows.Storage.Streams;
 
 namespace VrcVa.Windows.Ocr;
 
-internal sealed class WindowsOcrEngine : IOcrEngine
+internal sealed class WindowsOcrEngine(
+    OcrBitmapScaleMode scaleMode = OcrBitmapScaleMode.Adaptive) : IOcrEngine
 {
     internal const string EnglishRecognizerInstallationSteps =
         "設定 → 時刻と言語 → 言語と地域 → Englishを追加 → 言語のオプション → "
@@ -43,7 +44,10 @@ internal sealed class WindowsOcrEngine : IOcrEngine
                 .ConfigureAwait(false);
             BitmapTransform transform = WindowsOcrBitmapTransform.Create(
                 decoder.PixelWidth,
-                decoder.PixelHeight);
+                decoder.PixelHeight,
+                scaleMode: scaleMode,
+                scaleReferenceWidth: checked((uint)frame.OcrScaleReferenceWidth),
+                scaleReferenceHeight: checked((uint)frame.OcrScaleReferenceHeight));
             using SoftwareBitmap bitmap = await decoder
                 .GetSoftwareBitmapAsync(
                     BitmapPixelFormat.Bgra8,
