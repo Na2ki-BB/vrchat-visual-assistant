@@ -62,6 +62,34 @@ internal static class CaptureBackendBenchmarkRunner
         }
     }
 
+    public static async Task<int> RunRouteCheckAsync(Dispatcher dispatcher)
+    {
+        OpenVrEyeCaptureOptions eyeOptions = OpenVrEyeCaptureOptions.FromEnvironment(out _);
+        SteamVrResultPanel panel = new(dispatcher);
+        try
+        {
+            ICaptureSource source = new FallbackCaptureSource(
+                new OpenVrEyeCaptureSource(dispatcher, panel, eyeOptions),
+                new VrChatWindowCaptureSource(value => Console.WriteLine(
+                    $"WGC寸法: item={value.ItemWidth}x{value.ItemHeight}, "
+                    + $"content={value.ContentWidth}x{value.ContentHeight}, "
+                    + $"bitmap={value.BitmapWidth}x{value.BitmapHeight}, "
+                    + $"client={value.ClientWidth}x{value.ClientHeight}")));
+            using CapturedFrame frame = await source.CaptureAsync(
+                ScanRequest.Create("capture-route-check"),
+                CancellationToken.None).ConfigureAwait(false);
+            Console.WriteLine(
+                $"取得経路: {CaptureSourceDisplayName.Get(frame.SourceKind)}; "
+                + $"寸法: {frame.Width}x{frame.Height}");
+            Console.WriteLine("画像は保存せず、OCRも実行していません。");
+            return 0;
+        }
+        finally
+        {
+            await dispatcher.InvokeAsync(panel.Dispose, DispatcherPriority.Normal);
+        }
+    }
+
     private static async Task<CapturedFrame> CaptureTimedAsync(
         ICaptureSource source,
         string displayName)

@@ -29,7 +29,8 @@ internal static partial class WindowsGraphicsCapture
 
     internal static async Task<CapturedFrame> CaptureWindowAsync(
         IntPtr windowHandle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<WindowCaptureDiagnostics>? diagnostics = null)
     {
         if (!GraphicsCaptureSession.IsSupported())
         {
@@ -54,7 +55,12 @@ internal static partial class WindowsGraphicsCapture
             (sender, _) =>
             {
                 Direct3D11CaptureFrame? frame = sender.TryGetNextFrame();
-                if (frame is not null && !frameReady.TrySetResult(frame))
+                if (frame is null)
+                {
+                    return;
+                }
+
+                if (!frameReady.TrySetResult(frame))
                 {
                     frame.Dispose();
                 }
@@ -93,6 +99,15 @@ internal static partial class WindowsGraphicsCapture
                     windowHandle,
                     bitmap.PixelWidth,
                     bitmap.PixelHeight);
+                diagnostics?.Invoke(new WindowCaptureDiagnostics(
+                    item.Size.Width,
+                    item.Size.Height,
+                    frame.ContentSize.Width,
+                    frame.ContentSize.Height,
+                    bitmap.PixelWidth,
+                    bitmap.PixelHeight,
+                    checked((int)clientBounds.Width),
+                    checked((int)clientBounds.Height)));
                 byte[] encoded = await EncodePngAsync(
                         bitmap,
                         clientBounds,
@@ -329,3 +344,13 @@ internal static partial class WindowsGraphicsCapture
         IntPtr CreateForMonitor(IntPtr monitor, in Guid interfaceId);
     }
 }
+
+internal sealed record WindowCaptureDiagnostics(
+    int ItemWidth,
+    int ItemHeight,
+    int ContentWidth,
+    int ContentHeight,
+    int BitmapWidth,
+    int BitmapHeight,
+    int ClientWidth,
+    int ClientHeight);

@@ -5,7 +5,8 @@ using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows.Capture;
 
-internal sealed class VrChatWindowCaptureSource : ICaptureSource
+internal sealed class VrChatWindowCaptureSource(
+    Action<WindowCaptureDiagnostics>? diagnostics = null) : ICaptureSource
 {
     private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RestorePollInterval = TimeSpan.FromMilliseconds(50);
@@ -29,7 +30,7 @@ internal sealed class VrChatWindowCaptureSource : ICaptureSource
             }
 
             return await WindowsGraphicsCapture
-                .CaptureWindowAsync(handle, cancellationToken)
+                .CaptureWindowAsync(handle, cancellationToken, diagnostics)
                 .ConfigureAwait(false);
         }
         catch (ScanException)

@@ -13,10 +13,15 @@ internal static partial class NativeMethods
     internal const uint DwmwaExtendedFrameBounds = 9;
     internal const int SwRestore = 9;
     internal const int SwShowMinNoActive = 7;
+    internal static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
 
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool AttachConsole(uint processId);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetProcessDpiAwarenessContext(IntPtr value);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
