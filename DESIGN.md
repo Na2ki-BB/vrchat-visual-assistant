@@ -130,6 +130,16 @@ The path is technically feasible on the current Windows + SteamVR architecture, 
 
 Required official APIs: `IVRSystem.GetOutputDevice` (or legacy `GetDXGIOutputInfo`), `IVRCompositor.GetMirrorTextureD3D11`, `IVRCompositor.ReleaseMirrorTextureD3D11`, `IVROverlay.HideOverlay`, `IVROverlay.IsOverlayVisible`, and `IVROverlay.WaitFrameSync`.
 
+##### Stage 1 feasibility spike (2026-08-12)
+
+The diagnostic-only spike succeeds on the owner's Quest 3S + SteamVR + RTX 4060 Laptop system without entering `ICaptureSource` or changing normal SCAN behavior. `IVRSystem_026.GetOutputDevice(TextureType_DirectX)` returned adapter LUID `0x0000000000012F22`; a D3D11 device on that adapter acquired both `IVRCompositor_029` eye mirrors. Each eye was `3072×3352`, exposed as a `Texture2D` SRV with `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB`. The same run measured the current cropped VRChat window at `2560×1299`, so the eye source has 1.20× the horizontal pixels and 2.58× the vertical pixels.
+
+Single-eye `GetMirrorTextureD3D11` plus GPU staging readback was typically 24–28 ms in repeated no-save runs. The current window diagnostic took about 2.4 seconds including window capture and PNG encoding, so that number is not a like-for-like raw GPU-copy comparison. A coarse whole-GPU sample at 250 ms intervals measured 39.3% average GPU and 4193 MiB VRAM before the diagnostic versus 35.5% and 4193 MiB while it ran; this establishes no observed short-sample regression, not a final performance guarantee.
+
+The overlay-exclusion test found an important runtime behavior: after `HideOverlay`, `IsOverlayVisible == false`, and three `WaitFrameSync` boundaries, the first mirror acquisition still contained the distinctive test panel. Discarding that acquisition, crossing one more compositor boundary, and acquiring again returned zero marker signal for both eyes. The capture invariant therefore includes a mandatory throwaway mirror acquisition after hiding; analyzing the first acquisition would permit a self-OCR loop. The mirror view is released only with `ReleaseMirrorTextureD3D11`, while the separately obtained D3D resource follows normal COM ownership.
+
+The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` export exists solely for the remaining owner-supervised visual checks. Left/right eye choice and confirmation that the previously clipped vertical sign fits remain pending until that explicit export is approved and inspected. Stage 2 fallback/backend integration must not begin before those checks are reviewed.
+
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
@@ -323,6 +333,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Upscale full-frame and band OCR with a shared 2x-bounded Cubic transform | On the same synthetic six-line image, exact recognized lines were 4/6 without scaling, 3/6 with Fant, and 5/6 with Cubic; Cubic was selected from actual recognition output |
 | 2026-08-12 | Keep the result overlay non-interactive until an explicit hotkey/OVRAS toggle | Always-on interaction captures controller input from VRChat; explicit temporary interaction preserves movement while retaining persistent, scrollable results |
 | 2026-08-12 | Keep OpenVR eye-mirror capture at research status | The API is feasible, but correct GPU selection, D3D11 readback, shared OpenVR lifetime, overlay exclusion, fallback, and Quest 3S validation make it a separate medium-sized vertical slice |
+| 2026-08-12 | Validate OpenVR eye-mirror capture only as a diagnostic Stage 1 spike | Quest 3S returned 3072×3352 per eye and exposed a one-acquisition overlay delay; normal SCAN remains on window capture until visual comparison is reviewed |
 
 ## 13. Official sources reviewed
 
