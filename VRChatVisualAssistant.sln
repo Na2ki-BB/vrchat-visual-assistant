@@ -14,6 +14,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VrcVa.Infrastructure.Tests"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VrcVa.CaptureFixture", "tools\VrcVa.CaptureFixture\VrcVa.CaptureFixture.csproj", "{D6033A18-B866-45D5-B2C5-F91080A67D6E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VrcVa.Windows.Tests", "tests\VrcVa.Windows.Tests\VrcVa.Windows.Tests.csproj", "{C56E27CE-392E-45E8-AF37-9F22A014E11B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -44,5 +46,9 @@ Global
 		{D6033A18-B866-45D5-B2C5-F91080A67D6E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D6033A18-B866-45D5-B2C5-F91080A67D6E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D6033A18-B866-45D5-B2C5-F91080A67D6E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C56E27CE-392E-45E8-AF37-9F22A014E11B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C56E27CE-392E-45E8-AF37-9F22A014E11B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C56E27CE-392E-45E8-AF37-9F22A014E11B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C56E27CE-392E-45E8-AF37-9F22A014E11B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
