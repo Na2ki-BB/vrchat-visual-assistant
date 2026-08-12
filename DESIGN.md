@@ -118,7 +118,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
-- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, recognize each band, remove duplicate lines, and use the enhanced candidate only when it scores materially better. This preserves the one-action UX for long text outside the gaze center while avoiding extra passes on already-strong results.
+- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, and recognize each band. The final text is the union of primary-first and band-only lines; conservative, occurrence-aware approximate matching removes OCR variations caused by band overlap while retaining repeated lines within one observation. This preserves primary-only lines and avoids extra passes on already-strong results.
 - The newer Windows App SDK AI Text Recognition API is not selected because Microsoft documents that it runs only on devices with an NPU, and this development machine has no detected NPU.
 - A Tesseract backend remains a viable plug-in if Windows OCR accuracy is insufficient. It adds a native engine, trained-data distribution, license inventory, and preprocessing work.
 - A cloud Vision OCR backend may improve difficult in-world text, but it would upload the captured image and therefore must be an explicit opt-in provider with a clear data boundary.
@@ -208,7 +208,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
 3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture then copies that window's composed Direct3D surface into an in-memory PNG before restoring the prior minimized state.
-4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; temporary band buffers are disposed immediately. The better normalized result continues, while an empty result remains a typed, user-actionable failure.
+4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
 6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
@@ -295,6 +295,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture | Real-device use showed that an occluding PC window was OCRed instead of VRChat; direct window-surface capture fixes the root cause and removes the need to hide or foreground VRCVA |
 | 2026-08-12 | Shorten the XSOverlay start notification from 12 seconds to 1 second | Logs showed capture and OCR usually completed in about one second, but XSOverlay queued the result behind the long progress notification |
 | 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
+| 2026-08-12 | Union primary and band OCR with conservative approximate deduplication | Preserve primary-only lines while preventing overlap variations from duplicating translation input; occurrence-aware matching retains legitimate repeated lines |
 
 ## 13. Official sources reviewed
 
