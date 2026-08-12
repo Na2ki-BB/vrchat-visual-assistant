@@ -193,12 +193,20 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 診断中は識別色のテストパネルが短時間だけ表示されます。診断は、パネル非表示を確認してコンポジタ境界を跨ぎ、遅延して返る旧合成フレームを破棄してから、採用フレームに識別色が残っていないことを自動判定します。
 
+Questコントローラーで撮影タイミングを決める場合は`--wait-for-scan`を追加します。初期化後は最大3分待機し、OVR Advanced Settingsへ設定済みのSCAN操作（既定では`Ctrl+Shift+T`）を受信した瞬間から診断します。完了後はXSOverlayへ「ヘッドセットを外して構いません」と通知します。完了通知はキャプチャ後に送るため、取得画像へは写り込みません。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --openvr-eye-mirror-check --wait-for-scan
+```
+
 視野や左右差を目視するときだけ、空の保存先フォルダーを明示します。`eye-left.png`、`eye-right.png`、`window-current.png`が作成されます。既存ファイルは上書きしません。画像にはVRChatの表示内容が含まれるため、確認後に削除し、Gitへ追加しないでください。
 
 ```powershell
 New-Item -ItemType Directory C:\Temp\vrcva-eye-check
 dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
-  --openvr-eye-mirror-check --save-eye-mirror C:\Temp\vrcva-eye-check
+  --openvr-eye-mirror-check --wait-for-scan `
+  --save-eye-mirror C:\Temp\vrcva-eye-check
 ```
 
 ### 一度だけ: QuestコントローラーへSCANを割り当てる

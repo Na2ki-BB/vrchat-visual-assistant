@@ -1,23 +1,29 @@
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using VrcVa.Core;
+using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
 using VrcVa.Windows.OpenVr;
+using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows.Diagnostics;
 
 internal static class OpenVrEyeMirrorDiagnosticRunner
 {
     private const string SaveOption = "--save-eye-mirror";
+    private const string WaitForScanOption = "--wait-for-scan";
+    private const int DiagnosticHotKeyIdentifier = 0x565244;
     private const int MarkerWidth = 256;
     private const int MarkerHeight = 256;
 
     public static async Task<int> RunAsync(string[] arguments)
     {
-        string? saveDirectory = ParseSaveDirectory(arguments);
+        DiagnosticOptions options = ParseOptions(arguments);
+        string? saveDirectory = options.SaveDirectory;
         if (saveDirectory is not null)
         {
             Directory.CreateDirectory(saveDirectory);
@@ -47,6 +53,11 @@ internal static class OpenVrEyeMirrorDiagnosticRunner
         {
                 Console.WriteLine($"OpenVR compositor adapter LUID: 0x{activeCapture.AdapterLuid:X16}");
                 Console.WriteLine($"HMD activity: {activeCapture.HmdActivityLevel}");
+                if (options.WaitForScan)
+                {
+                    await WaitForScanAsync().ConfigureAwait(true);
+                }
+
                 OverlayMarkerCounts baselineLeftMarker;
                 OverlayMarkerCounts baselineRightMarker;
                 OverlayMarkerCounts visibleLeftMarker;
@@ -174,27 +185,112 @@ internal static class OpenVrEyeMirrorDiagnosticRunner
 
                 Console.WriteLine(
                     "第1段階の自動取得は成功しました。左右画像の視野比較とGPU負荷は実機で確認してください。");
+                await SendCompletionNotificationAsync().ConfigureAwait(false);
                 return 0;
             }
         }
     }
 
-    private static string? ParseSaveDirectory(string[] arguments)
+    public static async Task TrySendFailureNotificationAsync()
     {
-        if (arguments.Length == 1)
+        try
         {
-            return null;
+            await new XsOverlayUdpNotificationSink().SendAsync(
+                "アイミラー診断失敗",
+                "ヘッドセットを外して構いません。PC側の診断結果を確認してください。",
+                XsOverlayNotificationKind.Error,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // XSOverlay is optional and must never hide the diagnostic failure.
+        }
+    }
+
+    private static DiagnosticOptions ParseOptions(string[] arguments)
+    {
+        string? saveDirectory = null;
+        bool waitForScan = false;
+        for (int index = 1; index < arguments.Length; index++)
+        {
+            if (arguments[index].Equals(WaitForScanOption, StringComparison.OrdinalIgnoreCase))
+            {
+                if (waitForScan)
+                {
+                    throw new ArgumentException($"{WaitForScanOption} は1回だけ指定できます。");
+                }
+
+                waitForScan = true;
+                continue;
+            }
+
+            if (arguments[index].Equals(SaveOption, StringComparison.OrdinalIgnoreCase))
+            {
+                if (saveDirectory is not null
+                    || index + 1 >= arguments.Length
+                    || string.IsNullOrWhiteSpace(arguments[index + 1]))
+                {
+                    throw new ArgumentException($"{SaveOption} の指定が不正です。");
+                }
+
+                saveDirectory = Path.GetFullPath(arguments[++index]);
+                continue;
+            }
+
+            throw new ArgumentException($"未対応の診断オプションです: {arguments[index]}");
         }
 
-        if (arguments.Length != 3
-            || !arguments[1].Equals(SaveOption, StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(arguments[2]))
+        return new DiagnosticOptions(saveDirectory, waitForScan);
+    }
+
+    private static async Task WaitForScanAsync()
+    {
+        HwndSourceParameters parameters = new("VRCVA eye-mirror diagnostic trigger")
         {
-            throw new ArgumentException(
-                $"使用法: --openvr-eye-mirror-check [{SaveOption} <保存先フォルダー>]");
+            Width = 0,
+            Height = 0,
+            WindowStyle = 0,
+            ExtendedWindowStyle = 0x00000080,
+            ParentWindow = new IntPtr(-3),
+        };
+        using HwndSource messageWindow = new(parameters);
+        HotKeyDefinition definition = HotKeyDefinition.FromEnvironment();
+        using GlobalHotKey hotKey = new(
+            messageWindow.Handle,
+            DiagnosticHotKeyIdentifier,
+            definition);
+        TaskCompletionSource pressed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        hotKey.Pressed += (_, _) => pressed.TrySetResult();
+
+        Console.WriteLine(
+            $"診断待機中: 掲示物を見てコントローラーのSCAN操作（{definition.DisplayText}）を押してください。");
+        try
+        {
+            await pressed.Task.WaitAsync(TimeSpan.FromMinutes(3)).ConfigureAwait(true);
+        }
+        catch (TimeoutException)
+        {
+            throw new InvalidOperationException(
+                "3分以内にSCAN操作を受信できなかったため、診断を終了しました。");
         }
 
-        return Path.GetFullPath(arguments[2]);
+        Console.WriteLine("SCAN操作を受信しました。視線を数秒間維持してください。");
+    }
+
+    private static async Task SendCompletionNotificationAsync()
+    {
+        try
+        {
+            await new XsOverlayUdpNotificationSink().SendAsync(
+                "アイミラー診断完了",
+                "キャプチャが完了しました。ヘッドセットを外して構いません。",
+                XsOverlayNotificationKind.Result,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // XSOverlay is optional; the console still contains the full result.
+        }
     }
 
     private static async Task<WindowCaptureMeasurement?> MeasureWindowCaptureAsync(
@@ -381,6 +477,10 @@ internal static class OpenVrEyeMirrorDiagnosticRunner
         int Width,
         int Height,
         TimeSpan Elapsed);
+
+    private sealed record DiagnosticOptions(
+        string? SaveDirectory,
+        bool WaitForScan);
 
     private readonly record struct OverlayMarkerCounts(
         int Magenta,

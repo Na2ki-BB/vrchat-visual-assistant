@@ -26,6 +26,7 @@ public partial class App : System.Windows.Application
             }
             catch (Exception exception)
             {
+                await OpenVrEyeMirrorDiagnosticRunner.TrySendFailureNotificationAsync();
                 Console.Error.WriteLine(
                     $"OpenVRアイミラー診断に失敗しました: {exception.GetType().Name}: {exception.Message}");
                 exitCode = 6;
