@@ -72,7 +72,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 - Windows desktop application targeting .NET 8
 - Visible SCAN button and a configurable global keyboard hotkey
-- One-shot HWND-targeted capture using Windows Graphics Capture; occluding desktop windows are excluded
+- One-shot OpenVR eye-mirror capture with HWND-targeted Windows Graphics Capture fallback
 - In-memory PNG frame; no image is written by default
 - Local OCR using `Windows.Media.Ocr`, with a conditional full-view multi-band retry
 - English-to-Japanese translation behind an `ITextTranslator` interface
@@ -111,10 +111,10 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ### Capture
 
-- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Before encoding, the frame is cropped to the Win32 client rectangle so the Windows title bar is not sent to OCR. Desktop windows in front of VRChat are not part of that surface.
-- When VRChat is minimized, VRCVA temporarily restores it without forcing it to the foreground, waits for rendering, captures, and returns it to the minimized state. The brief restore can still be visible on the PC monitor. Protected content and some GPU/driver failures may still return an unusable frame; there is deliberately no silent screen-coordinate fallback.
-- **Optional later path:** Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) could capture an eye texture without restoring the desktop window. It is no longer required merely to solve occlusion, and should be attempted only if restore behavior remains materially disruptive.
-- The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
+- **Current primary: one OpenVR compositor eye mirror.** Normal SCAN uses `GetMirrorTextureD3D11` for the configured eye, left by default. It selects the compositor GPU through `IVRSystem.GetOutputDevice(TextureType_DirectX)`, reads one adopted frame into the existing in-memory `CapturedFrame`, and never starts SteamVR as a side effect.
+- The result overlay itself is the capture gate. Every primary capture must hide it, confirm `IsOverlayVisible == false`, cross three compositor boundaries, acquire and discard the first mirror view, cross one more boundary, and only then adopt the next view. Quest 3S proved that removing the discard can reintroduce the previous result and create a self-OCR loop.
+- **Fallback: VRChat HWND with Windows Graphics Capture.** `FallbackCaptureSource` uses this existing path when OpenVR initialization, interface lookup, GPU selection, or copy fails. The frame is cropped to the Win32 client rectangle so the title bar is excluded. A minimized VRChat window is restored without activation for this fallback only, then returned to minimized state.
+- The adopted source is visible in the WPF details and SteamVR result-panel title. Cancellation never starts the fallback path. Both sources remain one explicit in-memory capture with no automatic image output.
 
 #### OpenVR compositor eye-mirror feasibility and Stage 1 diagnostic
 
@@ -142,13 +142,25 @@ The owner-supervised, controller-triggered visual run completed while the HMD re
 
 The current window image clipped both the heading and a substantial lower block of the tall test sign. Both eye images contained the sign from its upper heading through its lower end, confirming the intended vertical-FOV improvement. The left eye placed the target text closer to the image center, so Stage 2 should use the left eye by default while keeping the choice configurable. The distinctive overlay marker was absent from both adopted frames (`hidden=0` for each eye), confirming the discard-and-wait exclusion contract on this device. The explicitly approved diagnostic images were inspected only for these properties and then permanently deleted; no image or scene text was copied into the repository or logs.
 
-The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` export remains an owner-controlled troubleshooting option. Stage 1 is complete; normal SCAN still uses `VrChatWindowCaptureSource`, and Stage 2 fallback/backend integration remains deliberately unimplemented until this result is reviewed and approved.
+The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` export remains an owner-controlled troubleshooting option. Stage 1 is complete and its measured invariants are retained by Stage 2.
+
+##### Stage 2 capture backend and adaptive OCR scaling (2026-08-12)
+
+Stage 2 promotes a configurable single eye to the primary `ICaptureSource` and retains `VrChatWindowCaptureSource` behind a platform-neutral `FallbackCaptureSource`. `OpenVrRuntime` remains process-wide and reference counted, so disposing the per-scan compositor lease cannot shut down the result panel's lease. A deterministic synthetic-marker test fixes the exact hide/boundary/discard/boundary/adopt order; cancellation and unexpected programming failures are not silently converted into fallback success.
+
+The 3072×3352 eye frame also required an OCR pixel budget. Sources below 8,000,000 pixels keep the previously validated Cubic upscale up to 2×, constrained to 16,777,216 output pixels and `OcrEngine.MaxImageDimension`. Sources at or above that roughly-4K threshold use 1×. Derived bands retain their parent frame as the scale reference, so splitting a high-resolution eye image cannot turn 2× back on. Band cropping is performed at 1× and OCR scaling is applied exactly once; `BitmapTransform` uses the documented scale-then-crop order, including scaled crop coordinates.
+
+On the same owner-supervised tall-sign scene, the eye frame was 3072×3352 and the window frame 2560×1600. Eye OCR changed from 4,649.1 ms with legacy 2× to 1,210.1 ms with adaptive 1× while retaining 33 lines and 638 ASCII letters/digits. Forced three-band OCR changed from 6,265.4 ms to 2,761.7 ms and recognized 60 lines/1,168 ASCII letters/digits versus 59/1,158. The window result was identical between modes: 24 lines/498 ASCII letters/digits for the full path and 36/748 for forced bands; timing differences were small (1,638.2 vs 1,482.4 ms full, 2,644.2 vs 2,705.6 ms bands). This validates the 8 MP threshold for the measured sources: it removes harmful eye upscaling without changing the lower-resolution window result.
+
+Production SCAN on Quest 3S completed through the left eye at 3072×3352 with capture/total pairs of 1,203/2,208 ms and 916/1,689 ms. The matched diagnostic window path took 2,530.7 ms to capture plus 1,638.2 ms for OCR, versus 1,081.3 + 1,210.1 ms through the eye, a roughly 45% capture-plus-OCR reduction. A trigger-correlated 250 ms GPU sample measured 56.1% average and 4,416 MiB immediately before SCAN versus 61.4% and 4,424 MiB during its 1.53-second interval. The short increase is about 5.3 percentage points and 8 MiB, with no sustained worker after completion.
+
+With SteamVR stopped, the production composition reached `VrChatWindowCaptureSource` and did not start `vrserver`. A locally staged, self-authored `VRChat.exe` fixture then completed through `FallbackCaptureSource` as `VRChatウィンドウ（フォールバック）`, and the fixture OCR check recognized its two synthetic lines. The final check matched its 640×360 client rectangle at the machine's 200% desktop scale; the test now derives this expected size from `GetClientRect` instead of assuming one DPI. Staging the fixture into `%TEMP%` avoids Windows network-executable warnings from the WSL UNC path; the process and uniquely named temporary directory are removed after the check.
 
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
 - At startup, the WPF shell always shows the available recognizer tags. If no `en`/`en-*` recognizer exists, it shows a prominent but non-blocking Japanese warning before the first scan, because a Japanese profile fallback can turn English into plausible-looking Han characters and full-width punctuation.
-- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, and recognize each band. The final text is the union of primary-first and band-only lines; conservative, occurrence-aware approximate matching removes OCR variations caused by band overlap while retaining repeated lines within one observation. This preserves primary-only lines and avoids extra passes on already-strong results.
+- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands and recognize each band. Frames below 8 MP retain the validated Cubic upscale up to 2×; high-resolution frames stay at 1×, and all paths obey a 16.8 MP output budget. The final text is the union of primary-first and band-only lines; conservative, occurrence-aware approximate matching removes OCR variations caused by band overlap while retaining repeated lines within one observation.
 - **Windows device validation on 2026-08-12:** for the same self-authored six-line image, `OcrResult.Text` returned one flattened line while `OcrResult.Lines` returned all six physical lines. A four-line, sub-threshold image changed from four flattened candidate blocks before the fix to individual lines after it, so union/dedup now receives line-sized inputs. Severe band-edge fragments remain separate by design when they exceed the conservative edit-distance threshold.
 - **Interpolation comparison on that six-line image:** unscaled OCR misread `DOOR` and `TWO`; Fant 2x also lost the leading word `FOLLOW`; Cubic 2x retained `DOOR` and `FOLLOW` and only misread `TWO`. The implementation therefore uses the shared Cubic transform for both full-frame and band paths; the decision was based on recognized content, with exact-line counts (4/6, 3/6, 5/6 respectively) recorded only as a secondary check.
 - The newer Windows App SDK AI Text Recognition API is not selected because Microsoft documents that it runs only on devices with an NPU, and this development machine has no detected NPU.
@@ -171,7 +183,7 @@ The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` 
 - **Phase 1.5 (superseded for final results): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification and remains available for short status/error messages. Fixed-duration result notifications were useful for the first headset test but cannot support dismiss-on-demand or long-text scrolling. The WPF view remains a parallel diagnostic renderer.
 - **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
 - **Phase 1.7 (selected after notification feedback): VRCVA-owned OpenVR result overlay.** Initialize only while SteamVR is already running and present the latest result over the scene until the user closes it or starts another scan. The panel is non-interactive by default so VRChat keeps controller input; an existing global-hotkey/OVRAS bridge toggles laser input only while the user needs scrolling or close. Closing, hiding, disconnecting, or disposing always clears interaction. The first placement is HMD-relative; wrist calibration and native input actions remain separate follow-up work.
-- **Phase 2:** validate OSCQuery-based VRChat triggering and direct SteamVR compositor capture based on measured UX.
+- **Phase 2 capture (implemented):** prefer one OpenVR compositor eye mirror with automatic window fallback. OSCQuery-based VRChat triggering remains a separate follow-up.
 
 ## 6. Implementation alternatives
 
@@ -187,8 +199,8 @@ The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` 
 
 | Variant | Capture | OCR | Privacy | Complexity | Use |
 | --- | --- | --- | --- | --- | --- |
-| Provider pending | Windows Graphics Capture | Windows OCR; translation disabled | Pixels and OCR text stay local | Medium | **Now** |
-| SteamVR-native | OpenVR compositor mirror | Windows OCR or Tesseract | Local unless cloud explicitly enabled | High | Only if desktop restore remains disruptive |
+| Provider pending | OpenVR eye mirror with window fallback | Windows OCR; translation disabled | Pixels and OCR text stay local | High | **Now** |
+| Window fallback | Windows Graphics Capture | Windows OCR | Pixels and OCR text stay local | Medium | Automatic when OpenVR is unavailable |
 | Vision cloud | Windows.Graphics.Capture | Cloud vision/LLM | Image leaves device | Low code, higher policy/cost burden | Opt-in fallback only |
 
 ## 7. Recommended architecture
@@ -196,8 +208,11 @@ The diagnostic never saves by default. Explicit `--save-eye-mirror <directory>` 
 ```mermaid
 flowchart LR
     T[Trigger<br/>button / global hotkey<br/>OVRAS controller bridge] --> P[ScanPipeline]
-    P --> C[ICaptureSource<br/>VRChat window]
-    C --> F[CapturedFrame<br/>in-memory PNG]
+    P --> C[FallbackCaptureSource]
+    C --> E[OpenVR eye mirror<br/>preferred]
+    C --> H[VRChat HWND<br/>fallback]
+    E --> F[CapturedFrame<br/>in-memory PNG]
+    H --> F
     F --> A[IAnalyzer<br/>TranslateAnalyzer]
     A --> O[AdaptiveOcrEngine<br/>full frame, then conditional bands]
     O --> W[Windows OCR]
@@ -219,9 +234,10 @@ src/
 tests/
   VrcVa.Core.Tests/
   VrcVa.Infrastructure.Tests/
+  VrcVa.Windows.Tests/
 ```
 
-The project count is deliberately small. OpenVR should initially be another renderer/trigger adapter, not a rewrite of the core pipeline.
+The project count is deliberately small. OpenVR remains a Windows adapter behind `ICaptureSource` and `IResultRenderer`, not a rewrite of the core pipeline.
 
 ### Core contracts
 
@@ -240,8 +256,8 @@ The project count is deliberately small. OpenVR should initially be another rend
 
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
-3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture copies that window's composed Direct3D surface, crops it to the DPI-aware client rectangle, and encodes one in-memory PNG before restoring the prior minimized state.
-4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
+3. Capture first tries the configured OpenVR eye while SteamVR is already running. It hides and drains the result overlay, discards one stale mirror acquisition, adopts the next, and encodes one in-memory PNG. Any OpenVR acquisition failure falls back to the `VRChat.exe` HWND path; a minimized window is restored only for this fallback.
+4. OCR first decodes the complete in-memory frame using a scale selected from root dimensions and output-pixel budget. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
 6. A composite renderer updates the WPF diagnostic UI and the VRCVA-owned OpenVR result overlay. The result overlay persists until explicit close or the next scan. It is non-interactive by default; a separate hotkey/OVRAS action temporarily enables close/scroll interaction and all hide/close/error paths clear that state. A short XSOverlay notification remains a best-effort progress/fallback channel.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
@@ -338,10 +354,13 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Keep the result overlay non-interactive until an explicit hotkey/OVRAS toggle | Always-on interaction captures controller input from VRChat; explicit temporary interaction preserves movement while retaining persistent, scrollable results |
 | 2026-08-12 | Keep OpenVR eye-mirror capture at research status | The API is feasible, but correct GPU selection, D3D11 readback, shared OpenVR lifetime, overlay exclusion, fallback, and Quest 3S validation make it a separate medium-sized vertical slice |
 | 2026-08-12 | Complete the OpenVR eye-mirror diagnostic with the left eye as the Stage 2 default candidate | Quest 3S returned 3072×3352 per eye; both eyes restored the tall sign's missing vertical content, the left kept the target nearer center, and adopted frames excluded the result overlay after a mandatory throwaway acquisition |
+| 2026-08-12 | Prefer one OpenVR eye mirror and fall back to the VRChat window | The left eye restored vertical FOV and cut measured capture-plus-OCR from about 4.17 s to 2.29 s; SteamVR is never auto-started and the retained HWND path covers OpenVR acquisition failures |
+| 2026-08-12 | Disable OCR upscaling at 8 MP and cap transformed output at 16.8 MP | Quest eye OCR fell from 4.65 s to 1.21 s with equal full-path coverage, while the lower-resolution window result remained identical; parent dimensions keep high-resolution bands at 1× |
+| 2026-08-12 | Apply `BitmapTransform` scaling once and convert crop bounds into scaled coordinates | Microsoft documents scale before crop; the previous band transform could double-scale and made middle/lower 1× crops invalid |
 
 ## 13. Official sources reviewed
 
-All sources below were checked on 2026-08-11.
+All sources below were checked on 2026-08-11 or 2026-08-12.
 
 - VRChat OSC overview and ports: <https://docs.vrchat.com/docs/osc-overview>
 - VRChat OSCQuery and multiple-receiver discovery: <https://docs.vrchat.com/docs/oscquery>
@@ -351,6 +370,7 @@ All sources below were checked on 2026-08-11.
 - Microsoft screen capture guidance: <https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture>
 - Microsoft `IGraphicsCaptureItemInterop.CreateForWindow`: <https://learn.microsoft.com/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow>
 - Microsoft Windows AI OCR guidance and NPU requirement: <https://learn.microsoft.com/en-us/windows/ai/apis/text-recognition>
+- Microsoft `BitmapTransform` scale/rotate/crop order: <https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmaptransform>
 - Microsoft `Graphics.CopyFromScreen` API: <https://learn.microsoft.com/en-us/dotnet/api/system.drawing.graphics.copyfromscreen>
 - Valve OpenVR API overview: <https://github.com/ValveSoftware/openvr/wiki/API-Documentation>
 - Valve OpenVR source/bindings, including compositor mirror texture access: <https://github.com/ValveSoftware/openvr>
