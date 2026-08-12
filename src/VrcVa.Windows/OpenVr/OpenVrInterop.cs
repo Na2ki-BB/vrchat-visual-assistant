@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
 
 namespace VrcVa.Windows.OpenVr;
@@ -11,11 +10,12 @@ internal sealed class OpenVrInterop : IDisposable
     private const uint HmdTrackedDeviceIndex = 0;
     private const int VrEventSize = 64;
 
-    private readonly IntPtr _libraryHandle;
-    private readonly ShutdownDelegate _shutdown;
+    private readonly OpenVrRuntime _runtime;
     private readonly CreateOverlayDelegate _createOverlay;
     private readonly DestroyOverlayDelegate _destroyOverlay;
     private readonly HideOverlayDelegate _hideOverlay;
+    private readonly IsOverlayVisibleDelegate _isOverlayVisible;
+    private readonly WaitFrameSyncDelegate _waitFrameSync;
     private readonly SetOverlayWidthInMetersDelegate _setOverlayWidthInMeters;
     private readonly SetOverlayTransformTrackedDeviceRelativeDelegate _setOverlayTransform;
     private readonly SetOverlayInputMethodDelegate _setOverlayInputMethod;
@@ -28,8 +28,7 @@ internal sealed class OpenVrInterop : IDisposable
     private bool _disposed;
 
     private OpenVrInterop(
-        IntPtr libraryHandle,
-        ShutdownDelegate shutdown,
+        OpenVrRuntime runtime,
         IntPtr overlayFunctionTable)
     {
         if (Marshal.SizeOf<VrEvent>() != VrEventSize)
@@ -37,29 +36,34 @@ internal sealed class OpenVrInterop : IDisposable
             throw new InvalidOperationException("The OpenVR event ABI layout is invalid.");
         }
 
-        _libraryHandle = libraryHandle;
-        _shutdown = shutdown;
-        _createOverlay = GetFunction<CreateOverlayDelegate>(overlayFunctionTable, OverlaySlot.CreateOverlay);
-        _destroyOverlay = GetFunction<DestroyOverlayDelegate>(overlayFunctionTable, OverlaySlot.DestroyOverlay);
-        _setOverlayFlag = GetFunction<SetOverlayFlagDelegate>(overlayFunctionTable, OverlaySlot.SetOverlayFlag);
-        _setOverlayWidthInMeters = GetFunction<SetOverlayWidthInMetersDelegate>(
+        _runtime = runtime;
+        _createOverlay = OpenVrRuntime.GetFunction<CreateOverlayDelegate>(overlayFunctionTable, OverlaySlot.CreateOverlay);
+        _destroyOverlay = OpenVrRuntime.GetFunction<DestroyOverlayDelegate>(overlayFunctionTable, OverlaySlot.DestroyOverlay);
+        _setOverlayFlag = OpenVrRuntime.GetFunction<SetOverlayFlagDelegate>(overlayFunctionTable, OverlaySlot.SetOverlayFlag);
+        _setOverlayWidthInMeters = OpenVrRuntime.GetFunction<SetOverlayWidthInMetersDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayWidthInMeters);
-        _setOverlayTransform = GetFunction<SetOverlayTransformTrackedDeviceRelativeDelegate>(
+        _setOverlayTransform = OpenVrRuntime.GetFunction<SetOverlayTransformTrackedDeviceRelativeDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayTransformTrackedDeviceRelative);
-        _showOverlay = GetFunction<ShowOverlayDelegate>(overlayFunctionTable, OverlaySlot.ShowOverlay);
-        _hideOverlay = GetFunction<HideOverlayDelegate>(overlayFunctionTable, OverlaySlot.HideOverlay);
-        _pollNextOverlayEvent = GetFunction<PollNextOverlayEventDelegate>(
+        _showOverlay = OpenVrRuntime.GetFunction<ShowOverlayDelegate>(overlayFunctionTable, OverlaySlot.ShowOverlay);
+        _hideOverlay = OpenVrRuntime.GetFunction<HideOverlayDelegate>(overlayFunctionTable, OverlaySlot.HideOverlay);
+        _isOverlayVisible = OpenVrRuntime.GetFunction<IsOverlayVisibleDelegate>(
+            overlayFunctionTable,
+            OverlaySlot.IsOverlayVisible);
+        _waitFrameSync = OpenVrRuntime.GetFunction<WaitFrameSyncDelegate>(
+            overlayFunctionTable,
+            OverlaySlot.WaitFrameSync);
+        _pollNextOverlayEvent = OpenVrRuntime.GetFunction<PollNextOverlayEventDelegate>(
             overlayFunctionTable,
             OverlaySlot.PollNextOverlayEvent);
-        _setOverlayInputMethod = GetFunction<SetOverlayInputMethodDelegate>(
+        _setOverlayInputMethod = OpenVrRuntime.GetFunction<SetOverlayInputMethodDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayInputMethod);
-        _setOverlayMouseScale = GetFunction<SetOverlayMouseScaleDelegate>(
+        _setOverlayMouseScale = OpenVrRuntime.GetFunction<SetOverlayMouseScaleDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayMouseScale);
-        _setOverlayRaw = GetFunction<SetOverlayRawDelegate>(
+        _setOverlayRaw = OpenVrRuntime.GetFunction<SetOverlayRawDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayRaw);
     }
@@ -67,39 +71,16 @@ internal sealed class OpenVrInterop : IDisposable
     public static bool TryCreate(out OpenVrInterop? interop)
     {
         interop = null;
-        string? libraryPath = FindRunningSteamVrLibrary();
-        if (libraryPath is null)
+        if (!OpenVrRuntime.TryAcquire(out OpenVrRuntime? runtime))
         {
             return false;
         }
 
-        IntPtr libraryHandle = IntPtr.Zero;
-        ShutdownDelegate? shutdown = null;
         OpenVrInterop? candidate = null;
         try
         {
-            libraryHandle = NativeLibrary.Load(libraryPath);
-            InitDelegate init = LoadExport<InitDelegate>(libraryHandle, "VR_InitInternal2");
-            shutdown = LoadExport<ShutdownDelegate>(libraryHandle, "VR_ShutdownInternal");
-            GetGenericInterfaceDelegate getInterface =
-                LoadExport<GetGenericInterfaceDelegate>(libraryHandle, "VR_GetGenericInterface");
-
-            EvrInitError initError = EvrInitError.None;
-            _ = init(ref initError, EvrApplicationType.Overlay, string.Empty);
-            if (initError != EvrInitError.None)
-            {
-                throw new InvalidOperationException($"OpenVR initialization failed with code {(int)initError}.");
-            }
-
-            EvrInitError interfaceError = EvrInitError.None;
-            IntPtr table = getInterface(OverlayInterface, ref interfaceError);
-            if (table == IntPtr.Zero || interfaceError != EvrInitError.None)
-            {
-                throw new InvalidOperationException(
-                    $"OpenVR overlay interface failed with code {(int)interfaceError}.");
-            }
-
-            candidate = new OpenVrInterop(libraryHandle, shutdown, table);
+            IntPtr table = runtime!.GetInterface(OverlayInterface);
+            candidate = new OpenVrInterop(runtime, table);
             candidate.CreateAndConfigureOverlay();
             interop = candidate;
             return true;
@@ -112,11 +93,7 @@ internal sealed class OpenVrInterop : IDisposable
             }
             else
             {
-                shutdown?.Invoke();
-                if (libraryHandle != IntPtr.Zero)
-                {
-                    NativeLibrary.Free(libraryHandle);
-                }
+                runtime?.Dispose();
             }
 
             throw;
@@ -159,6 +136,37 @@ internal sealed class OpenVrInterop : IDisposable
         }
 
         _ = _hideOverlay(_overlayHandle);
+    }
+
+    public bool IsVisible()
+    {
+        ThrowIfDisposed();
+        return _isOverlayVisible(_overlayHandle);
+    }
+
+    public void HideAndConfirmInvisible(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        EnsureSuccess(_hideOverlay(_overlayHandle));
+
+        Stopwatch timer = Stopwatch.StartNew();
+        while (_isOverlayVisible(_overlayHandle))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (timer.Elapsed >= TimeSpan.FromSeconds(1))
+            {
+                throw new InvalidOperationException(
+                    "The VRCVA overlay remained visible after HideOverlay.");
+            }
+
+            Thread.Sleep(5);
+        }
+    }
+
+    public void WaitFrameSync(uint timeoutMilliseconds = 1000)
+    {
+        ThrowIfDisposed();
+        EnsureSuccess(_waitFrameSync(timeoutMilliseconds));
     }
 
     public void SetInteractive(bool enabled)
@@ -204,8 +212,7 @@ internal sealed class OpenVrInterop : IDisposable
             _overlayHandle = InvalidOverlayHandle;
         }
 
-        _shutdown();
-        NativeLibrary.Free(_libraryHandle);
+        _runtime.Dispose();
     }
 
     private void CreateAndConfigureOverlay()
@@ -243,52 +250,6 @@ internal sealed class OpenVrInterop : IDisposable
     private void SetFlag(VrOverlayFlag flag, bool enabled = true) =>
         EnsureSuccess(_setOverlayFlag(_overlayHandle, flag, enabled));
 
-    private static T LoadExport<T>(IntPtr libraryHandle, string name)
-        where T : Delegate =>
-        Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(libraryHandle, name));
-
-    private static T GetFunction<T>(IntPtr functionTable, int slot)
-        where T : Delegate
-    {
-        IntPtr function = Marshal.ReadIntPtr(functionTable, slot * IntPtr.Size);
-        return Marshal.GetDelegateForFunctionPointer<T>(function);
-    }
-
-    private static string? FindRunningSteamVrLibrary()
-    {
-        foreach (Process process in Process.GetProcessesByName("vrserver"))
-        {
-            using (process)
-            {
-                try
-                {
-                    string? executable = process.MainModule?.FileName;
-                    if (executable is null)
-                    {
-                        continue;
-                    }
-
-                    string candidate = Path.Combine(
-                        Path.GetDirectoryName(executable)!,
-                        "openvr_api.dll");
-                    if (File.Exists(candidate))
-                    {
-                        return candidate;
-                    }
-                }
-                catch (Exception exception) when (
-                    exception is System.ComponentModel.Win32Exception
-                        or InvalidOperationException
-                        or NotSupportedException)
-                {
-                    // Another candidate may still be readable. No process details are logged.
-                }
-            }
-        }
-
-        return null;
-    }
-
     private static void EnsureSuccess(EvrOverlayError error)
     {
         if (error != EvrOverlayError.None)
@@ -310,25 +271,13 @@ internal sealed class OpenVrInterop : IDisposable
         public const int SetOverlayTransformTrackedDeviceRelative = 34;
         public const int ShowOverlay = 41;
         public const int HideOverlay = 42;
+        public const int IsOverlayVisible = 43;
+        public const int WaitFrameSync = 45;
         public const int PollNextOverlayEvent = 46;
         public const int SetOverlayInputMethod = 48;
         public const int SetOverlayMouseScale = 50;
         public const int SetOverlayRaw = 60;
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    private delegate IntPtr InitDelegate(
-        ref EvrInitError error,
-        EvrApplicationType applicationType,
-        [MarshalAs(UnmanagedType.LPStr)] string startupInfo);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void ShutdownDelegate();
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    private delegate IntPtr GetGenericInterfaceDelegate(
-        [MarshalAs(UnmanagedType.LPStr)] string version,
-        ref EvrInitError error);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate EvrOverlayError CreateOverlayDelegate(
@@ -364,6 +313,13 @@ internal sealed class OpenVrInterop : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool IsOverlayVisibleDelegate(ulong overlayHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate EvrOverlayError WaitFrameSyncDelegate(uint timeoutMilliseconds);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    [return: MarshalAs(UnmanagedType.I1)]
     private delegate bool PollNextOverlayEventDelegate(
         ulong overlayHandle,
         ref VrEvent overlayEvent,
@@ -386,16 +342,6 @@ internal sealed class OpenVrInterop : IDisposable
         uint width,
         uint height,
         uint bytesPerPixel);
-
-    private enum EvrApplicationType
-    {
-        Overlay = 2,
-    }
-
-    private enum EvrInitError
-    {
-        None = 0,
-    }
 
     private enum EvrOverlayError
     {
