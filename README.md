@@ -11,7 +11,7 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
-- Windows Graphics Captureで`VRChat.exe`のウィンドウサーフェスを1回だけ取得。別のPCウィンドウに覆われていても混ざらない
+- Windows Graphics Captureで`VRChat.exe`の描画領域だけを1回取得。タイトルバーや別のPCウィンドウは混ざらない
 - 最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
 - 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
@@ -225,7 +225,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
   --capture-vrchat-check
 ```
 
-成功時は寸法、PNGのバイト数、`source: windows-graphics-capture`だけを表示します。
+成功時は寸法、PNGのバイト数、`source: windows-graphics-capture-client-area`だけを表示します。
 
 明示的にキャプチャ内容を調べるときだけ、次の診断オプションでPNGを保存できます。これは通常動作では使いません。保存先の画像には画面内容が含まれるため、確認後に自分で削除してください。
 
@@ -240,7 +240,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | --- | --- | --- |
 | `CaptureTargetNotFound` | Capture | Windows版 `VRChat.exe` が起動し、通常ウィンドウがあるか |
 | 自動復元エラー | Capture | VRChatが応答しているか確認し、一度だけ手動復元して再試行 |
-| 別窓が写る | Capture | 旧GDI版です。最新版をビルド・再起動し、`--capture-vrchat-check`のsourceが`windows-graphics-capture`か確認 |
+| 別窓やタイトルバーが写る | Capture | 最新版をビルド・再起動し、`--capture-vrchat-check`のsourceが`windows-graphics-capture-client-area`か確認 |
 | 黒い/一部だけ写る | Capture | `--capture-vrchat-check`を実行し、VRChatが応答しているか、HDRを一時的に切ると変わるか確認 |
 | `OcrUnavailable` | OCR | Windowsの言語オプションにOCR機能があるか。診断コマンドが列挙する言語タグを確認 |
 | `NoTextDetected` | OCR | 通常OCRと全画面3帯の強化OCRの両方で文字を取れなかった状態。文字へ少し近づく、ミラー解像度を上げる、画像診断で同じ場面を試す |
@@ -262,7 +262,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 ## 現在の制約
 
-- 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatウィンドウ枠です。
+- 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatクライアント描画領域です。Windowsのタイトルバーと枠は除外します。
 - Windows Graphics Captureで対象ウィンドウを直接取得するため、他ウィンドウの遮蔽には依存しません。ただしVRChatを最小化した場合は描画再開のため短時間だけ自動復元します。
 - 現在のVR表示はXSOverlayの一時通知です。常設パネルや手首HUDではなく、長文は700文字で省略します。
 - VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
