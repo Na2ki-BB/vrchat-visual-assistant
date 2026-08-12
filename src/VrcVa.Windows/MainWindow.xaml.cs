@@ -131,13 +131,16 @@ public partial class MainWindow : Window
     private void MainWindow_Loaded(object sender, RoutedEventArgs eventArgs)
     {
         IReadOnlyList<string> languageTags;
+        string? selectedRecognizerTag;
         try
         {
             languageTags = WindowsOcrEngine.GetAvailableLanguageTags();
+            selectedRecognizerTag = WindowsOcrEngine.GetSelectedRecognizerLanguageTag();
         }
         catch (Exception exception)
         {
             languageTags = [];
+            selectedRecognizerTag = null;
             _logger.Error(
                 "startup.ocr_language_query_failed",
                 Guid.Empty,
@@ -150,7 +153,34 @@ public partial class MainWindow : Window
             ? "OCR言語: 検出できません"
             : $"OCR言語: {string.Join(", ", languageTags)}";
 
-        StatusText.Text = _startupWarning ?? "準備完了。VRChatを表示してSCANしてください。";
+        bool hasEnglishRecognizer = WindowsOcrEngine.HasEnglishRecognizer(languageTags);
+        bool usesEnglishRecognizer = selectedRecognizerTag is not null
+            && WindowsOcrEngine.HasEnglishRecognizer([selectedRecognizerTag]);
+        string selectedRecognizerDisplay = selectedRecognizerTag ?? "検出できません";
+        if (!usesEnglishRecognizer && selectedRecognizerTag is not null)
+        {
+            selectedRecognizerDisplay += "（英語用の代替）";
+        }
+
+        string availableRecognizerDisplay = languageTags.Count == 0
+            ? "検出できません"
+            : string.Join(", ", languageTags);
+        OcrLanguageStatusText.Text =
+            $"使用するOCR認識器: {selectedRecognizerDisplay} / 利用可能: {availableRecognizerDisplay}";
+
+        bool englishOcrReady = hasEnglishRecognizer && usesEnglishRecognizer;
+        OcrLanguageWarningBorder.Visibility = englishOcrReady
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        OcrLanguageWarningText.Text = languageTags.Count == 0
+            ? "Windows OCRの認識器を確認できませんでした。"
+                + WindowsOcrEngine.EnglishRecognizerInstallationSteps
+            : WindowsOcrEngine.EnglishRecognizerMissingWarning;
+
+        StatusText.Text = _startupWarning
+            ?? (englishOcrReady
+                ? "準備完了。VRChatを表示してSCANしてください。"
+                : "英語OCRが未導入です。上の警告を確認してください。SCANは引き続き使用できます。");
         UpdateEnvironmentDetails();
     }
 

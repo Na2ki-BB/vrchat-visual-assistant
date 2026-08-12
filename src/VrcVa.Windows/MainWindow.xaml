@@ -3,13 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="VRChat Visual Assistant"
         Width="780"
-        Height="780"
+        Height="900"
         MinWidth="620"
-        MinHeight="640"
+        MinHeight="760"
         Background="{StaticResource WindowBackground}"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="22">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -50,6 +51,39 @@
             BorderBrush="#3B4850"
             BorderThickness="1"
             CornerRadius="6">
+      <StackPanel>
+        <TextBlock x:Name="OcrLanguageStatusText"
+                   FontWeight="SemiBold"
+                   Text="使用するOCR認識器: 確認中 / 利用可能: 確認中" />
+        <Border x:Name="OcrLanguageWarningBorder"
+                Margin="0,9,0,0"
+                Padding="10"
+                Background="#3A1919"
+                BorderBrush="#E26666"
+                BorderThickness="2"
+                CornerRadius="5"
+                Visibility="Collapsed">
+          <StackPanel>
+            <TextBlock FontSize="16"
+                       FontWeight="Bold"
+                       Foreground="#FF9B9B"
+                       Text="英語OCRが未導入です" />
+            <TextBlock x:Name="OcrLanguageWarningText"
+                       Margin="0,5,0,0"
+                       Foreground="#FFE2E2"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </Border>
+
+    <Border Grid.Row="3"
+            Margin="0,12,0,0"
+            Padding="12"
+            Background="#1C252B"
+            BorderBrush="#3B4850"
+            BorderThickness="1"
+            CornerRadius="6">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
@@ -76,7 +110,7 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="3" Margin="0,12,0,12">
+    <Grid Grid.Row="4" Margin="0,12,0,12">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
@@ -109,7 +143,7 @@
                 Content="常に手前" />
     </Grid>
 
-    <GroupBox Grid.Row="4"
+    <GroupBox Grid.Row="5"
               Margin="0,0,0,12"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
@@ -121,7 +155,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <GroupBox Grid.Row="5"
+    <GroupBox Grid.Row="6"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
               Header="日本語訳">
@@ -133,7 +167,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <Grid Grid.Row="6" Margin="0,14,0,0">
+    <Grid Grid.Row="7" Margin="0,14,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
