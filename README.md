@@ -52,11 +52,30 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 - .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
 - PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
 - 翻訳バックエンドは未選定。現段階ではキャプチャとOCRだけを無料で検証可能
-- WindowsのOCR言語機能（この開発PCでは日本語OCRだけでも英語fixtureを認識できましたが、英語OCR追加を推奨）
+- Windowsの英語OCR言語機能。未導入でもアプリは動作しますが、日本語認識器が英語を漢字や全角記号へ誤認識し、結果がほぼ読めなくなる場合があります
 - VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
 - VRコントローラーからSCANする暫定経路にはOVR Advanced Settings（キーボードなら不要）
 
 このリポジトリの確認環境は、Windows build 26200 + WSL2 Ubuntu 24.04.4 + Windows .NET SDK 8.0.422です。Visual Studioは不要です。
+
+### 英語OCR言語機能を導入する
+
+英語の看板を読むには、Windows側に英語の文字認識（OCR）が必要です。Windowsの表示言語を英語へ変更する必要はありません。
+
+1. Windowsの`設定`を開きます。
+2. `時刻と言語` → `言語と地域`を開きます。
+3. `English`を追加します。
+4. Englishの`言語のオプション`を開きます。
+5. `オプション機能`から`文字認識 (OCR)`を追加します。
+6. VRChat Visual Assistantを再起動し、画面の`利用可能なOCR認識器`に`en`または`en-US`などが出ることを確認します。
+
+現在Windows OCRが認識している言語タグは、Windows PowerShellからも確認できます。管理者権限は不要です。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-ocr-languages.ps1
+```
+
+PowerShellからのインストール方法はWindowsの版や導入状態に依存し、管理者権限も必要になるため、本READMEでは未検証のCapability名を指定して自動導入しません。
 
 ## ビルドとテスト
 
@@ -233,6 +252,12 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
   --capture-vrchat-ocr --save-capture C:\Temp\vrcva-debug.png
 ```
+
+## 英語の看板なのに結果に漢字が混ざる
+
+英語OCR言語機能が未導入で、日本語認識器が英語を読んでいる可能性が高い症状です。例えば英単語の途中に`代`や`取`などの漢字、`「`や`・`などの全角記号が混ざります。テキスト領域の検出やSCAN自体は成功扱いになるため、失敗コードは表示されません。
+
+アプリ上部の`使用するOCR認識器 / 利用可能`を確認してください。`ja`や`ja-JP`だけで、`en`または`en-*`がなければ、上の「英語OCR言語機能を導入する」の手順で文字認識（OCR）を追加し、アプリを再起動します。Windowsの表示言語を英語へ変更する必要はありません。日本語OCRを意図して使う場合は、警告が表示されたままでもSCANを続けられます。
 
 ## 失敗時の切り分け
 
