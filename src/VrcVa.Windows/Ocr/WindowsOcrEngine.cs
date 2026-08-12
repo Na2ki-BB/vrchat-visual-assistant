@@ -8,6 +8,15 @@ namespace VrcVa.Windows.Ocr;
 
 internal sealed class WindowsOcrEngine : IOcrEngine
 {
+    internal const string EnglishRecognizerInstallationSteps =
+        "設定 → 時刻と言語 → 言語と地域 → Englishを追加 → 言語のオプション → "
+        + "オプション機能 → 文字認識 (OCR)。Windowsの表示言語を英語に変更する必要はありません。";
+
+    internal const string EnglishRecognizerMissingWarning =
+        "英語OCR言語が未導入です。英語を日本語認識器で読むため、結果に存在しない漢字や全角記号が混ざり、"
+        + "ほぼ読めない場合があります。"
+        + EnglishRecognizerInstallationSteps;
+
     public async Task<OcrOutput> RecognizeAsync(
         CapturedFrame frame,
         CancellationToken cancellationToken)
@@ -76,17 +85,22 @@ internal sealed class WindowsOcrEngine : IOcrEngine
             .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+    internal static bool HasEnglishRecognizer(IEnumerable<string> languageTags) =>
+        languageTags.Any(IsEnglishLanguageTag);
+
+    internal static string? GetSelectedRecognizerLanguageTag()
+    {
+        OcrEngine? engine = TryCreateEnglishEngine()
+            ?? OcrEngine.TryCreateFromUserProfileLanguages();
+        return engine?.RecognizerLanguage.LanguageTag;
+    }
+
     private static (OcrEngine Engine, string? Warning) CreateEngine()
     {
-        Language? english = OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(
-            language => language.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase));
-        if (english is not null)
+        OcrEngine? englishEngine = TryCreateEnglishEngine();
+        if (englishEngine is not null)
         {
-            OcrEngine? englishEngine = OcrEngine.TryCreateFromLanguage(english);
-            if (englishEngine is not null)
-            {
-                return (englishEngine, null);
-            }
+            return (englishEngine, null);
         }
 
         OcrEngine? fallback = OcrEngine.TryCreateFromUserProfileLanguages();
@@ -94,7 +108,8 @@ internal sealed class WindowsOcrEngine : IOcrEngine
         {
             return (
                 fallback,
-                $"英語OCR言語が未導入のため {fallback.RecognizerLanguage.LanguageTag} を使用しました。精度が低い場合はWindowsの英語OCR機能を追加してください。");
+                $"{fallback.RecognizerLanguage.LanguageTag} 認識器を代わりに使用しました。"
+                + EnglishRecognizerMissingWarning);
         }
 
         throw new ScanException(
@@ -102,5 +117,17 @@ internal sealed class WindowsOcrEngine : IOcrEngine
             ScanStage.Ocr,
             "利用可能なWindows OCR言語がありません。Windowsの言語オプションでOCR機能を追加してください。");
     }
-}
 
+    private static OcrEngine? TryCreateEnglishEngine()
+    {
+        Language? english = OcrEngine.AvailableRecognizerLanguages.FirstOrDefault(
+            language => IsEnglishLanguageTag(language.LanguageTag));
+        return english is null
+            ? null
+            : OcrEngine.TryCreateFromLanguage(english);
+    }
+
+    private static bool IsEnglishLanguageTag(string languageTag) =>
+        languageTag.Equals("en", StringComparison.OrdinalIgnoreCase)
+        || languageTag.StartsWith("en-", StringComparison.OrdinalIgnoreCase);
+}
