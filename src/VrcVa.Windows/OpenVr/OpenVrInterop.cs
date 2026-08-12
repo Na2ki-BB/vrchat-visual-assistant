@@ -9,6 +9,7 @@ internal sealed class OpenVrInterop : IDisposable
     private const string OverlayInterface = "FnTable:IVROverlay_027";
     private const ulong InvalidOverlayHandle = 0;
     private const uint HmdTrackedDeviceIndex = 0;
+    private const int VrEventSize = 64;
 
     private readonly IntPtr _libraryHandle;
     private readonly ShutdownDelegate _shutdown;
@@ -31,6 +32,11 @@ internal sealed class OpenVrInterop : IDisposable
         ShutdownDelegate shutdown,
         IntPtr overlayFunctionTable)
     {
+        if (Marshal.SizeOf<VrEvent>() != VrEventSize)
+        {
+            throw new InvalidOperationException("The OpenVR event ABI layout is invalid.");
+        }
+
         _libraryHandle = libraryHandle;
         _shutdown = shutdown;
         _createOverlay = GetFunction<CreateOverlayDelegate>(overlayFunctionTable, OverlaySlot.CreateOverlay);
@@ -162,7 +168,7 @@ internal sealed class OpenVrInterop : IDisposable
         if (!_pollNextOverlayEvent(
                 _overlayHandle,
                 ref nativeEvent,
-                checked((uint)Marshal.SizeOf<VrEvent>())))
+                VrEventSize))
         {
             overlayEvent = default;
             return false;
@@ -440,12 +446,24 @@ internal sealed class OpenVrInterop : IDisposable
         public float Y = y;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    // On 64-bit Windows, VREvent_Data_t is 8-byte aligned because the native
+    // union includes uint64 members. The payload therefore starts at byte 16,
+    // and the complete VREvent_t is 64 bytes. Using a sequential managed union
+    // containing only the mouse/scroll members incorrectly produces 60 bytes;
+    // SteamVR then rejects PollNextOverlayEvent without returning any events.
+    [StructLayout(LayoutKind.Explicit, Size = VrEventSize)]
     private struct VrEvent
     {
+        [FieldOffset(0)]
         public uint EventType;
+
+        [FieldOffset(4)]
         public uint TrackedDeviceIndex;
+
+        [FieldOffset(8)]
         public float EventAgeSeconds;
+
+        [FieldOffset(16)]
         public VrEventData Data;
     }
 
