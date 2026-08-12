@@ -105,7 +105,7 @@ internal sealed class SteamVrResultPanel : IDisposable
                         Hide();
                         return;
                     case OpenVrEvent.MouseButtonDown
-                        when overlayEvent.MouseButton == 0
+                        when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton
                             && _texture.IsCloseButton(
                                 overlayEvent.MouseX,
                                 overlayEvent.MouseY):

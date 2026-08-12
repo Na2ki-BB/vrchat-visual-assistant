@@ -504,6 +504,7 @@ internal readonly record struct OpenVrEvent(
     uint MouseButton,
     float ScrollY)
 {
+    public const uint LeftMouseButton = 1;
     public const uint MouseButtonDown = 301;
     public const uint ScrollDiscrete = 305;
     public const uint ScrollSmooth = 309;
