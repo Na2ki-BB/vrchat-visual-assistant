@@ -2,21 +2,24 @@
 
 VRChat のデスクトップミラーに見えている英語を、明示的な SCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 1.5の実機改善中** です。キャプチャ、OCR、XSOverlay通知は実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首HUDとVRChat OSCトリガーは後続です。
+現在は **Phase 1.7の実機改善中** です。キャプチャ、OCR、操作可能なSteamVR結果パネルは実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首追従とVRChat OSCトリガーは後続です。
 
-確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。現在は小さなXSOverlay通知だけを表示します。
+確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
 > 非公式プロジェクトです。VRChat Inc.、Valve Corporation、OpenAIの承認・提携を示すものではありません。
 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
-- Windows Graphics Captureで`VRChat.exe`のウィンドウサーフェスを1回だけ取得。別のPCウィンドウに覆われていても混ざらない
+- 結果パネルは既定で非インタラクティブ。`Ctrl+Shift+I`またはOVRAS操作でレーザー操作をON/OFF
+- Windows Graphics Captureで`VRChat.exe`の描画領域だけを1回取得。タイトルバーや別のPCウィンドウは混ざらない
 - 最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
 - 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
-- 約1秒のSCAN中通知と、OCR/翻訳結果または失敗段階をXSOverlay通知としてVR内表示
+- 約1秒のSCAN中通知と失敗段階をXSOverlay通知としてVR内表示
+- OCR/翻訳結果をSteamVR内の操作可能なパネルへ表示し、閉じるまで保持
+- 長い結果をVRコントローラーで上下スクロール
 - OpenAI利用時は`Ctrl+Shift+G`、またはOVR Advanced Settingsに割り当てたVR操作で`GPT-5.4 nano`と`GPT-5.6 Luna`を切り替え
 - 英語OCR、翻訳、処理時間、失敗段階、相関IDをWPF画面に表示
 - 任意のローカル画像からOCR/翻訳を診断
@@ -52,11 +55,30 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 - .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
 - PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
 - 翻訳バックエンドは未選定。現段階ではキャプチャとOCRだけを無料で検証可能
-- WindowsのOCR言語機能（この開発PCでは日本語OCRだけでも英語fixtureを認識できましたが、英語OCR追加を推奨）
+- Windowsの英語OCR言語機能。未導入でもアプリは動作しますが、日本語認識器が英語を漢字や全角記号へ誤認識し、結果がほぼ読めなくなる場合があります
 - VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
 - VRコントローラーからSCANする暫定経路にはOVR Advanced Settings（キーボードなら不要）
 
 このリポジトリの確認環境は、Windows build 26200 + WSL2 Ubuntu 24.04.4 + Windows .NET SDK 8.0.422です。Visual Studioは不要です。
+
+### 英語OCR言語機能を導入する
+
+英語の看板を読むには、Windows側に英語の文字認識（OCR）が必要です。Windowsの表示言語を英語へ変更する必要はありません。
+
+1. Windowsの`設定`を開きます。
+2. `時刻と言語` → `言語と地域`を開きます。
+3. `English`を追加します。
+4. Englishの`言語のオプション`を開きます。
+5. `オプション機能`から`文字認識 (OCR)`を追加します。
+6. VRChat Visual Assistantを再起動し、画面の`利用可能なOCR認識器`に`en`または`en-US`などが出ることを確認します。
+
+現在Windows OCRが認識している言語タグは、Windows PowerShellからも確認できます。管理者権限は不要です。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-ocr-languages.ps1
+```
+
+PowerShellからのインストール方法はWindowsの版や導入状態に依存し、管理者権限も必要になるため、本READMEでは未検証のCapability名を指定して自動導入しません。
 
 ## ビルドとテスト
 
@@ -135,19 +157,30 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 2. VRChat Visual Assistantを起動します。
 3. アプリのデスクトップ窓はそのままでも、最小化しても構いません。VRChat窓と重なってもキャプチャへ混ざりません。
 4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
-5. XSOverlay起動中は、約1秒の「SCAN中…」に続いて結果がVR内通知で表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
+5. XSOverlay起動中は約1秒の「SCAN中…」が表示され、その後に結果がVRCVAのSteamVRパネルへ表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
+6. 結果は自動では消えません。コントローラーでスクロールし、読み終えたら右上の「閉じる」を選びます。次のSCANを始めると古い結果は閉じます。
 
 SCAN中もVRCVAの窓は消えたり再表示されたりしません。対象ウィンドウを直接取得するため、VRChatを前面化する必要もありません。
 
-## Meta Quest 3S + XSOverlayでVR内通知を使う
+## Meta Quest 3S + SteamVRで結果パネルを使う
 
-**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。VRCVAはXSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ、短い進行通知と結果だけを送ります。
+**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。結果パネルはVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ送るのは、短い進行通知とエラーだけです。
 
 1. Quest 3SをPCVR接続し、SteamVR、XSOverlay、VRChat、VRChat Visual Assistantを起動します。
 2. `Ctrl+Shift+T`を1回押します。
 3. 約1秒の「SCAN中…」に続いて「OCR結果（翻訳未設定）」または「日本語訳」が出ることを確認します。
 
-開始通知は結果を待たせないよう1秒・小型です。結果は12秒、エラーは15秒表示されます。XSOverlayが終了していてもSCANは失敗せず、結果はデスクトップ窓に残ります。通知本文は最大700文字です。
+開始通知は結果を待たせないよう1秒・小型です。結果パネルは閉じるまで残り、長文を省略しません。SteamVRパネルを初期化できない場合もSCANは失敗せず、結果はデスクトップ窓に残り、XSOverlayが起動中ならエラー通知を出します。
+
+### 結果パネルだけを診断する
+
+SteamVRを起動した状態で、Windows PowerShellから次を実行します。固定ダミー文だけを使い、キャプチャ、OCR、翻訳、外部API送信は行いません。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --steamvr-overlay-check
+```
+
+ヘッドセット内でパネルを上下にスクロールし、右上の「閉じる」を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
 
 ### 一度だけ: QuestコントローラーへSCANを割り当てる
 
@@ -160,7 +193,7 @@ SCAN中もVRCVAの窓は消えたり再表示されたりしません。対象�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1
 ```
 
-3. 表示内容を確認後、バックアップ付きでShortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
+3. 表示内容を確認後、バックアップ付きでShortcut Oneを結果パネル操作、Shortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1 -Apply
@@ -173,11 +206,12 @@ http://127.0.0.1:27062/dashboard/controllerbinding.html?desktop=1&app=steam.over
 ```
 
 5. `OVR Advanced Settings`の現在のバインドを編集し、`Misc`アクションへ進みます。
-6. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
-7. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
-8. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
+6. 結果パネルの操作切替には`KeyboardOne`（内部出力`/actions/misc/in/keyboardone`）を未使用の操作へ割り当てます。結果は既定で非インタラクティブなので、表示したままVRChat内を移動できます。読む位置を動かす、または閉じるときだけ1回押してレーザー操作をONにし、読み終わったらもう1回押してOFFへ戻します。パネルを閉じた場合も自動的にOFFへ戻ります。
+7. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
+8. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
+9. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
 
-OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の2値だけを変更し、同じフォルダーに日時付きバックアップを作ります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
+OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の3値だけを変更し、同じフォルダーに日時付きバックアップを作ります。この実機では変更前の`KeyboardOne`が`Ctrl+Shift+M`なので、`-Apply`によりVRCVA用の`Ctrl+Shift+I`へ置き換わります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
 
 ### 設定用環境変数
 
@@ -189,6 +223,7 @@ OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
 | `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
+| `VRCVA_PANEL_INTERACTION_HOTKEY` | `Ctrl+Shift+I` | 結果パネルのレーザー操作をON/OFFするグローバルホットキー |
 | `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 
 例:
@@ -225,7 +260,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
   --capture-vrchat-check
 ```
 
-成功時は寸法、PNGのバイト数、`source: windows-graphics-capture`だけを表示します。
+成功時は寸法、PNGのバイト数、`source: windows-graphics-capture-client-area`だけを表示します。
 
 明示的にキャプチャ内容を調べるときだけ、次の診断オプションでPNGを保存できます。これは通常動作では使いません。保存先の画像には画面内容が含まれるため、確認後に自分で削除してください。
 
@@ -234,13 +269,19 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
   --capture-vrchat-ocr --save-capture C:\Temp\vrcva-debug.png
 ```
 
+## 英語の看板なのに結果に漢字が混ざる
+
+英語OCR言語機能が未導入で、日本語認識器が英語を読んでいる可能性が高い症状です。例えば英単語の途中に`代`や`取`などの漢字、`「`や`・`などの全角記号が混ざります。テキスト領域の検出やSCAN自体は成功扱いになるため、失敗コードは表示されません。
+
+アプリ上部の`使用するOCR認識器 / 利用可能`を確認してください。`ja`や`ja-JP`だけで、`en`または`en-*`がなければ、上の「英語OCR言語機能を導入する」の手順で文字認識（OCR）を追加し、アプリを再起動します。Windowsの表示言語を英語へ変更する必要はありません。日本語OCRを意図して使う場合は、警告が表示されたままでもSCANを続けられます。
+
 ## 失敗時の切り分け
 
 | 表示/症状 | 段階 | 確認すること |
 | --- | --- | --- |
 | `CaptureTargetNotFound` | Capture | Windows版 `VRChat.exe` が起動し、通常ウィンドウがあるか |
 | 自動復元エラー | Capture | VRChatが応答しているか確認し、一度だけ手動復元して再試行 |
-| 別窓が写る | Capture | 旧GDI版です。最新版をビルド・再起動し、`--capture-vrchat-check`のsourceが`windows-graphics-capture`か確認 |
+| 別窓やタイトルバーが写る | Capture | 最新版をビルド・再起動し、`--capture-vrchat-check`のsourceが`windows-graphics-capture-client-area`か確認 |
 | 黒い/一部だけ写る | Capture | `--capture-vrchat-check`を実行し、VRChatが応答しているか、HDRを一時的に切ると変わるか確認 |
 | `OcrUnavailable` | OCR | Windowsの言語オプションにOCR機能があるか。診断コマンドが列挙する言語タグを確認 |
 | `NoTextDetected` | OCR | 通常OCRと全画面3帯の強化OCRの両方で文字を取れなかった状態。文字へ少し近づく、ミラー解像度を上げる、画像診断で同じ場面を試す |
@@ -250,6 +291,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | タイムアウト | Translation | ネットワークと `VRCVA_OPENAI_TIMEOUT_SECONDS` |
 | ホットキー登録失敗 | Trigger | 他アプリとの競合。`VRCVA_HOTKEY` を変更して再起動 |
 | XSOverlay通知が出ない | Rendering | XSOverlayが起動中か確認。Window Captureは不要。デスクトップ窓に結果が出るならSCAN自体は成功 |
+| SteamVR結果パネルが出ない | Rendering | SteamVRを先に起動し、上の`--steamvr-overlay-check`を実行。失敗しても結果はデスクトップ窓に残る |
+| 結果パネルを操作できない | Rendering | `--steamvr-overlay-check`でスクロールと「閉じる」を分離確認。SteamVR Dashboardのコントローラーポインターが他パネルで反応するかも確認 |
+| 結果パネル表示中にVRChatを操作できない | Rendering | `Ctrl+Shift+I`またはOVRASの`KeyboardOne`をもう一度押し、結果パネル操作をOFFにする。パネル自体は閉じずに表示を続けます |
 | OVRAS操作が反応しない | Trigger | 補助スクリプト適用後にSteamVRを再起動したか、Shortcut Twoをコントローラーへバインドしたか |
 
 ログは次にあります。
@@ -262,9 +306,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 ## 現在の制約
 
-- 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatウィンドウ枠です。
+- 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatクライアント描画領域です。Windowsのタイトルバーと枠は除外します。
 - Windows Graphics Captureで対象ウィンドウを直接取得するため、他ウィンドウの遮蔽には依存しません。ただしVRChatを最小化した場合は描画再開のため短時間だけ自動復元します。
-- 現在のVR表示はXSOverlayの一時通知です。常設パネルや手首HUDではなく、長文は700文字で省略します。
+- 現在のVR結果表示はHMD相対のSteamVRパネルです。利用者が閉じるか次のSCANで置き換えるまで保持します。既定ではVRChat操作を妨げない非インタラクティブ表示で、`Ctrl+Shift+I`またはOVRASの`KeyboardOne`を押した間だけスクロール・閉じる操作が可能です。手首追従位置の調整はまだ実装していません。
 - VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。

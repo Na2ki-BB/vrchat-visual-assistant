@@ -51,7 +51,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 4. The assistant captures the VRChat desktop window frame once. If it was minimized, the app restores it only for capture and returns it to minimized state afterward.
 5. Local OCR extracts text.
 6. With no provider, OCR text is the successful local-only result. A configured translation provider instead translates it to Japanese.
-7. The result is sent to both the desktop diagnostic view and a compact XSOverlay notification.
+7. The result is sent to the desktop diagnostic view and the persistent OpenVR result panel. XSOverlay carries only short progress/fallback notices.
 
 ### Operational use cases
 
@@ -82,6 +82,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - Cancellation/single-flight behavior so repeated triggers cannot create request storms
 - Privacy-conscious file logging without captured images, OCR text, translations, or secrets
 - Best-effort localhost XSOverlay notifications for progress, OCR/translation result, and failure stage
+- Persistent HMD-relative OpenVR result panel with explicit interaction toggle, scrolling, and close
 - Automatic restore/capture/re-minimize behavior when the VRChat desktop window was minimized
 - Unit tests for the platform-neutral pipeline and HTTP translation response handling
 - Windows CI build/test and public-repository hygiene
@@ -90,7 +91,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 - DLL injection, memory reading, hooks inside VRChat, client modification, or anti-cheat interaction
 - Continuous capture, recording, passive monitoring, automatic image upload, or telemetry
-- SteamVR overlay or wrist-relative HUD
+- Wrist-relative HUD placement
 - Native SteamVR controller action bindings
 - Avatar package/Unity asset generation
 - OCR bounding-box selection UI, perspective correction, or advanced preprocessing
@@ -110,15 +111,32 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 ### Capture
 
-- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Desktop windows in front of VRChat are not part of that surface.
+- **Current: capture the VRChat HWND with Windows Graphics Capture.** `IGraphicsCaptureItemInterop.CreateForWindow` targets the window's composed surface, and a free-threaded Direct3D11 frame pool returns one in-memory frame. Before encoding, the frame is cropped to the Win32 client rectangle so the Windows title bar is not sent to OCR. Desktop windows in front of VRChat are not part of that surface.
 - When VRChat is minimized, VRCVA temporarily restores it without forcing it to the foreground, waits for rendering, captures, and returns it to the minimized state. The brief restore can still be visible on the PC monitor. Protected content and some GPU/driver failures may still return an unusable frame; there is deliberately no silent screen-coordinate fallback.
 - **Optional later path:** Valve OpenVR compositor mirror access (`GetMirrorTextureD3D11`) could capture an eye texture without restoring the desktop window. It is no longer required merely to solve occlusion, and should be attempted only if restore behavior remains materially disruptive.
 - The MVP captures the desktop mirror, not the headset compositor's independent eye texture. This is intentional and should be tested against the user's VRChat mirror configuration.
 
+#### OpenVR compositor eye-mirror feasibility (research only; not implemented)
+
+The path is technically feasible on the current Windows + SteamVR architecture, but it is a medium-sized capture backend rather than a small change to `OpenVrInterop`.
+
+- Valve's current `IVRCompositor_029` exposes `GetMirrorTextureD3D11(Eye_Left/Eye_Right, deviceOrResource, shaderResourceView)` and describes the result as an undistorted composited image for one eye. The returned view must be released with `ReleaseMirrorTextureD3D11`, not ordinary COM `Release`.
+- The D3D11 device must use the compositor's GPU. Resolve it through `IVRSystem.GetOutputDevice(TextureType_DirectX)` (adapter LUID; `GetDXGIOutputInfo` is the older index path), create the D3D11 device on that adapter, copy the mirror resource to a CPU-readable staging texture, and convert/encode it into the existing in-memory `CapturedFrame` boundary.
+- Start with one configurable eye and compare left/right on Quest 3S before choosing a default. Stereo stitching would add cost and parallax artifacts and is not required for the first vertical slice.
+- Because Valve calls this a *composited* eye image, our result overlay may be present in the mirror. This is an inference from the official API wording and must be confirmed on-device. The capture contract must execute `HideOverlay` first, verify `IsOverlayVisible == false`, then cross at least one compositor boundary with `WaitFrameSync` before calling `GetMirrorTextureD3D11`. The existing Trigger-stage hide occurs before Capture and is the correct ordering, but the future backend must make this synchronization an explicit invariant and test that a distinctive synthetic result panel never appears in the captured frame.
+- Introduce a `FallbackCaptureSource`: try the compositor source only while SteamVR and the required interfaces are already available; on initialization/interface/device/copy failure, fall back to the existing `VrChatWindowCaptureSource`. Do not launch SteamVR as a side effect. Cancellation and privacy semantics remain one explicit in-memory capture with no automatic file output.
+- `VR_Init`/`VR_ShutdownInternal` ownership must be shared or reference-counted. The current result panel owns one OpenVR lifetime; a second independent capture lifetime could shut the runtime down underneath the renderer.
+- Estimated implementation size: 4–7 production files plus diagnostics/tests, roughly 350–650 lines. Estimate 2–4 engineering days for interop, D3D11 readback, fallback, and automated coverage, plus a separate Quest 3S device-validation session for FOV, eye choice, overlay exclusion, latency, and GPU impact.
+
+Required official APIs: `IVRSystem.GetOutputDevice` (or legacy `GetDXGIOutputInfo`), `IVRCompositor.GetMirrorTextureD3D11`, `IVRCompositor.ReleaseMirrorTextureD3D11`, `IVROverlay.HideOverlay`, `IVROverlay.IsOverlayVisible`, and `IVROverlay.WaitFrameSync`.
+
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
-- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, recognize each band, remove duplicate lines, and use the enhanced candidate only when it scores materially better. This preserves the one-action UX for long text outside the gaze center while avoiding extra passes on already-strong results.
+- At startup, the WPF shell always shows the available recognizer tags. If no `en`/`en-*` recognizer exists, it shows a prominent but non-blocking Japanese warning before the first scan, because a Japanese profile fallback can turn English into plausible-looking Han characters and full-width punctuation.
+- **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, and recognize each band. The final text is the union of primary-first and band-only lines; conservative, occurrence-aware approximate matching removes OCR variations caused by band overlap while retaining repeated lines within one observation. This preserves primary-only lines and avoids extra passes on already-strong results.
+- **Windows device validation on 2026-08-12:** for the same self-authored six-line image, `OcrResult.Text` returned one flattened line while `OcrResult.Lines` returned all six physical lines. A four-line, sub-threshold image changed from four flattened candidate blocks before the fix to individual lines after it, so union/dedup now receives line-sized inputs. Severe band-edge fragments remain separate by design when they exceed the conservative edit-distance threshold.
+- **Interpolation comparison on that six-line image:** unscaled OCR misread `DOOR` and `TWO`; Fant 2x also lost the leading word `FOLLOW`; Cubic 2x retained `DOOR` and `FOLLOW` and only misread `TWO`. The implementation therefore uses the shared Cubic transform for both full-frame and band paths; the decision was based on recognized content, with exact-line counts (4/6, 3/6, 5/6 respectively) recorded only as a secondary check.
 - The newer Windows App SDK AI Text Recognition API is not selected because Microsoft documents that it runs only on devices with an NPU, and this development machine has no detected NPU.
 - A Tesseract backend remains a viable plug-in if Windows OCR accuracy is insufficient. It adds a native engine, trained-data distribution, license inventory, and preprocessing work.
 - A cloud Vision OCR backend may improve difficult in-world text, but it would upload the captured image and therefore must be an explicit opt-in provider with a clear data boundary.
@@ -136,10 +154,10 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### Renderer
 
 - **Phase 1:** ordinary WPF window. This keeps full source text, translation, timing, and errors visible during development.
-- **Phase 1.5 (selected after device feedback): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification, then the final text or failure to the installed XSOverlay. The former 12-second start notification queued and delayed the result despite sub-second processing. The WPF view remains a parallel diagnostic renderer.
+- **Phase 1.5 (superseded for final results): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification and remains available for short status/error messages. Fixed-duration result notifications were useful for the first headset test but cannot support dismiss-on-demand or long-text scrolling. The WPF view remains a parallel diagnostic renderer.
 - **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
+- **Phase 1.7 (selected after notification feedback): VRCVA-owned OpenVR result overlay.** Initialize only while SteamVR is already running and present the latest result over the scene until the user closes it or starts another scan. The panel is non-interactive by default so VRChat keeps controller input; an existing global-hotkey/OVRAS bridge toggles laser input only while the user needs scrolling or close. Closing, hiding, disconnecting, or disposing always clears interaction. The first placement is HMD-relative; wrist calibration and native input actions remain separate follow-up work.
 - **Phase 2:** validate OSCQuery-based VRChat triggering and direct SteamVR compositor capture based on measured UX.
-- **Phase 3 fallback:** implement a custom OpenVR overlay only if XSOverlay cannot provide acceptable placement or interaction. Valve's `IVROverlay` supports absolute or tracked-device-relative transforms.
 
 ## 6. Implementation alternatives
 
@@ -172,7 +190,8 @@ flowchart LR
     A --> X[ITextTranslator<br/>OpenAI opt-in]
     A --> N[OCR-only result<br/>default]
     A --> R[AnalysisResult]
-    R --> V[Composite renderer<br/>WPF + XSOverlay notification]
+    R --> V[Composite renderer<br/>WPF + OpenVR result overlay]
+    P --> S[XSOverlay status notification<br/>SCAN start / fallback error]
     P -. stage metadata only .-> L[Privacy-safe log]
 ```
 
@@ -207,10 +226,10 @@ The project count is deliberately small. OpenVR should initially be another rend
 
 1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
-3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture then copies that window's composed Direct3D surface into an in-memory PNG before restoring the prior minimized state.
-4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; temporary band buffers are disposed immediately. The better normalized result continues, while an empty result remains a typed, user-actionable failure.
+3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture copies that window's composed Direct3D surface, crops it to the DPI-aware client rectangle, and encodes one in-memory PNG before restoring the prior minimized state.
+4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
-6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
+6. A composite renderer updates the WPF diagnostic UI and the VRCVA-owned OpenVR result overlay. The result overlay persists until explicit close or the next scan. It is non-interactive by default; a separate hotkey/OVRAS action temporarily enables close/scroll interaction and all hide/close/error paths clear that state. A short XSOverlay notification remains a best-effort progress/fallback channel.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
 8. Logs record correlation ID, stage, duration, dimensions/text length, and sanitized errors—not content.
 
@@ -262,9 +281,9 @@ Measure latency and OCR accuracy in representative worlds. Validate occluded-win
 
 Use OSCQuery discovery to coexist with XSOverlay and other OSC clients, then add a localhost-only avatar-parameter listener with rising-edge/debounce behavior. Document the Expression Menu parameter and keep the keyboard/OVRAS trigger as recovery path.
 
-### Phase 3 — custom VR rendering fallback
+### Phase 1.7 — interactive VR result panel
 
-Implement an OpenVR overlay renderer only if the XSOverlay evaluation exposes material limitations, first head-locked/dashboard-style, then controller-relative. Keep WPF diagnostics available.
+The XSOverlay notification evaluation exposed material limitations: fixed lifetime, no explicit close, and no long-text scrolling. The implemented VRCVA-owned OpenVR scene overlay uses the existing renderer contract, keeps an HMD-relative result until close/replacement, and retains WPF diagnostics and graceful fallback. It is non-interactive by default and uses the hotkey/OVRAS bridge for temporary close/scroll input. Controller-relative wrist placement and native SteamVR action bindings remain follow-up work.
 
 ### Phase 4 — analyzer expansion
 
@@ -295,6 +314,15 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture | Real-device use showed that an occluding PC window was OCRed instead of VRChat; direct window-surface capture fixes the root cause and removes the need to hide or foreground VRCVA |
 | 2026-08-12 | Shorten the XSOverlay start notification from 12 seconds to 1 second | Logs showed capture and OCR usually completed in about one second, but XSOverlay queued the result behind the long progress notification |
 | 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
+| 2026-08-12 | Union primary and band OCR with conservative approximate deduplication | Preserve primary-only lines while preventing overlap variations from duplicating translation input; occurrence-aware matching retains legitimate repeated lines |
+| 2026-08-12 | Crop window capture to the Win32 client rectangle | Real-device OCR included the Windows title-bar text `VRChat`; geometric exclusion fixes the capture boundary without suppressing legitimate in-world words |
+| 2026-08-12 | Replace fixed-duration XSOverlay result notifications with a VRCVA-owned OpenVR result panel | Real-device use requires the result to remain readable, close on demand, and scroll through long text; the renderer boundary allows this without changing capture, OCR, or translation |
+| 2026-08-12 | Keep OpenVR result placement HMD-relative before wrist placement | It proves compositor rendering and interaction with the fewest new moving parts; controller-relative calibration remains an independent follow-up |
+| 2026-08-12 | Detect a missing English OCR recognizer at startup and show installation steps without blocking SCAN | Japanese profile fallback can return structurally plausible but unusable Han characters for English; users need to discover and remedy this before the first scan while retaining intentional Japanese OCR use |
+| 2026-08-12 | Build OCR text from `OcrResult.Lines` instead of `OcrResult.Text` | Windows device comparison returned one flattened `.Text` line but six `Lines`; explicit joining restores the line boundary required by normalization and adaptive deduplication |
+| 2026-08-12 | Upscale full-frame and band OCR with a shared 2x-bounded Cubic transform | On the same synthetic six-line image, exact recognized lines were 4/6 without scaling, 3/6 with Fant, and 5/6 with Cubic; Cubic was selected from actual recognition output |
+| 2026-08-12 | Keep the result overlay non-interactive until an explicit hotkey/OVRAS toggle | Always-on interaction captures controller input from VRChat; explicit temporary interaction preserves movement while retaining persistent, scrollable results |
+| 2026-08-12 | Keep OpenVR eye-mirror capture at research status | The API is feasible, but correct GPU selection, D3D11 readback, shared OpenVR lifetime, overlay exclusion, fallback, and Quest 3S validation make it a separate medium-sized vertical slice |
 
 ## 13. Official sources reviewed
 
@@ -311,6 +339,7 @@ All sources below were checked on 2026-08-11.
 - Microsoft `Graphics.CopyFromScreen` API: <https://learn.microsoft.com/en-us/dotnet/api/system.drawing.graphics.copyfromscreen>
 - Valve OpenVR API overview: <https://github.com/ValveSoftware/openvr/wiki/API-Documentation>
 - Valve OpenVR source/bindings, including compositor mirror texture access: <https://github.com/ValveSoftware/openvr>
+- Valve current `openvr.h`, including `GetOutputDevice`, `GetMirrorTextureD3D11`, `ReleaseMirrorTextureD3D11`, `IsOverlayVisible`, and `WaitFrameSync`: <https://raw.githubusercontent.com/ValveSoftware/openvr/master/headers/openvr.h>
 - Valve `IVROverlay` overview: <https://github.com/ValveSoftware/openvr/wiki/IVROverlay_Overview>
 - Steamworks SteamVR overlay apps: <https://partner.steamgames.com/doc/features/steamvr/info>
 - Tesseract official repository and license: <https://github.com/tesseract-ocr/tesseract>

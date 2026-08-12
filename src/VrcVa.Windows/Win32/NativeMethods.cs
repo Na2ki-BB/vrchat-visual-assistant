@@ -10,6 +10,7 @@ internal static partial class NativeMethods
     internal const uint ModShift = 0x0004;
     internal const uint ModWin = 0x0008;
     internal const uint ModNoRepeat = 0x4000;
+    internal const uint DwmwaExtendedFrameBounds = 9;
     internal const int SwRestore = 9;
     internal const int SwShowMinNoActive = 7;
 
@@ -40,5 +41,40 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool ShowWindowAsync(IntPtr windowHandle, int command);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetClientRect(IntPtr windowHandle, out Rect rectangle);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ClientToScreen(IntPtr windowHandle, ref Point point);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetWindowRect(IntPtr windowHandle, out Rect rectangle);
+
+    [LibraryImport("dwmapi.dll")]
+    internal static partial int DwmGetWindowAttribute(
+        IntPtr windowHandle,
+        uint attribute,
+        out Rect value,
+        uint valueSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Point
+    {
+        internal int X;
+        internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Rect
+    {
+        internal int Left;
+        internal int Top;
+        internal int Right;
+        internal int Bottom;
+    }
 
 }

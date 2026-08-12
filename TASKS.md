@@ -56,6 +56,7 @@ Exit: fake adapters can drive Trigger → Capture → Analyzer → Result → Re
 - [x] Initially resolve the visible VRChat frame with DWM bounds and capture it with GDI; retain this only as superseded implementation history.
 - [x] Replace screen-coordinate GDI with HWND-targeted Windows Graphics Capture after real use showed occluding desktop windows were included.
 - [x] Create a free-threaded Direct3D11 frame pool, copy one window surface to an in-memory PNG, and release frame/session/pool resources deterministically.
+- [x] Crop the captured surface to the DPI-aware Win32 client rectangle before OCR so title-bar text is excluded without word filtering.
 - [x] Do not silently fall back to desktop pixels when direct window capture fails.
 - [x] Implement an explicit local-image input path for OCR diagnostics; never enable implicit image persistence.
 - [x] Add an isolated `VRChat.exe` fixture and repeatable script that verifies discovery, capture, and OCR without launching VRChat.
@@ -72,7 +73,7 @@ Failure split:
 
 - No process/window: verify `VRChat.exe` is running and has a desktop mirror window.
 - Auto-restore failure: verify VRChat is responsive, restore it once manually, and retry.
-- Black/incorrect frame: verify `source: windows-graphics-capture`, check VRChat responsiveness, and compare HDR on/off before adding a provider fallback.
+- Black/incorrect frame: verify `source: windows-graphics-capture-client-area`, check VRChat responsiveness, and compare HDR on/off before adding a provider fallback.
 - Wrong scaling/crop: record the Windows Graphics Capture frame dimensions and display scaling without saving content.
 
 ## Milestone 4 — Local OCR
@@ -198,9 +199,13 @@ Current state: publication, authentication, and the initial CI run are complete.
 
 - [ ] Collect representative test images with explicit consent and no unnecessary personal data.
 - [>] Measure single-pass versus conditional full-view band OCR accuracy and latency on real VRChat text.
+- [x] Confirm on Windows that `OcrResult.Text` flattens lines, then build output from `OcrResult.Lines` so adaptive union/dedup receives line-sized inputs.
+- [x] Compare unscaled, Fant 2x, and Cubic 2x OCR on the same self-authored image; use the better Cubic result for full-frame and band paths.
 - [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
-- [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) only if temporary desktop-window restoration remains disruptive.
+- [x] Document OpenVR compositor mirror feasibility, required APIs, overlay-exclusion invariant, window-capture fallback, and implementation size without implementing it.
+- [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR only after the documented implementation decision.
 - [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
+- [>] Verify on the owner's VRChat window that client-area capture removes the Windows `VRChat` title while preserving in-world text.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
 - [ ] Evaluate Tesseract as a local `IOcrEngine` fallback, including native packaging and notices.
 - [ ] Add provider selection UI with plain-language privacy impact; OpenAI nano/Luna model selection is already available.
@@ -215,12 +220,20 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [ ] Document an unsaved/unsynced Expression Parameter and Button setup.
 - [ ] Keep OSC disabled by default until explicitly enabled in both apps.
 
-## Post-MVP Milestone D — Custom SteamVR overlay fallback
+## Post-MVP Milestone D — Interactive SteamVR result panel
 
-- [ ] Spike OpenVR initialization as `VRApplication_Overlay` without starting or modifying VRChat.
-- [ ] Render a static test texture and verify it appears over VRChat.
-- [ ] Feed a text texture from the existing `IResultRenderer` contract.
-- [ ] Implement dashboard/head-locked placement before tracked-device-relative placement.
+- [x] Initialize OpenVR as `VRApplication_Overlay` only when SteamVR is already running; never start or modify VRChat.
+- [x] Render a static test texture and verify it appears over VRChat.
+- [x] Feed a text texture from the existing `IResultRenderer` contract.
+- [x] Keep the latest result visible until explicit close or the next scan.
+- [x] Handle and device-check OpenVR pointer click and scroll events for close and long-text navigation.
+- [x] Default the result panel to non-interactive and toggle close/scroll input through the existing global-hotkey/OVRAS bridge.
+- [x] Clear overlay interaction on close, next-scan hide, disconnect, and disposal; never add time-based result dismissal.
+- [x] Implement HMD-relative placement before tracked-device-relative placement.
+- [x] Keep the WPF renderer and short XSOverlay progress/fallback notifications when SteamVR is unavailable.
+- [x] Stop sending successful long-form results as fixed-duration XSOverlay notifications.
+- [x] Verify that overlay rendering never logs or persists OCR/translation content.
+- [ ] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
 - [ ] Add controller-relative transform and user calibration for a wrist-like position.
 - [ ] Test compositor restarts, headset disconnects, overlay cleanup, and WPF fallback.
 - [ ] Add optional SteamVR input actions only after overlay stability is proven.

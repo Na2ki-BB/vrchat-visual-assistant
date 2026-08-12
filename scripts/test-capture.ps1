@@ -33,9 +33,16 @@ try {
         -PassThru
     Start-Sleep -Seconds 2
 
-    dotnet $appDll --capture-vrchat-ocr
-    if ($LASTEXITCODE -ne 0) {
-        throw "Capture/OCR diagnostic failed with exit code $LASTEXITCODE."
+    $diagnosticOutput = @(dotnet $appDll --capture-vrchat-ocr)
+    $diagnosticExitCode = $LASTEXITCODE
+    $diagnosticOutput | Write-Output
+    if ($diagnosticExitCode -ne 0) {
+        throw "Capture/OCR diagnostic failed with exit code $diagnosticExitCode."
+    }
+
+    $expectedFrameLine = "Frame: 1280x720,"
+    if (-not ($diagnosticOutput | Where-Object { $_.StartsWith($expectedFrameLine) })) {
+        throw "Capture included non-client window chrome. Expected a 1280x720 client frame."
     }
 }
 finally {

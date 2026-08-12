@@ -7,6 +7,7 @@ using VrcVa.Core;
 using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
 using VrcVa.Windows.Ocr;
+using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Win32;
 
@@ -15,12 +16,14 @@ namespace VrcVa.Windows;
 public partial class MainWindow : Window
 {
     private const int ScanHotKeyIdentifier = 0x565243;
-    private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 1;
+    private const int PanelInteractionHotKeyIdentifier = ScanHotKeyIdentifier + 1;
+    private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 2;
     private readonly HttpClient _httpClient = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
     private readonly IXsOverlayNotificationSink _xsOverlayNotificationSink;
+    private readonly SteamVrResultPanel _steamVrResultPanel;
     private readonly ScanPipeline _vrChatPipeline;
     private readonly string _privacyNotice;
     private readonly OpenAiTextTranslator? _openAiTranslator;
@@ -29,6 +32,7 @@ public partial class MainWindow : Window
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
     private GlobalHotKey? _globalHotKey;
+    private GlobalHotKey? _panelInteractionHotKey;
     private GlobalHotKey? _modelToggleHotKey;
     private CancellationTokenSource? _activeScanCancellation;
     private int _uiScanRunning;
@@ -100,11 +104,17 @@ public partial class MainWindow : Window
 
         _analyzer = analyzer;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
+        _steamVrResultPanel = new SteamVrResultPanel(Dispatcher);
         _renderer = new CompositeResultRenderer(
             new WpfResultRenderer(
                 Dispatcher,
                 RenderProgress,
                 RenderOutcome),
+            new SteamVrOverlayResultRenderer(
+                Dispatcher,
+                _steamVrResultPanel,
+                _xsOverlayNotificationSink,
+                _logger),
             new XsOverlayNotificationRenderer(_xsOverlayNotificationSink));
         _vrChatPipeline = new ScanPipeline(
             new VrChatWindowCaptureSource(),
@@ -123,13 +133,16 @@ public partial class MainWindow : Window
     private void MainWindow_Loaded(object sender, RoutedEventArgs eventArgs)
     {
         IReadOnlyList<string> languageTags;
+        string? selectedRecognizerTag;
         try
         {
             languageTags = WindowsOcrEngine.GetAvailableLanguageTags();
+            selectedRecognizerTag = WindowsOcrEngine.GetSelectedRecognizerLanguageTag();
         }
         catch (Exception exception)
         {
             languageTags = [];
+            selectedRecognizerTag = null;
             _logger.Error(
                 "startup.ocr_language_query_failed",
                 Guid.Empty,
@@ -142,7 +155,34 @@ public partial class MainWindow : Window
             ? "OCR言語: 検出できません"
             : $"OCR言語: {string.Join(", ", languageTags)}";
 
-        StatusText.Text = _startupWarning ?? "準備完了。VRChatを表示してSCANしてください。";
+        bool hasEnglishRecognizer = WindowsOcrEngine.HasEnglishRecognizer(languageTags);
+        bool usesEnglishRecognizer = selectedRecognizerTag is not null
+            && WindowsOcrEngine.HasEnglishRecognizer([selectedRecognizerTag]);
+        string selectedRecognizerDisplay = selectedRecognizerTag ?? "検出できません";
+        if (!usesEnglishRecognizer && selectedRecognizerTag is not null)
+        {
+            selectedRecognizerDisplay += "（英語用の代替）";
+        }
+
+        string availableRecognizerDisplay = languageTags.Count == 0
+            ? "検出できません"
+            : string.Join(", ", languageTags);
+        OcrLanguageStatusText.Text =
+            $"使用するOCR認識器: {selectedRecognizerDisplay} / 利用可能: {availableRecognizerDisplay}";
+
+        bool englishOcrReady = hasEnglishRecognizer && usesEnglishRecognizer;
+        OcrLanguageWarningBorder.Visibility = englishOcrReady
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        OcrLanguageWarningText.Text = languageTags.Count == 0
+            ? "Windows OCRの認識器を確認できませんでした。"
+                + WindowsOcrEngine.EnglishRecognizerInstallationSteps
+            : WindowsOcrEngine.EnglishRecognizerMissingWarning;
+
+        StatusText.Text = _startupWarning
+            ?? (englishOcrReady
+                ? "準備完了。VRChatを表示してSCANしてください。"
+                : "英語OCRが未導入です。上の警告を確認してください。SCANは引き続き使用できます。");
         UpdateEnvironmentDetails();
     }
 
@@ -165,6 +205,30 @@ public partial class MainWindow : Window
             StatusText.Text = "グローバルホットキーを登録できませんでした。SCANボタンは使用できます。";
             _logger.Error(
                 "startup.hotkey_registration_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+
+        try
+        {
+            HotKeyDefinition definition = HotKeyDefinition.FromEnvironment(
+                "VRCVA_PANEL_INTERACTION_HOTKEY",
+                "Ctrl+Shift+I");
+            _panelInteractionHotKey = new GlobalHotKey(
+                new WindowInteropHelper(this).Handle,
+                PanelInteractionHotKeyIdentifier,
+                definition);
+            _panelInteractionHotKey.Pressed += PanelInteractionHotKey_Pressed;
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+        {
+            StatusText.Text = "結果パネル操作の切替ホットキーを登録できませんでした。";
+            _logger.Error(
+                "startup.panel_interaction_hotkey_registration_failed",
                 Guid.Empty,
                 ScanStage.Trigger,
                 ScanFailureCode.Unexpected,
@@ -232,6 +296,40 @@ public partial class MainWindow : Window
                 "翻訳モデル切替",
                 $"次回のSCAN: {choice.DisplayName}",
                 XsOverlayNotificationKind.Result);
+        }
+    }
+
+    private async void PanelInteractionHotKey_Pressed(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            SteamVrPanelInteractionChange change = _steamVrResultPanel.ToggleInteraction();
+            (string title, string content) = change switch
+            {
+                SteamVrPanelInteractionChange.Enabled => (
+                    "結果パネル操作 ON",
+                    "レーザーでスクロール・閉じる操作ができます。もう一度押すとVRChat操作へ戻ります。"),
+                SteamVrPanelInteractionChange.Disabled => (
+                    "結果パネル操作 OFF",
+                    "VRChat操作へ戻りました。結果パネルは表示を続けます。"),
+                _ => (
+                    "結果パネルなし",
+                    "先にSCANして結果パネルを表示してください。"),
+            };
+            await SendXsOverlayStatusAsync(title, content, XsOverlayNotificationKind.Result);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(
+                "rendering.steamvr_overlay_interaction_toggle_failed",
+                Guid.Empty,
+                ScanStage.Rendering,
+                ScanFailureCode.Unexpected,
+                exception);
+            await SendXsOverlayStatusAsync(
+                "結果パネル操作エラー",
+                "パネルを閉じました。SteamVRを確認して再度SCANしてください。",
+                XsOverlayNotificationKind.Error);
         }
     }
 
@@ -394,7 +492,9 @@ public partial class MainWindow : Window
         _activeScanCancellation?.Cancel();
         _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
+        _panelInteractionHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
+        _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
     }
 
