@@ -118,6 +118,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### OCR
 
 - **MVP: legacy `Windows.Media.Ocr.OcrEngine`.** It is local, does not need an API key, and works on ordinary Windows systems. English should be preferred when installed; the implementation reports available recognizers and falls back to the profile recognizer.
+- At startup, the WPF shell always shows the available recognizer tags. If no `en`/`en-*` recognizer exists, it shows a prominent but non-blocking Japanese warning before the first scan, because a Japanese profile fallback can turn English into plausible-looking Han characters and full-width punctuation.
 - **Current accuracy fallback:** first OCR the complete frame. If fewer than 80 ASCII letters/digits are found, split the complete view into three overlapping horizontal bands, enlarge within the Windows OCR dimension limit, and recognize each band. The final text is the union of primary-first and band-only lines; conservative, occurrence-aware approximate matching removes OCR variations caused by band overlap while retaining repeated lines within one observation. This preserves primary-only lines and avoids extra passes on already-strong results.
 - The newer Windows App SDK AI Text Recognition API is not selected because Microsoft documents that it runs only on devices with an NPU, and this development machine has no detected NPU.
 - A Tesseract backend remains a viable plug-in if Windows OCR accuracy is insufficient. It adds a native engine, trained-data distribution, license inventory, and preprocessing work.
@@ -297,6 +298,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
 | 2026-08-12 | Union primary and band OCR with conservative approximate deduplication | Preserve primary-only lines while preventing overlap variations from duplicating translation input; occurrence-aware matching retains legitimate repeated lines |
 | 2026-08-12 | Crop window capture to the Win32 client rectangle | Real-device OCR included the Windows title-bar text `VRChat`; geometric exclusion fixes the capture boundary without suppressing legitimate in-world words |
+| 2026-08-12 | Detect a missing English OCR recognizer at startup and show installation steps without blocking SCAN | Japanese profile fallback can return structurally plausible but unusable Han characters for English; users need to discover and remedy this before the first scan while retaining intentional Japanese OCR use |
 
 ## 13. Official sources reviewed
 
