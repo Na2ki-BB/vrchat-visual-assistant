@@ -34,25 +34,32 @@ internal static class CaptureBackendBenchmarkRunner
             Console.WriteLine($"警告: {warning}");
         }
 
-        using SteamVrResultPanel panel = new(dispatcher);
-        if (arguments.Length == 2)
+        SteamVrResultPanel panel = new(dispatcher);
+        try
         {
-            await OpenVrEyeMirrorDiagnosticRunner.WaitForScanAsync().ConfigureAwait(true);
+            if (arguments.Length == 2)
+            {
+                await OpenVrEyeMirrorDiagnosticRunner.WaitForScanAsync().ConfigureAwait(true);
+            }
+
+            using CapturedFrame eyeFrame = await CaptureTimedAsync(
+                new OpenVrEyeCaptureSource(dispatcher, panel, eyeOptions),
+                "SteamVRアイミラー").ConfigureAwait(false);
+            using CapturedFrame windowFrame = await CaptureTimedAsync(
+                new VrChatWindowCaptureSource(),
+                "VRChatウィンドウ").ConfigureAwait(false);
+
+            await TrySendCaptureCompleteNotificationAsync().ConfigureAwait(false);
+            Console.WriteLine("画像は保存せず、OCR本文も表示しません。");
+            await BenchmarkFrameAsync("SteamVRアイミラー", eyeFrame).ConfigureAwait(false);
+            await BenchmarkFrameAsync("VRChatウィンドウ", windowFrame).ConfigureAwait(false);
+            Console.WriteLine("測定が完了しました。");
+            return 0;
         }
-
-        using CapturedFrame eyeFrame = await CaptureTimedAsync(
-            new OpenVrEyeCaptureSource(dispatcher, panel, eyeOptions),
-            "SteamVRアイミラー").ConfigureAwait(false);
-        using CapturedFrame windowFrame = await CaptureTimedAsync(
-            new VrChatWindowCaptureSource(),
-            "VRChatウィンドウ").ConfigureAwait(false);
-
-        await TrySendCaptureCompleteNotificationAsync().ConfigureAwait(false);
-        Console.WriteLine("画像は保存せず、OCR本文も表示しません。");
-        await BenchmarkFrameAsync("SteamVRアイミラー", eyeFrame).ConfigureAwait(false);
-        await BenchmarkFrameAsync("VRChatウィンドウ", windowFrame).ConfigureAwait(false);
-        Console.WriteLine("測定が完了しました。");
-        return 0;
+        finally
+        {
+            await dispatcher.InvokeAsync(panel.Dispose, DispatcherPriority.Normal);
+        }
     }
 
     private static async Task<CapturedFrame> CaptureTimedAsync(
@@ -75,18 +82,26 @@ internal static class CaptureBackendBenchmarkRunner
         CapturedFrame frame)
     {
         Console.WriteLine($"[{sourceName}] OCR比較を開始します。");
-        OcrBenchmark adaptive = await MeasureAdaptivePipelineAsync(
-            frame,
-            OcrBitmapScaleMode.Adaptive).ConfigureAwait(false);
-        OcrBenchmark legacy = await MeasureAdaptivePipelineAsync(
-            frame,
-            OcrBitmapScaleMode.LegacyTwoTimes).ConfigureAwait(false);
-        OcrBenchmark adaptiveBands = await MeasureForcedBandsAsync(
-            frame,
-            OcrBitmapScaleMode.Adaptive).ConfigureAwait(false);
-        OcrBenchmark legacyBands = await MeasureForcedBandsAsync(
-            frame,
-            OcrBitmapScaleMode.LegacyTwoTimes).ConfigureAwait(false);
+        OcrBenchmark adaptive = await RunStepAsync(
+            "適応 全体パイプライン",
+            () => MeasureAdaptivePipelineAsync(
+                frame,
+                OcrBitmapScaleMode.Adaptive)).ConfigureAwait(false);
+        OcrBenchmark legacy = await RunStepAsync(
+            "従来2倍 全体パイプライン",
+            () => MeasureAdaptivePipelineAsync(
+                frame,
+                OcrBitmapScaleMode.LegacyTwoTimes)).ConfigureAwait(false);
+        OcrBenchmark adaptiveBands = await RunStepAsync(
+            "適応 強制3帯",
+            () => MeasureForcedBandsAsync(
+                frame,
+                OcrBitmapScaleMode.Adaptive)).ConfigureAwait(false);
+        OcrBenchmark legacyBands = await RunStepAsync(
+            "従来2倍 強制3帯",
+            () => MeasureForcedBandsAsync(
+                frame,
+                OcrBitmapScaleMode.LegacyTwoTimes)).ConfigureAwait(false);
 
         PrintMeasurement("適応 全体パイプライン", adaptive);
         PrintMeasurement("従来2倍 全体パイプライン", legacy);
@@ -95,6 +110,23 @@ internal static class CaptureBackendBenchmarkRunner
         Console.WriteLine(
             $"結果一致: 全体={string.Equals(adaptive.Text, legacy.Text, StringComparison.Ordinal)}, "
             + $"3帯={string.Equals(adaptiveBands.Text, legacyBands.Text, StringComparison.Ordinal)}");
+    }
+
+    private static async Task<OcrBenchmark> RunStepAsync(
+        string stepName,
+        Func<Task<OcrBenchmark>> action)
+    {
+        Console.WriteLine($"  実行中: {stepName}");
+        try
+        {
+            return await action().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"{stepName} に失敗しました ({exception.GetType().Name})。",
+                exception);
+        }
     }
 
     private static async Task<OcrBenchmark> MeasureAdaptivePipelineAsync(
