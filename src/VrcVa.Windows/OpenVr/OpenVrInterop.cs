@@ -161,6 +161,12 @@ internal sealed class OpenVrInterop : IDisposable
         _ = _hideOverlay(_overlayHandle);
     }
 
+    public void SetInteractive(bool enabled)
+    {
+        ThrowIfDisposed();
+        SetFlag(VrOverlayFlag.MakeOverlaysInteractiveIfVisible, enabled);
+    }
+
     public bool TryPollEvent(out OpenVrEvent overlayEvent)
     {
         ThrowIfDisposed();
@@ -226,7 +232,7 @@ internal sealed class OpenVrInterop : IDisposable
         EnsureSuccess(_setOverlayInputMethod(_overlayHandle, VrOverlayInputMethod.Mouse));
         HmdVector2 mouseScale = new(1280, 720);
         EnsureSuccess(_setOverlayMouseScale(_overlayHandle, ref mouseScale));
-        SetFlag(VrOverlayFlag.MakeOverlaysInteractiveIfVisible);
+        SetFlag(VrOverlayFlag.MakeOverlaysInteractiveIfVisible, false);
         SetFlag(VrOverlayFlag.SendVrDiscreteScrollEvents);
         SetFlag(VrOverlayFlag.SendVrSmoothScrollEvents);
         SetFlag(VrOverlayFlag.EnableControlBar);
@@ -234,8 +240,8 @@ internal sealed class OpenVrInterop : IDisposable
         SetFlag(VrOverlayFlag.EnableClickStabilization);
     }
 
-    private void SetFlag(VrOverlayFlag flag) =>
-        EnsureSuccess(_setOverlayFlag(_overlayHandle, flag, true));
+    private void SetFlag(VrOverlayFlag flag, bool enabled = true) =>
+        EnsureSuccess(_setOverlayFlag(_overlayHandle, flag, enabled));
 
     private static T LoadExport<T>(IntPtr libraryHandle, string name)
         where T : Delegate =>
