@@ -88,6 +88,7 @@ public sealed class ScanPipeline
             AnalysisResult result = await _analyzer
                 .AnalyzeAsync(frame, request, progress, cancellationToken)
                 .ConfigureAwait(false);
+            result = result with { CaptureSourceKind = frame.SourceKind };
 
             total.Stop();
             ScanOutcome success = ScanOutcome.Succeeded(

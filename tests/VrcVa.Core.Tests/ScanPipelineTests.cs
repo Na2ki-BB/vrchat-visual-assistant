@@ -23,6 +23,7 @@ public sealed class ScanPipelineTests
 
         Assert.True(outcome.IsSuccess);
         Assert.Equal("安全第一", outcome.Result?.JapaneseText);
+        Assert.Equal("test", outcome.Result?.CaptureSourceKind);
         Assert.All(sensitiveFrame, value => Assert.Equal(0, value));
         Assert.Contains(renderer.Progress, item => item.Stage == ScanStage.Capture);
         Assert.Single(renderer.Outcomes);
@@ -154,4 +155,3 @@ public sealed class ScanPipelineTests
         }
     }
 }
-

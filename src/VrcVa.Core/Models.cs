@@ -108,7 +108,8 @@ public sealed record AnalysisResult(
     string TranslationModel,
     TimeSpan OcrDuration,
     TimeSpan TranslationDuration,
-    string? Warning = null);
+    string? Warning = null,
+    string CaptureSourceKind = "unknown");
 
 public sealed record ScanProgress(
     Guid CorrelationId,
@@ -140,4 +141,3 @@ public sealed record ScanOutcome(
         TimeSpan totalDuration) =>
         new(correlationId, false, null, failure, totalDuration);
 }
-

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace VrcVa.Windows.OpenVr;
 
-internal sealed class OpenVrInterop : IDisposable
+internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
 {
     private const string OverlayInterface = "FnTable:IVROverlay_027";
     private const ulong InvalidOverlayHandle = 0;

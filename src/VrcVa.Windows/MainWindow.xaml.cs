@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly string _privacyNotice;
     private readonly OpenAiTextTranslator? _openAiTranslator;
     private readonly bool _hasOpenAiApiKey;
+    private readonly string _captureConfiguration;
     private string _translationStatus;
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
@@ -105,6 +106,18 @@ public partial class MainWindow : Window
         _analyzer = analyzer;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
         _steamVrResultPanel = new SteamVrResultPanel(Dispatcher);
+        OpenVrEyeCaptureOptions eyeOptions = OpenVrEyeCaptureOptions.FromEnvironment(
+            out string? eyeConfigurationWarning);
+        if (eyeConfigurationWarning is not null)
+        {
+            _startupWarning = string.IsNullOrWhiteSpace(_startupWarning)
+                ? eyeConfigurationWarning
+                : $"{_startupWarning} {eyeConfigurationWarning}";
+        }
+
+        _captureConfiguration = eyeOptions.Eye == OpenVrEye.Left
+            ? "キャプチャ: SteamVR左眼を優先 / ウィンドウ自動フォールバック"
+            : "キャプチャ: SteamVR右眼を優先 / ウィンドウ自動フォールバック";
         _renderer = new CompositeResultRenderer(
             new WpfResultRenderer(
                 Dispatcher,
@@ -117,7 +130,9 @@ public partial class MainWindow : Window
                 _logger),
             new XsOverlayNotificationRenderer(_xsOverlayNotificationSink));
         _vrChatPipeline = new ScanPipeline(
-            new VrChatWindowCaptureSource(),
+            new FallbackCaptureSource(
+                new OpenVrEyeCaptureSource(Dispatcher, _steamVrResultPanel, eyeOptions),
+                new VrChatWindowCaptureSource()),
             _analyzer,
             _renderer,
             _logger);
@@ -483,6 +498,7 @@ public partial class MainWindow : Window
         DetailText.Text =
             $"合計 {outcome.TotalDuration.TotalSeconds:0.0}秒 "
             + $"(OCR {outcome.Result.OcrDuration.TotalSeconds:0.0}秒 / 翻訳 {outcome.Result.TranslationDuration.TotalSeconds:0.0}秒) "
+            + $"/ 取得 {CaptureSourceDisplayName.Get(outcome.Result.CaptureSourceKind)} "
             + $"/ OCR {outcome.Result.OcrLanguage} / {outcome.Result.TranslationProvider} {outcome.Result.TranslationModel} "
             + $"/ 相関ID: {outcome.CorrelationId:D}";
     }
@@ -551,7 +567,8 @@ public partial class MainWindow : Window
     }
 
     private void UpdateEnvironmentDetails() =>
-        DetailText.Text = $"{_ocrInfo} / {_translationStatus} / ログ: {_logger.LogDirectory}";
+        DetailText.Text =
+            $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / ログ: {_logger.LogDirectory}";
 
     private sealed record TranslationModelChoice(string DisplayName, string ModelId);
 
