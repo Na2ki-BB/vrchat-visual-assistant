@@ -15,6 +15,30 @@ public partial class App : System.Windows.Application
 
         if (eventArgs.Args.Length > 0
             && eventArgs.Args[0].Equals(
+                "--capture-backend-benchmark",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            AttachDiagnosticConsole();
+            int exitCode;
+            try
+            {
+                exitCode = await CaptureBackendBenchmarkRunner.RunAsync(
+                    Dispatcher,
+                    eventArgs.Args);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"キャプチャ経路比較に失敗しました: {exception.GetType().Name}: {exception.Message}");
+                exitCode = 7;
+            }
+
+            Shutdown(exitCode);
+            return;
+        }
+
+        if (eventArgs.Args.Length > 0
+            && eventArgs.Args[0].Equals(
                 "--openvr-eye-mirror-check",
                 StringComparison.OrdinalIgnoreCase))
         {

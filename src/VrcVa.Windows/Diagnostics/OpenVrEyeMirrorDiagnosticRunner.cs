@@ -243,7 +243,7 @@ internal static class OpenVrEyeMirrorDiagnosticRunner
         return new DiagnosticOptions(saveDirectory, waitForScan);
     }
 
-    private static async Task WaitForScanAsync()
+    internal static async Task WaitForScanAsync()
     {
         HwndSourceParameters parameters = new("VRCVA eye-mirror diagnostic trigger")
         {
