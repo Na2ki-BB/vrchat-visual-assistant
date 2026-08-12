@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -58,7 +59,7 @@ internal sealed class OpenVrEyeCaptureSource(
         {
             throw;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsAcquisitionFailure(exception))
         {
             throw CreateUnavailableException(exception);
         }
@@ -102,4 +103,14 @@ internal sealed class OpenVrEyeCaptureSource(
             ScanStage.Capture,
             "SteamVRのアイミラーを取得できなかったため、VRChatウィンドウ取得を試します。",
             innerException);
+
+    private static bool IsAcquisitionFailure(Exception exception) =>
+        exception is InvalidOperationException
+            or ExternalException
+            or DllNotFoundException
+            or EntryPointNotFoundException
+            or BadImageFormatException
+            or NotSupportedException
+            or ArgumentException
+            or System.ComponentModel.Win32Exception;
 }

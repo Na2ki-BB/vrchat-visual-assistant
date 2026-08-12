@@ -9,6 +9,11 @@ internal sealed record OpenVrEyeCaptureOptions(OpenVrEye Eye)
     public static OpenVrEyeCaptureOptions FromEnvironment(out string? warning)
     {
         string? value = Environment.GetEnvironmentVariable(EnvironmentVariable)?.Trim();
+        return Parse(value, out warning);
+    }
+
+    internal static OpenVrEyeCaptureOptions Parse(string? value, out string? warning)
+    {
         warning = null;
         if (string.IsNullOrEmpty(value)
             || value.Equals("left", StringComparison.OrdinalIgnoreCase))
