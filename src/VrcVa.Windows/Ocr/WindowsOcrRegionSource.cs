@@ -61,8 +61,8 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
                 byte[] encoded = await EncodePngAsync(bitmap, cancellationToken);
                 regions.Add(new CapturedFrame(
                     encoded,
-                    checked((int)transform.ScaledWidth),
-                    checked((int)transform.ScaledHeight),
+                    checked((int)transform.Bounds.Width),
+                    checked((int)transform.Bounds.Height),
                     "image/png",
                     $"{frame.SourceKind}:ocr-band-{index + 1}",
                     frame.OcrScaleReferenceWidth,

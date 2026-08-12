@@ -1,4 +1,5 @@
 using VrcVa.Windows.Ocr;
+using Windows.Graphics.Imaging;
 
 namespace VrcVa.Windows.Tests;
 
@@ -78,5 +79,48 @@ public sealed class WindowsOcrBitmapTransformTests
             OcrBitmapScaleMode.LegacyTwoTimes);
 
         Assert.Equal(2d, scale, precision: 6);
+    }
+
+    [Fact]
+    public void Create_ScalesFullSourceBeforeConvertingCropBounds()
+    {
+        BitmapTransform transform = WindowsOcrBitmapTransform.Create(
+            2560,
+            1600,
+            new BitmapBounds
+            {
+                X = 0,
+                Y = 800,
+                Width = 2560,
+                Height = 800,
+            });
+
+        Assert.Equal(5120u, transform.ScaledWidth);
+        Assert.Equal(3200u, transform.ScaledHeight);
+        Assert.Equal(0u, transform.Bounds.X);
+        Assert.Equal(1600u, transform.Bounds.Y);
+        Assert.Equal(5120u, transform.Bounds.Width);
+        Assert.Equal(1600u, transform.Bounds.Height);
+    }
+
+    [Fact]
+    public void Create_UnscaledCropKeepsBoundsInsideFullSource()
+    {
+        BitmapTransform transform = WindowsOcrBitmapTransform.Create(
+            3072,
+            3352,
+            new BitmapBounds
+            {
+                X = 0,
+                Y = 1676,
+                Width = 3072,
+                Height = 1676,
+            },
+            OcrBitmapScaleMode.Unscaled);
+
+        Assert.Equal(3072u, transform.ScaledWidth);
+        Assert.Equal(3352u, transform.ScaledHeight);
+        Assert.Equal(1676u, transform.Bounds.Y);
+        Assert.Equal(1676u, transform.Bounds.Height);
     }
 }

@@ -31,15 +31,31 @@ internal static class WindowsOcrBitmapTransform
             inputHeight,
             OcrEngine.MaxImageDimension,
             scaleMode);
+        uint scaledSourceWidth = ScaleDimension(sourceWidth, scale);
+        uint scaledSourceHeight = ScaleDimension(sourceHeight, scale);
         BitmapTransform transform = new()
         {
-            ScaledWidth = Math.Max(1u, checked((uint)Math.Floor(inputWidth * scale))),
-            ScaledHeight = Math.Max(1u, checked((uint)Math.Floor(inputHeight * scale))),
+            ScaledWidth = scaledSourceWidth,
+            ScaledHeight = scaledSourceHeight,
             InterpolationMode = BitmapInterpolationMode.Cubic,
         };
         if (bounds is BitmapBounds selectedBounds)
         {
-            transform.Bounds = selectedBounds;
+            uint scaledX = ScaleOffset(selectedBounds.X, scale);
+            uint scaledY = ScaleOffset(selectedBounds.Y, scale);
+            uint scaledRight = Math.Min(
+                scaledSourceWidth,
+                ScaleEnd(checked(selectedBounds.X + selectedBounds.Width), scale));
+            uint scaledBottom = Math.Min(
+                scaledSourceHeight,
+                ScaleEnd(checked(selectedBounds.Y + selectedBounds.Height), scale));
+            transform.Bounds = new BitmapBounds
+            {
+                X = scaledX,
+                Y = scaledY,
+                Width = Math.Max(1u, scaledRight - scaledX),
+                Height = Math.Max(1u, scaledBottom - scaledY),
+            };
         }
 
         return transform;
@@ -82,4 +98,13 @@ internal static class WindowsOcrBitmapTransform
 
         return Math.Min(desiredScale, Math.Min(pixelBudgetScale, dimensionScale));
     }
+
+    private static uint ScaleDimension(uint value, double scale) =>
+        Math.Max(1u, checked((uint)Math.Floor(value * scale)));
+
+    private static uint ScaleOffset(uint value, double scale) =>
+        checked((uint)Math.Floor(value * scale));
+
+    private static uint ScaleEnd(uint value, double scale) =>
+        checked((uint)Math.Ceiling(value * scale));
 }
