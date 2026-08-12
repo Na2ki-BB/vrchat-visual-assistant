@@ -24,7 +24,7 @@ public sealed class AdaptiveOcrEngineTests
         QueueOcrEngine primary = new(
             new OcrOutput("EXIT", "en-US"),
             new OcrOutput("KEEP OUT\nEmergency exit", "en-US"),
-            new OcrOutput(" emergency   exit \nAuthorized personnel only", "en-US"),
+            new OcrOutput(" Emergency exlt \nAuthorized personnel only", "en-US"),
             new OcrOutput("AUTHORIZED PERSONNEL ONLY", "en-US"));
         RecordingRegionSource regions = new(
             [CreateFrame(2), CreateFrame(3), CreateFrame(4)]);
@@ -36,6 +36,7 @@ public sealed class AdaptiveOcrEngineTests
         Assert.Equal(
             string.Join(
                 Environment.NewLine,
+                "EXIT",
                 "KEEP OUT",
                 "Emergency exit",
                 "Authorized personnel only"),
@@ -46,7 +47,7 @@ public sealed class AdaptiveOcrEngineTests
     }
 
     [Fact]
-    public async Task RecognizeAsync_KeepsPrimaryTextWhenRegionsAreNotBetter()
+    public async Task RecognizeAsync_UnionsPrimaryAndRegionTextWithoutImprovementGate()
     {
         QueueOcrEngine primary = new(
             new OcrOutput("EMERGENCY EXIT AHEAD", "en-US"),
@@ -57,8 +58,36 @@ public sealed class AdaptiveOcrEngineTests
 
         OcrOutput output = await engine.RecognizeAsync(frame, CancellationToken.None);
 
-        Assert.Equal("EMERGENCY EXIT AHEAD", output.Text);
-        Assert.Null(output.Warning);
+        Assert.Equal(
+            string.Join(
+                Environment.NewLine,
+                "EMERGENCY EXIT AHEAD",
+                "EXIT"),
+            output.Text);
+        Assert.Contains("OCR強化処理", output.Warning, StringComparison.Ordinal);
+        Assert.All(regions.Frames, region =>
+            Assert.Throws<ObjectDisposedException>(() => region.EncodedImage.ToArray()));
+    }
+
+    [Fact]
+    public void MergeUniqueLines_PreservesLegitimateRepeatedLines()
+    {
+        string output = AdaptiveOcrEngine.MergeUniqueLines(
+            ["Back\nBack", "BACK\nBACK"]);
+
+        Assert.Equal(
+            string.Join(Environment.NewLine, "Back", "Back"),
+            output);
+    }
+
+    [Fact]
+    public void MergeUniqueLines_DoesNotApproximatelyMergeShortMenuItems()
+    {
+        string output = AdaptiveOcrEngine.MergeUniqueLines(["Start", "Stats"]);
+
+        Assert.Equal(
+            string.Join(Environment.NewLine, "Start", "Stats"),
+            output);
     }
 
     [Fact]
