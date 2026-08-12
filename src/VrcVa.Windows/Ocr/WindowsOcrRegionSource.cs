@@ -4,8 +4,7 @@ using Windows.Storage.Streams;
 
 namespace VrcVa.Windows.Ocr;
 
-internal sealed class WindowsOcrRegionSource(
-    OcrBitmapScaleMode scaleMode = OcrBitmapScaleMode.Adaptive) : IOcrRegionSource
+internal sealed class WindowsOcrRegionSource : IOcrRegionSource
 {
     private const int RegionCount = 3;
 
@@ -49,7 +48,7 @@ internal sealed class WindowsOcrRegionSource(
                         Width = sourceWidth,
                         Height = regionHeight,
                     },
-                    scaleMode);
+                    OcrBitmapScaleMode.Unscaled);
                 using SoftwareBitmap bitmap = await decoder
                     .GetSoftwareBitmapAsync(
                         BitmapPixelFormat.Bgra8,
@@ -65,7 +64,9 @@ internal sealed class WindowsOcrRegionSource(
                     checked((int)transform.ScaledWidth),
                     checked((int)transform.ScaledHeight),
                     "image/png",
-                    $"{frame.SourceKind}:ocr-band-{index + 1}"));
+                    $"{frame.SourceKind}:ocr-band-{index + 1}",
+                    frame.OcrScaleReferenceWidth,
+                    frame.OcrScaleReferenceHeight));
             }
 
             return regions;

@@ -45,7 +45,9 @@ internal sealed class WindowsOcrEngine(
             BitmapTransform transform = WindowsOcrBitmapTransform.Create(
                 decoder.PixelWidth,
                 decoder.PixelHeight,
-                scaleMode: scaleMode);
+                scaleMode: scaleMode,
+                scaleReferenceWidth: checked((uint)frame.OcrScaleReferenceWidth),
+                scaleReferenceHeight: checked((uint)frame.OcrScaleReferenceHeight));
             using SoftwareBitmap bitmap = await decoder
                 .GetSoftwareBitmapAsync(
                     BitmapPixelFormat.Bgra8,

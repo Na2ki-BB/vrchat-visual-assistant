@@ -13,7 +13,9 @@ internal static class WindowsOcrBitmapTransform
         uint sourceWidth,
         uint sourceHeight,
         BitmapBounds? bounds = null,
-        OcrBitmapScaleMode scaleMode = OcrBitmapScaleMode.Adaptive)
+        OcrBitmapScaleMode scaleMode = OcrBitmapScaleMode.Adaptive,
+        uint? scaleReferenceWidth = null,
+        uint? scaleReferenceHeight = null)
     {
         uint inputWidth = bounds?.Width ?? sourceWidth;
         uint inputHeight = bounds?.Height ?? sourceHeight;
@@ -23,8 +25,8 @@ internal static class WindowsOcrBitmapTransform
         }
 
         double scale = CalculateScale(
-            sourceWidth,
-            sourceHeight,
+            scaleReferenceWidth ?? sourceWidth,
+            scaleReferenceHeight ?? sourceHeight,
             inputWidth,
             inputHeight,
             OcrEngine.MaxImageDimension,
