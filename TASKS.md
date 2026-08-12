@@ -199,8 +199,11 @@ Current state: publication, authentication, and the initial CI run are complete.
 
 - [ ] Collect representative test images with explicit consent and no unnecessary personal data.
 - [>] Measure single-pass versus conditional full-view band OCR accuracy and latency on real VRChat text.
+- [x] Confirm on Windows that `OcrResult.Text` flattens lines, then build output from `OcrResult.Lines` so adaptive union/dedup receives line-sized inputs.
+- [x] Compare unscaled, Fant 2x, and Cubic 2x OCR on the same self-authored image; use the better Cubic result for full-frame and band paths.
 - [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
-- [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) only if temporary desktop-window restoration remains disruptive.
+- [x] Document OpenVR compositor mirror feasibility, required APIs, overlay-exclusion invariant, window-capture fallback, and implementation size without implementing it.
+- [ ] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR only after the documented implementation decision.
 - [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
 - [>] Verify on the owner's VRChat window that client-area capture removes the Windows `VRChat` title while preserving in-world text.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
@@ -220,10 +223,12 @@ Current state: publication, authentication, and the initial CI run are complete.
 ## Post-MVP Milestone D — Interactive SteamVR result panel
 
 - [x] Initialize OpenVR as `VRApplication_Overlay` only when SteamVR is already running; never start or modify VRChat.
-- [>] Render a static test texture and verify it appears over VRChat; OpenVR accepted the image/show calls, headset visual confirmation remains.
+- [x] Render a static test texture and verify it appears over VRChat.
 - [x] Feed a text texture from the existing `IResultRenderer` contract.
 - [x] Keep the latest result visible until explicit close or the next scan.
-- [>] Handle OpenVR pointer click and scroll events for close and long-text navigation; implementation is complete and device interaction remains.
+- [x] Handle and device-check OpenVR pointer click and scroll events for close and long-text navigation.
+- [x] Default the result panel to non-interactive and toggle close/scroll input through the existing global-hotkey/OVRAS bridge.
+- [x] Clear overlay interaction on close, next-scan hide, disconnect, and disposal; never add time-based result dismissal.
 - [x] Implement HMD-relative placement before tracked-device-relative placement.
 - [x] Keep the WPF renderer and short XSOverlay progress/fallback notifications when SteamVR is unavailable.
 - [x] Stop sending successful long-form results as fixed-duration XSOverlay notifications.

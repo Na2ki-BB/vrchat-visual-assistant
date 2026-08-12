@@ -8,6 +8,7 @@ internal sealed class SteamVrResultPanel : IDisposable
     private readonly DispatcherTimer _eventTimer;
     private OpenVrInterop? _interop;
     private bool _visible;
+    private bool _interactive;
     private bool _disposed;
 
     public event EventHandler? Hidden;
@@ -32,6 +33,7 @@ internal sealed class SteamVrResultPanel : IDisposable
 
         try
         {
+            SetInteractive(false);
             _texture.SetContent(title, body);
             UploadTexture();
             _interop!.Show();
@@ -55,13 +57,43 @@ internal sealed class SteamVrResultPanel : IDisposable
 
         try
         {
-            _interop?.Hide();
+            try
+            {
+                SetInteractive(false);
+            }
+            finally
+            {
+                _interop?.Hide();
+            }
         }
         finally
         {
             _visible = false;
+            _interactive = false;
             _eventTimer.Stop();
             Hidden?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public SteamVrPanelInteractionChange ToggleInteraction()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_visible || _interop is null)
+        {
+            return SteamVrPanelInteractionChange.NoVisiblePanel;
+        }
+
+        try
+        {
+            SetInteractive(!_interactive);
+            return _interactive
+                ? SteamVrPanelInteractionChange.Enabled
+                : SteamVrPanelInteractionChange.Disabled;
+        }
+        catch
+        {
+            Disconnect();
+            throw;
         }
     }
 
@@ -74,6 +106,8 @@ internal sealed class SteamVrResultPanel : IDisposable
 
         _disposed = true;
         _eventTimer.Stop();
+        _visible = false;
+        _interactive = false;
         _interop?.Dispose();
         _interop = null;
     }
@@ -137,11 +171,25 @@ internal sealed class SteamVrResultPanel : IDisposable
             ResultPanelTexture.PixelHeight);
     }
 
+    private void SetInteractive(bool enabled)
+    {
+        _interop?.SetInteractive(enabled);
+        _interactive = enabled;
+    }
+
     private void Disconnect()
     {
         _eventTimer.Stop();
         _visible = false;
+        _interactive = false;
         _interop?.Dispose();
         _interop = null;
     }
+}
+
+internal enum SteamVrPanelInteractionChange
+{
+    NoVisiblePanel,
+    Enabled,
+    Disabled,
 }

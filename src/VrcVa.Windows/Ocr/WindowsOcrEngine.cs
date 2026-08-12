@@ -23,14 +23,6 @@ internal sealed class WindowsOcrEngine : IOcrEngine
     {
         ArgumentNullException.ThrowIfNull(frame);
 
-        if (frame.Width > OcrEngine.MaxImageDimension || frame.Height > OcrEngine.MaxImageDimension)
-        {
-            throw new ScanException(
-                ScanFailureCode.OcrUnavailable,
-                ScanStage.Ocr,
-                $"画像がWindows OCRの上限 {OcrEngine.MaxImageDimension}px を超えています。");
-        }
-
         (OcrEngine engine, string? warning) = CreateEngine();
 
         try
@@ -49,19 +41,28 @@ internal sealed class WindowsOcrEngine : IOcrEngine
                 .CreateAsync(randomAccessStream)
                 .AsTask(cancellationToken)
                 .ConfigureAwait(false);
+            BitmapTransform transform = WindowsOcrBitmapTransform.Create(
+                decoder.PixelWidth,
+                decoder.PixelHeight);
             using SoftwareBitmap bitmap = await decoder
                 .GetSoftwareBitmapAsync(
                     BitmapPixelFormat.Bgra8,
-                    BitmapAlphaMode.Premultiplied)
+                    BitmapAlphaMode.Premultiplied,
+                    transform,
+                    ExifOrientationMode.IgnoreExifOrientation,
+                    ColorManagementMode.DoNotColorManage)
                 .AsTask(cancellationToken)
                 .ConfigureAwait(false);
             OcrResult result = await engine
                 .RecognizeAsync(bitmap)
                 .AsTask(cancellationToken)
                 .ConfigureAwait(false);
+            string text = string.Join(
+                Environment.NewLine,
+                result.Lines.Select(line => line.Text));
 
             return new OcrOutput(
-                result.Text,
+                text,
                 engine.RecognizerLanguage.LanguageTag,
                 warning);
         }

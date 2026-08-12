@@ -11,6 +11,7 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
+- 結果パネルは既定で非インタラクティブ。`Ctrl+Shift+I`またはOVRAS操作でレーザー操作をON/OFF
 - Windows Graphics Captureで`VRChat.exe`の描画領域だけを1回取得。タイトルバーや別のPCウィンドウは混ざらない
 - 最小化中なら撮影時だけ自動復元し、直後に元の最小化状態へ戻す
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
@@ -192,7 +193,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --st
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1
 ```
 
-3. 表示内容を確認後、バックアップ付きでShortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
+3. 表示内容を確認後、バックアップ付きでShortcut Oneを結果パネル操作、Shortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1 -Apply
@@ -205,11 +206,12 @@ http://127.0.0.1:27062/dashboard/controllerbinding.html?desktop=1&app=steam.over
 ```
 
 5. `OVR Advanced Settings`の現在のバインドを編集し、`Misc`アクションへ進みます。
-6. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
-7. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
-8. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
+6. 結果パネルの操作切替には`KeyboardOne`（内部出力`/actions/misc/in/keyboardone`）を未使用の操作へ割り当てます。結果は既定で非インタラクティブなので、表示したままVRChat内を移動できます。読む位置を動かす、または閉じるときだけ1回押してレーザー操作をONにし、読み終わったらもう1回押してOFFへ戻します。パネルを閉じた場合も自動的にOFFへ戻ります。
+7. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
+8. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
+9. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
 
-OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の2値だけを変更し、同じフォルダーに日時付きバックアップを作ります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
+OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の3値だけを変更し、同じフォルダーに日時付きバックアップを作ります。この実機では変更前の`KeyboardOne`が`Ctrl+Shift+M`なので、`-Apply`によりVRCVA用の`Ctrl+Shift+I`へ置き換わります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
 
 ### 設定用環境変数
 
@@ -221,6 +223,7 @@ OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
 | `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
+| `VRCVA_PANEL_INTERACTION_HOTKEY` | `Ctrl+Shift+I` | 結果パネルのレーザー操作をON/OFFするグローバルホットキー |
 | `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 
 例:
@@ -290,6 +293,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | XSOverlay通知が出ない | Rendering | XSOverlayが起動中か確認。Window Captureは不要。デスクトップ窓に結果が出るならSCAN自体は成功 |
 | SteamVR結果パネルが出ない | Rendering | SteamVRを先に起動し、上の`--steamvr-overlay-check`を実行。失敗しても結果はデスクトップ窓に残る |
 | 結果パネルを操作できない | Rendering | `--steamvr-overlay-check`でスクロールと「閉じる」を分離確認。SteamVR Dashboardのコントローラーポインターが他パネルで反応するかも確認 |
+| 結果パネル表示中にVRChatを操作できない | Rendering | `Ctrl+Shift+I`またはOVRASの`KeyboardOne`をもう一度押し、結果パネル操作をOFFにする。パネル自体は閉じずに表示を続けます |
 | OVRAS操作が反応しない | Trigger | 補助スクリプト適用後にSteamVRを再起動したか、Shortcut Twoをコントローラーへバインドしたか |
 
 ログは次にあります。
@@ -304,7 +308,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 - 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatクライアント描画領域です。Windowsのタイトルバーと枠は除外します。
 - Windows Graphics Captureで対象ウィンドウを直接取得するため、他ウィンドウの遮蔽には依存しません。ただしVRChatを最小化した場合は描画再開のため短時間だけ自動復元します。
-- 現在のVR結果表示はHMD相対のSteamVRパネルです。閉じるまで保持して長文をスクロールできますが、手首追従位置の調整はまだ実装していません。
+- 現在のVR結果表示はHMD相対のSteamVRパネルです。利用者が閉じるか次のSCANで置き換えるまで保持します。既定ではVRChat操作を妨げない非インタラクティブ表示で、`Ctrl+Shift+I`またはOVRASの`KeyboardOne`を押した間だけスクロール・閉じる操作が可能です。手首追従位置の調整はまだ実装していません。
 - VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。

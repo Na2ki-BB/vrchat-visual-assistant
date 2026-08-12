@@ -1,6 +1,5 @@
 using VrcVa.Core;
 using Windows.Graphics.Imaging;
-using Windows.Media.Ocr;
 using Windows.Storage.Streams;
 
 namespace VrcVa.Windows.Ocr;
@@ -23,8 +22,8 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
             .AsTask(cancellationToken)
             .ConfigureAwait(false);
 
-        uint sourceWidth = checked((uint)frame.Width);
-        uint sourceHeight = checked((uint)frame.Height);
+        uint sourceWidth = decoder.PixelWidth;
+        uint sourceHeight = decoder.PixelHeight;
         uint regionHeight = Math.Max(1u, (sourceHeight + 1) / 2);
         uint maximumStart = sourceHeight - regionHeight;
         List<CapturedFrame> regions = [];
@@ -39,26 +38,16 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
                     : checked((uint)Math.Round(
                         maximumStart * index / (double)(RegionCount - 1),
                         MidpointRounding.AwayFromZero));
-                double scale = Math.Min(
-                    2d,
-                    Math.Min(
-                        OcrEngine.MaxImageDimension / (double)sourceWidth,
-                        OcrEngine.MaxImageDimension / (double)regionHeight));
-                uint scaledWidth = Math.Max(1u, checked((uint)Math.Floor(sourceWidth * scale)));
-                uint scaledHeight = Math.Max(1u, checked((uint)Math.Floor(regionHeight * scale)));
-                BitmapTransform transform = new()
+                BitmapTransform transform = WindowsOcrBitmapTransform.Create(
+                    sourceWidth,
+                    sourceHeight,
+                    new BitmapBounds
                 {
-                    Bounds = new BitmapBounds
-                    {
-                        X = 0,
-                        Y = startY,
-                        Width = sourceWidth,
-                        Height = regionHeight,
-                    },
-                    ScaledWidth = scaledWidth,
-                    ScaledHeight = scaledHeight,
-                    InterpolationMode = BitmapInterpolationMode.Fant,
-                };
+                    X = 0,
+                    Y = startY,
+                    Width = sourceWidth,
+                    Height = regionHeight,
+                });
                 using SoftwareBitmap bitmap = await decoder
                     .GetSoftwareBitmapAsync(
                         BitmapPixelFormat.Bgra8,
@@ -71,8 +60,8 @@ internal sealed class WindowsOcrRegionSource : IOcrRegionSource
                 byte[] encoded = await EncodePngAsync(bitmap, cancellationToken);
                 regions.Add(new CapturedFrame(
                     encoded,
-                    checked((int)scaledWidth),
-                    checked((int)scaledHeight),
+                    checked((int)transform.ScaledWidth),
+                    checked((int)transform.ScaledHeight),
                     "image/png",
                     $"{frame.SourceKind}:ocr-band-{index + 1}"));
             }
