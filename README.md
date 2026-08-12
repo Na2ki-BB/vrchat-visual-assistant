@@ -2,9 +2,9 @@
 
 VRChat のデスクトップミラーに見えている英語を、明示的な SCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 1.5の実機改善中** です。キャプチャ、OCR、XSOverlay通知は実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首HUDとVRChat OSCトリガーは後続です。
+現在は **Phase 1.7の実機改善中** です。キャプチャ、OCR、操作可能なSteamVR結果パネルは実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首追従とVRChat OSCトリガーは後続です。
 
-確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。現在は小さなXSOverlay通知だけを表示します。
+確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
 > 非公式プロジェクトです。VRChat Inc.、Valve Corporation、OpenAIの承認・提携を示すものではありません。
 
@@ -16,7 +16,9 @@ VRChat のデスクトップミラーに見えている英語を、明示的な 
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
 - 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
-- 約1秒のSCAN中通知と、OCR/翻訳結果または失敗段階をXSOverlay通知としてVR内表示
+- 約1秒のSCAN中通知と失敗段階をXSOverlay通知としてVR内表示
+- OCR/翻訳結果をSteamVR内の操作可能なパネルへ表示し、閉じるまで保持
+- 長い結果をVRコントローラーで上下スクロール
 - OpenAI利用時は`Ctrl+Shift+G`、またはOVR Advanced Settingsに割り当てたVR操作で`GPT-5.4 nano`と`GPT-5.6 Luna`を切り替え
 - 英語OCR、翻訳、処理時間、失敗段階、相関IDをWPF画面に表示
 - 任意のローカル画像からOCR/翻訳を診断
@@ -154,19 +156,30 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 2. VRChat Visual Assistantを起動します。
 3. アプリのデスクトップ窓はそのままでも、最小化しても構いません。VRChat窓と重なってもキャプチャへ混ざりません。
 4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
-5. XSOverlay起動中は、約1秒の「SCAN中…」に続いて結果がVR内通知で表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
+5. XSOverlay起動中は約1秒の「SCAN中…」が表示され、その後に結果がVRCVAのSteamVRパネルへ表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
+6. 結果は自動では消えません。コントローラーでスクロールし、読み終えたら右上の「閉じる」を選びます。次のSCANを始めると古い結果は閉じます。
 
 SCAN中もVRCVAの窓は消えたり再表示されたりしません。対象ウィンドウを直接取得するため、VRChatを前面化する必要もありません。
 
-## Meta Quest 3S + XSOverlayでVR内通知を使う
+## Meta Quest 3S + SteamVRで結果パネルを使う
 
-**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。VRCVAはXSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ、短い進行通知と結果だけを送ります。
+**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。結果パネルはVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ送るのは、短い進行通知とエラーだけです。
 
 1. Quest 3SをPCVR接続し、SteamVR、XSOverlay、VRChat、VRChat Visual Assistantを起動します。
 2. `Ctrl+Shift+T`を1回押します。
 3. 約1秒の「SCAN中…」に続いて「OCR結果（翻訳未設定）」または「日本語訳」が出ることを確認します。
 
-開始通知は結果を待たせないよう1秒・小型です。結果は12秒、エラーは15秒表示されます。XSOverlayが終了していてもSCANは失敗せず、結果はデスクトップ窓に残ります。通知本文は最大700文字です。
+開始通知は結果を待たせないよう1秒・小型です。結果パネルは閉じるまで残り、長文を省略しません。SteamVRパネルを初期化できない場合もSCANは失敗せず、結果はデスクトップ窓に残り、XSOverlayが起動中ならエラー通知を出します。
+
+### 結果パネルだけを診断する
+
+SteamVRを起動した状態で、Windows PowerShellから次を実行します。固定ダミー文だけを使い、キャプチャ、OCR、翻訳、外部API送信は行いません。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --steamvr-overlay-check
+```
+
+ヘッドセット内でパネルを上下にスクロールし、右上の「閉じる」を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
 
 ### 一度だけ: QuestコントローラーへSCANを割り当てる
 
@@ -275,6 +288,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | タイムアウト | Translation | ネットワークと `VRCVA_OPENAI_TIMEOUT_SECONDS` |
 | ホットキー登録失敗 | Trigger | 他アプリとの競合。`VRCVA_HOTKEY` を変更して再起動 |
 | XSOverlay通知が出ない | Rendering | XSOverlayが起動中か確認。Window Captureは不要。デスクトップ窓に結果が出るならSCAN自体は成功 |
+| SteamVR結果パネルが出ない | Rendering | SteamVRを先に起動し、上の`--steamvr-overlay-check`を実行。失敗しても結果はデスクトップ窓に残る |
+| 結果パネルを操作できない | Rendering | `--steamvr-overlay-check`でスクロールと「閉じる」を分離確認。SteamVR Dashboardのコントローラーポインターが他パネルで反応するかも確認 |
 | OVRAS操作が反応しない | Trigger | 補助スクリプト適用後にSteamVRを再起動したか、Shortcut Twoをコントローラーへバインドしたか |
 
 ログは次にあります。
@@ -289,7 +304,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 - 取得対象はVRChatのHMD eye textureではなく、Windowsデスクトップ上のVRChatクライアント描画領域です。Windowsのタイトルバーと枠は除外します。
 - Windows Graphics Captureで対象ウィンドウを直接取得するため、他ウィンドウの遮蔽には依存しません。ただしVRChatを最小化した場合は描画再開のため短時間だけ自動復元します。
-- 現在のVR表示はXSOverlayの一時通知です。常設パネルや手首HUDではなく、長文は700文字で省略します。
+- 現在のVR結果表示はHMD相対のSteamVRパネルです。閉じるまで保持して長文をスクロールできますが、手首追従位置の調整はまだ実装していません。
 - VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。

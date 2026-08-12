@@ -101,6 +101,11 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
         ScanOutcome outcome,
         CancellationToken cancellationToken)
     {
+        if (outcome.IsSuccess && outcome.Result is not null)
+        {
+            return Task.CompletedTask;
+        }
+
         if (!outcome.IsSuccess || outcome.Result is null)
         {
             ScanFailure? failure = outcome.Failure;
@@ -112,16 +117,7 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
                 cancellationToken);
         }
 
-        bool ocrOnly = string.IsNullOrWhiteSpace(outcome.Result.JapaneseText);
-        string title = ocrOnly ? "OCR結果（翻訳未設定）" : "日本語訳";
-        string content = ocrOnly
-            ? outcome.Result.SourceText
-            : outcome.Result.JapaneseText;
-        return sink.SendAsync(
-            title,
-            Clip(content),
-            XsOverlayNotificationKind.Result,
-            cancellationToken);
+        return Task.CompletedTask;
     }
 
     private static string Clip(string value) =>

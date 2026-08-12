@@ -14,6 +14,28 @@ public partial class App : System.Windows.Application
         base.OnStartup(eventArgs);
 
         if (eventArgs.Args.Length > 0
+            && eventArgs.Args[0].Equals(
+                "--steamvr-overlay-check",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            AttachDiagnosticConsole();
+            int exitCode;
+            try
+            {
+                exitCode = await OpenVrDiagnosticRunner.RunAsync(Dispatcher);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"SteamVR overlay diagnostic failed: {exception.GetType().Name}");
+                exitCode = 4;
+            }
+
+            Shutdown(exitCode);
+            return;
+        }
+
+        if (eventArgs.Args.Length > 0
             && (eventArgs.Args[0].Equals("--ocr-file", StringComparison.OrdinalIgnoreCase)
                 || eventArgs.Args[0].Equals(
                     "--capture-vrchat-ocr",
@@ -22,16 +44,7 @@ public partial class App : System.Windows.Application
                     "--capture-vrchat-check",
                     StringComparison.OrdinalIgnoreCase)))
         {
-            NativeMethods.AttachConsole(unchecked((uint)-1));
-            try
-            {
-                Console.OutputEncoding = Encoding.UTF8;
-            }
-            catch (IOException)
-            {
-                // A GUI-subsystem launch may not have an attachable console.
-                // `dotnet VrcVa.dll ...` is the documented diagnostic path.
-            }
+            AttachDiagnosticConsole();
             int exitCode;
             try
             {
@@ -55,5 +68,19 @@ public partial class App : System.Windows.Application
         MainWindow window = new();
         MainWindow = window;
         window.Show();
+    }
+
+    private static void AttachDiagnosticConsole()
+    {
+        NativeMethods.AttachConsole(unchecked((uint)-1));
+        try
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+        catch (IOException)
+        {
+            // A GUI-subsystem launch may not have an attachable console.
+            // `dotnet VrcVa.dll ...` is the documented diagnostic path.
+        }
     }
 }

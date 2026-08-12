@@ -7,6 +7,7 @@ using VrcVa.Core;
 using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
 using VrcVa.Windows.Ocr;
+using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Win32;
 
@@ -21,6 +22,7 @@ public partial class MainWindow : Window
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
     private readonly IXsOverlayNotificationSink _xsOverlayNotificationSink;
+    private readonly SteamVrResultPanel _steamVrResultPanel;
     private readonly ScanPipeline _vrChatPipeline;
     private readonly string _privacyNotice;
     private readonly OpenAiTextTranslator? _openAiTranslator;
@@ -100,11 +102,17 @@ public partial class MainWindow : Window
 
         _analyzer = analyzer;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
+        _steamVrResultPanel = new SteamVrResultPanel(Dispatcher);
         _renderer = new CompositeResultRenderer(
             new WpfResultRenderer(
                 Dispatcher,
                 RenderProgress,
                 RenderOutcome),
+            new SteamVrOverlayResultRenderer(
+                Dispatcher,
+                _steamVrResultPanel,
+                _xsOverlayNotificationSink,
+                _logger),
             new XsOverlayNotificationRenderer(_xsOverlayNotificationSink));
         _vrChatPipeline = new ScanPipeline(
             new VrChatWindowCaptureSource(),
@@ -425,6 +433,7 @@ public partial class MainWindow : Window
         _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
+        _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
     }
 

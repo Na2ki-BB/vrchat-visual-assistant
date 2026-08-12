@@ -137,10 +137,10 @@ The source stays in the current WSL workspace. Windows commands access it throug
 ### Renderer
 
 - **Phase 1:** ordinary WPF window. This keeps full source text, translation, timing, and errors visible during development.
-- **Phase 1.5 (selected after device feedback): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification, then the final text or failure to the installed XSOverlay. The former 12-second start notification queued and delayed the result despite sub-second processing. The WPF view remains a parallel diagnostic renderer.
+- **Phase 1.5 (superseded for final results): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification and remains available for short status/error messages. Fixed-duration result notifications were useful for the first headset test but cannot support dismiss-on-demand or long-text scrolling. The WPF view remains a parallel diagnostic renderer.
 - **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
+- **Phase 1.7 (selected after notification feedback): VRCVA-owned OpenVR result overlay.** Initialize only while SteamVR is already running, present the latest result over the scene until the user closes it or starts another scan, and process OpenVR mouse/scroll events for close and long-text navigation. The first placement is HMD-relative; wrist calibration and native input actions remain separate follow-up work.
 - **Phase 2:** validate OSCQuery-based VRChat triggering and direct SteamVR compositor capture based on measured UX.
-- **Phase 3 fallback:** implement a custom OpenVR overlay only if XSOverlay cannot provide acceptable placement or interaction. Valve's `IVROverlay` supports absolute or tracked-device-relative transforms.
 
 ## 6. Implementation alternatives
 
@@ -173,7 +173,8 @@ flowchart LR
     A --> X[ITextTranslator<br/>OpenAI opt-in]
     A --> N[OCR-only result<br/>default]
     A --> R[AnalysisResult]
-    R --> V[Composite renderer<br/>WPF + XSOverlay notification]
+    R --> V[Composite renderer<br/>WPF + OpenVR result overlay]
+    P --> S[XSOverlay status notification<br/>SCAN start / fallback error]
     P -. stage metadata only .-> L[Privacy-safe log]
 ```
 
@@ -211,7 +212,7 @@ The project count is deliberately small. OpenVR should initially be another rend
 3. Capture locates the `VRChat.exe` main HWND. If minimized, it restores it temporarily; Windows Graphics Capture copies that window's composed Direct3D surface, crops it to the DPI-aware client rectangle, and encodes one in-memory PNG before restoring the prior minimized state.
 4. OCR first decodes the complete in-memory frame. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
 5. With provider `none`, OCR text becomes the result immediately. Otherwise translation receives normalized text only, with timeout, cancellation, bounded output, and explicit provider errors.
-6. A composite renderer updates the WPF UI on its dispatcher and sends a best-effort notification to XSOverlay over loopback UDP.
+6. A composite renderer updates the WPF diagnostic UI and the VRCVA-owned OpenVR result overlay. The result overlay persists until explicit close or the next scan and accepts close/scroll interaction. A short XSOverlay notification remains a best-effort progress/fallback channel.
 7. Frame buffers are disposed as soon as analysis completes. No image is retained.
 8. Logs record correlation ID, stage, duration, dimensions/text length, and sanitized errors—not content.
 
@@ -263,9 +264,9 @@ Measure latency and OCR accuracy in representative worlds. Validate occluded-win
 
 Use OSCQuery discovery to coexist with XSOverlay and other OSC clients, then add a localhost-only avatar-parameter listener with rising-edge/debounce behavior. Document the Expression Menu parameter and keep the keyboard/OVRAS trigger as recovery path.
 
-### Phase 3 — custom VR rendering fallback
+### Phase 1.7 — interactive VR result panel
 
-Implement an OpenVR overlay renderer only if the XSOverlay evaluation exposes material limitations, first head-locked/dashboard-style, then controller-relative. Keep WPF diagnostics available.
+The XSOverlay notification evaluation has exposed material limitations: fixed lifetime, no explicit close, and no long-text scrolling. Add a VRCVA-owned OpenVR scene overlay through the existing renderer contract. First use an HMD-relative panel with persistent results, close, and scrolling; retain WPF diagnostics and graceful fallback when SteamVR is unavailable. Controller-relative wrist placement and native SteamVR action bindings follow only after this vertical slice is stable.
 
 ### Phase 4 — analyzer expansion
 
@@ -298,6 +299,8 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Add conditional full-view multi-band OCR instead of a center-only crop | The user must be able to read long text anywhere in view without precisely centering it; conditional retry limits added latency |
 | 2026-08-12 | Union primary and band OCR with conservative approximate deduplication | Preserve primary-only lines while preventing overlap variations from duplicating translation input; occurrence-aware matching retains legitimate repeated lines |
 | 2026-08-12 | Crop window capture to the Win32 client rectangle | Real-device OCR included the Windows title-bar text `VRChat`; geometric exclusion fixes the capture boundary without suppressing legitimate in-world words |
+| 2026-08-12 | Replace fixed-duration XSOverlay result notifications with a VRCVA-owned OpenVR result panel | Real-device use requires the result to remain readable, close on demand, and scroll through long text; the renderer boundary allows this without changing capture, OCR, or translation |
+| 2026-08-12 | Keep OpenVR result placement HMD-relative before wrist placement | It proves compositor rendering and interaction with the fewest new moving parts; controller-relative calibration remains an independent follow-up |
 | 2026-08-12 | Detect a missing English OCR recognizer at startup and show installation steps without blocking SCAN | Japanese profile fallback can return structurally plausible but unusable Han characters for English; users need to discover and remedy this before the first scan while retaining intentional Japanese OCR use |
 
 ## 13. Official sources reviewed

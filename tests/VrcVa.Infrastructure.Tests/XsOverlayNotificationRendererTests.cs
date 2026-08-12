@@ -25,7 +25,7 @@ public sealed class XsOverlayNotificationRendererTests
     }
 
     [Fact]
-    public async Task RenderOutcomeAsync_UsesOcrTextWhenTranslationIsUnconfigured()
+    public async Task RenderOutcomeAsync_DoesNotSendSuccessfulResultAsFixedNotification()
     {
         RecordingSink sink = new();
         XsOverlayNotificationRenderer renderer = new(sink);
@@ -42,10 +42,7 @@ public sealed class XsOverlayNotificationRendererTests
             ScanOutcome.Succeeded(Guid.NewGuid(), result, TimeSpan.FromMilliseconds(40)),
             CancellationToken.None);
 
-        Notification notification = Assert.Single(sink.Notifications);
-        Assert.Equal("OCR結果（翻訳未設定）", notification.Title);
-        Assert.Equal("EMERGENCY EXIT", notification.Content);
-        Assert.Equal(XsOverlayNotificationKind.Result, notification.Kind);
+        Assert.Empty(sink.Notifications);
     }
 
     [Fact]
