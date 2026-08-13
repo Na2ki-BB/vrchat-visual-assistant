@@ -21,7 +21,6 @@ internal sealed class ResultPanelTexture
     public const int CapturingCell = 1;
     public const int ProcessingCell = 2;
     private const int FirstResultCell = 3;
-    public const int CalibrationCell = FirstResultCell;
     private const int MaximumResultPages = 3;
     private const double BodyTop = 116;
     private const double BodyBottom = 668;
@@ -43,7 +42,6 @@ internal sealed class ResultPanelTexture
     private int _resultPage;
     private int _resultPageCount = 1;
     private bool _resultTruncated;
-    private bool _calibrationMode;
 
     public int CurrentResultCell => FirstResultCell + _resultPage;
 
@@ -55,18 +53,9 @@ internal sealed class ResultPanelTexture
 
     public void SetContent(string title, string body)
     {
-        _calibrationMode = false;
         _title = title;
         _body = body;
         _resultPage = 0;
-    }
-
-    public void SetCalibration()
-    {
-        _calibrationMode = true;
-        _resultPage = 0;
-        _resultPageCount = 1;
-        _resultTruncated = false;
     }
 
     public bool Scroll(float delta)
@@ -103,6 +92,11 @@ internal sealed class ResultPanelTexture
         float localY = ((PixelHeight - openVrY) * AtlasRows) - (row * PixelHeight);
         return (localX, localY);
     }
+
+    internal static (float X, float Y) MapFullTexturePointer(
+        float openVrX,
+        float openVrY) =>
+        (openVrX, PixelHeight - openVrY);
 
     public bool BeginScrollbarInteraction(float x, float y)
     {
@@ -164,37 +158,47 @@ internal sealed class ResultPanelTexture
                 "文字を処理中…",
                 "OCRを実行し、設定時は\n日本語へ翻訳しています。");
 
-            if (_calibrationMode)
+            FormattedText body = CreateBodyText();
+            double viewportHeight = BodyBottom - BodyTop;
+            int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
+            _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
+            _resultTruncated = requiredPages > MaximumResultPages;
+            _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+            for (int page = 0; page < MaximumResultPages; page++)
             {
-                DrawCalibrationCell(drawing);
-                DrawEmptyCell(drawing, FirstResultCell + 1);
-                DrawEmptyCell(drawing, FirstResultCell + 2);
-            }
-            else
-            {
-                FormattedText body = CreateBodyText();
-                double viewportHeight = BodyBottom - BodyTop;
-                int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
-                _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
-                _resultTruncated = requiredPages > MaximumResultPages;
-                _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
-                for (int page = 0; page < MaximumResultPages; page++)
-                {
-                    DrawResultCell(drawing, body, page, viewportHeight);
-                }
+                DrawResultCell(drawing, body, page, viewportHeight);
             }
         }
 
+        return RenderVisualRgba(visual, AtlasPixelWidth, AtlasPixelHeight);
+    }
+
+    public byte[] RenderCalibrationRgba()
+    {
+        DrawingVisual visual = new();
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            DrawCalibrationSurface(drawing);
+        }
+
+        return RenderVisualRgba(visual, PixelWidth, PixelHeight);
+    }
+
+    private static byte[] RenderVisualRgba(
+        DrawingVisual visual,
+        int pixelWidth,
+        int pixelHeight)
+    {
         RenderTargetBitmap bitmap = new(
-            AtlasPixelWidth,
-            AtlasPixelHeight,
+            pixelWidth,
+            pixelHeight,
             96,
             96,
             PixelFormats.Pbgra32);
         bitmap.Render(visual);
 
-        byte[] bgra = new byte[AtlasPixelWidth * AtlasPixelHeight * 4];
-        bitmap.CopyPixels(bgra, AtlasPixelWidth * 4, 0);
+        byte[] bgra = new byte[pixelWidth * pixelHeight * 4];
+        bitmap.CopyPixels(bgra, pixelWidth * 4, 0);
         byte[] rgba = new byte[bgra.Length];
         for (int index = 0; index < bgra.Length; index += 4)
         {
@@ -269,9 +273,8 @@ internal sealed class ResultPanelTexture
         drawing.Pop();
     }
 
-    private void DrawCalibrationCell(DrawingContext drawing)
+    private void DrawCalibrationSurface(DrawingContext drawing)
     {
-        drawing.PushTransform(GetCellTransform(CalibrationCell));
         DrawBackground(drawing);
         FormattedText title = CreateText(
             "VR結果パネルの位置調整",
@@ -320,15 +323,6 @@ internal sealed class ResultPanelTexture
                 text,
                 new Point(bounds.Left + 10, bounds.Top + ((bounds.Height - text.Height) / 2)));
         }
-
-        drawing.Pop();
-    }
-
-    private static void DrawEmptyCell(DrawingContext drawing, int cell)
-    {
-        drawing.PushTransform(GetCellTransform(cell));
-        DrawBackground(drawing);
-        drawing.Pop();
     }
 
     private static readonly (ResultPanelCalibrationAction Action, Rect Bounds, string Label)[] CalibrationButtons =

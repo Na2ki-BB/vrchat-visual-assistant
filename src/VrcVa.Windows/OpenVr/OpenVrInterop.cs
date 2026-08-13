@@ -179,6 +179,13 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref bounds));
     }
 
+    public void SelectFullTexture()
+    {
+        ThrowIfDisposed();
+        VrTextureBounds bounds = new(0, 0, 1, 1);
+        EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref bounds));
+    }
+
     public void Show()
     {
         ThrowIfDisposed();

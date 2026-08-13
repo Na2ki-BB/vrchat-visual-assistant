@@ -9,8 +9,7 @@ internal sealed class SteamVrResultPanel : IDisposable
     private OpenVrInterop? _interop;
     private bool _visible;
     private bool _interactive;
-    private bool _atlasLoaded;
-    private bool _imageUploadInFlight;
+    private readonly ResultPanelImageUploadTracker _imageUpload = new();
     private bool _showAfterImageLoad;
     private bool _enableInteractionAfterImageLoad;
     private int _pendingCell;
@@ -74,7 +73,7 @@ internal sealed class SteamVrResultPanel : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         placement.Validate();
-        if (_calibrationActive || !EnsureConnected() || _imageUploadInFlight)
+        if (_calibrationActive || !EnsureConnected() || _imageUpload.InFlight)
         {
             return false;
         }
@@ -93,9 +92,7 @@ internal sealed class SteamVrResultPanel : IDisposable
 
             _calibrationOriginalPlacement = placement;
             _calibrationActive = true;
-            _texture.SetCalibration();
-            BeginAtlasUpload();
-            _pendingCell = ResultPanelTexture.CalibrationCell;
+            BeginCalibrationUpload();
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = true;
             _eventTimer.Start();
@@ -122,7 +119,7 @@ internal sealed class SteamVrResultPanel : IDisposable
             SetInteractive(false);
             _interop!.Hide();
             _visible = false;
-            if (_imageUploadInFlight)
+            if (_imageUpload.InFlight)
             {
                 _queuedResultTitle = title;
                 _queuedResultBody = body;
@@ -185,9 +182,9 @@ internal sealed class SteamVrResultPanel : IDisposable
         try
         {
             SetInteractive(false);
-            if (!_atlasLoaded)
+            if (!_imageUpload.AtlasLoaded)
             {
-                if (!_imageUploadInFlight)
+                if (!_imageUpload.InFlight)
                 {
                     _texture.SetContent(string.Empty, string.Empty);
                     BeginAtlasUpload();
@@ -221,7 +218,7 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
 
         SetInteractive(false);
-        if (_imageUploadInFlight)
+        if (_imageUpload.InFlight)
         {
             _pendingCell = atlasCell;
             _showAfterImageLoad = true;
@@ -246,7 +243,7 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
 
         if (_disposed
-            || (!_visible && !_showAfterImageLoad && !_imageUploadInFlight))
+            || (!_visible && !_showAfterImageLoad && !_imageUpload.InFlight))
         {
             return;
         }
@@ -281,7 +278,7 @@ internal sealed class SteamVrResultPanel : IDisposable
             _enableInteractionAfterImageLoad = false;
             _queuedResultTitle = null;
             _queuedResultBody = null;
-            if (!_imageUploadInFlight)
+            if (!_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
             }
@@ -332,7 +329,7 @@ internal sealed class SteamVrResultPanel : IDisposable
 
     private void PollEvents(object? sender, EventArgs eventArgs)
     {
-        if ((!_visible && !_imageUploadInFlight) || _interop is null)
+        if ((!_visible && !_imageUpload.InFlight) || _interop is null)
         {
             return;
         }
@@ -342,18 +339,21 @@ internal sealed class SteamVrResultPanel : IDisposable
             bool textureChanged = false;
             while (_interop.TryPollEvent(out OpenVrEvent overlayEvent))
             {
-                (float localX, float localY) = ResultPanelTexture.MapOpenVrPointer(
-                    overlayEvent.MouseX,
-                    overlayEvent.MouseY,
-                    _texture.CurrentResultCell);
+                (float localX, float localY) = _calibrationActive
+                    ? ResultPanelTexture.MapFullTexturePointer(
+                        overlayEvent.MouseX,
+                        overlayEvent.MouseY)
+                    : ResultPanelTexture.MapOpenVrPointer(
+                        overlayEvent.MouseX,
+                        overlayEvent.MouseY,
+                        _texture.CurrentResultCell);
                 switch (overlayEvent.EventType)
                 {
                     case OpenVrEvent.OverlayClosed:
                         Hide();
                         return;
-                    case OpenVrEvent.ImageLoaded when _imageUploadInFlight:
-                        _imageUploadInFlight = false;
-                        _atlasLoaded = true;
+                    case OpenVrEvent.ImageLoaded when _imageUpload.InFlight:
+                        ResultPanelImageUploadKind completedUpload = _imageUpload.Complete();
                         if (_queuedResultTitle is not null && _queuedResultBody is not null)
                         {
                             string title = _queuedResultTitle;
@@ -366,9 +366,26 @@ internal sealed class SteamVrResultPanel : IDisposable
                             _showAfterImageLoad = true;
                             _enableInteractionAfterImageLoad = true;
                         }
+                        else if (RequiresAtlasReloadAfterImageLoaded(
+                            completedUpload,
+                            _calibrationActive,
+                            _showAfterImageLoad))
+                        {
+                            // A SCAN can replace calibration while its image upload is still
+                            // completing. Upload the real atlas before applying atlas bounds.
+                            _texture.SetContent(string.Empty, string.Empty);
+                            BeginAtlasUpload(drainEvents: false);
+                        }
                         else if (_showAfterImageLoad)
                         {
-                            SelectAtlasCell(_pendingCell);
+                            if (_calibrationActive)
+                            {
+                                _interop.SelectFullTexture();
+                            }
+                            else
+                            {
+                                SelectAtlasCell(_pendingCell);
+                            }
                             ShowOverlay();
                             _visible = _interop.IsVisible();
                             _showAfterImageLoad = false;
@@ -427,7 +444,7 @@ internal sealed class SteamVrResultPanel : IDisposable
                 SelectAtlasCell(_texture.CurrentResultCell);
             }
 
-            if (!_visible && !_imageUploadInFlight)
+            if (!_visible && !_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
             }
@@ -447,13 +464,37 @@ internal sealed class SteamVrResultPanel : IDisposable
             // Associate the next image completion event with this upload.
         }
 
-        _atlasLoaded = false;
-        _imageUploadInFlight = true;
+        _imageUpload.Begin(ResultPanelImageUploadKind.Atlas);
         byte[] pixels = _texture.RenderRgba();
         interop.SetImage(
             pixels,
             ResultPanelTexture.AtlasPixelWidth,
             ResultPanelTexture.AtlasPixelHeight);
+    }
+
+    internal static bool RequiresAtlasReloadAfterImageLoaded(
+        ResultPanelImageUploadKind completedUpload,
+        bool calibrationActive,
+        bool showAfterImageLoad) =>
+        completedUpload == ResultPanelImageUploadKind.Calibration
+        && !calibrationActive
+        && showAfterImageLoad;
+
+    private void BeginCalibrationUpload()
+    {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        while (interop.TryPollEvent(out _))
+        {
+            // Associate the next image completion event with this upload.
+        }
+
+        _imageUpload.Begin(ResultPanelImageUploadKind.Calibration);
+        byte[] pixels = _texture.RenderCalibrationRgba();
+        interop.SetImage(
+            pixels,
+            ResultPanelTexture.PixelWidth,
+            ResultPanelTexture.PixelHeight);
     }
 
     private void SelectAtlasCell(int cell) => _interop!.SelectAtlasCell(
@@ -548,8 +589,7 @@ internal sealed class SteamVrResultPanel : IDisposable
         _eventTimer.Stop();
         _visible = false;
         _interactive = false;
-        _atlasLoaded = false;
-        _imageUploadInFlight = false;
+        _imageUpload.Reset();
         _showAfterImageLoad = false;
         _enableInteractionAfterImageLoad = false;
         _queuedResultTitle = null;
@@ -562,3 +602,44 @@ internal sealed class SteamVrResultPanel : IDisposable
 internal sealed record ResultPanelPlacementCalibrationEventArgs(
     ResultPanelPlacement Placement,
     bool SaveRequested);
+
+internal enum ResultPanelImageUploadKind
+{
+    None,
+    Atlas,
+    Calibration,
+}
+
+internal sealed class ResultPanelImageUploadTracker
+{
+    private ResultPanelImageUploadKind _kind;
+
+    public bool InFlight => _kind != ResultPanelImageUploadKind.None;
+
+    public bool AtlasLoaded { get; private set; }
+
+    public void Begin(ResultPanelImageUploadKind kind)
+    {
+        if (kind == ResultPanelImageUploadKind.None)
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        _kind = kind;
+        AtlasLoaded = false;
+    }
+
+    public ResultPanelImageUploadKind Complete()
+    {
+        ResultPanelImageUploadKind completedKind = _kind;
+        AtlasLoaded = completedKind == ResultPanelImageUploadKind.Atlas;
+        _kind = ResultPanelImageUploadKind.None;
+        return completedKind;
+    }
+
+    public void Reset()
+    {
+        _kind = ResultPanelImageUploadKind.None;
+        AtlasLoaded = false;
+    }
+}

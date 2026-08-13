@@ -96,17 +96,31 @@ public sealed class ResultPanelTextureTests
     }
 
     [Fact]
-    public void RenderRgba_CreatesCalibrationAtlasAtKnownCell()
+    public void RenderCalibrationRgba_CreatesOneLogicalUiTexture()
     {
         ResultPanelTexture texture = new();
-        texture.SetCalibration();
 
-        byte[] pixels = texture.RenderRgba();
+        byte[] pixels = texture.RenderCalibrationRgba();
 
-        Assert.Equal(ResultPanelTexture.CalibrationCell, texture.CurrentResultCell);
         Assert.Equal(
-            ResultPanelTexture.AtlasPixelWidth * ResultPanelTexture.AtlasPixelHeight * 4,
+            ResultPanelTexture.PixelWidth * ResultPanelTexture.PixelHeight * 4,
             pixels.Length);
+    }
+
+    [Theory]
+    [InlineData(173, 517.5, 173, 202.5)]
+    [InlineData(795, 357.5, 795, 362.5)]
+    [InlineData(188, 160, 188, 560)]
+    public void MapFullTexturePointer_MapsOpenVrBottomOriginToLogicalUi(
+        float rawX,
+        float rawY,
+        float expectedX,
+        float expectedY)
+    {
+        (float actualX, float actualY) = ResultPanelTexture.MapFullTexturePointer(rawX, rawY);
+
+        Assert.Equal(expectedX, actualX, precision: 2);
+        Assert.Equal(expectedY, actualY, precision: 2);
     }
 
     [Theory]
@@ -216,5 +230,81 @@ public sealed class ResultPanelTextureTests
         texture.SetContent("title", string.Join('\n', Enumerable.Repeat("long result line", 80)));
         _ = texture.RenderRgba();
         return texture;
+    }
+}
+
+public sealed class ResultPanelImageUploadTrackerTests
+{
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public void CalibrationCompletion_ReloadsAtlasOnlyForPendingPostCalibrationDisplay(
+        bool showAfterImageLoad,
+        bool calibrationActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SteamVrResultPanel.RequiresAtlasReloadAfterImageLoaded(
+                ResultPanelImageUploadKind.Calibration,
+                calibrationActive,
+                showAfterImageLoad));
+        Assert.False(
+            SteamVrResultPanel.RequiresAtlasReloadAfterImageLoaded(
+                ResultPanelImageUploadKind.Atlas,
+                calibrationActive,
+                showAfterImageLoad));
+    }
+
+    [Fact]
+    public void CompletedCalibrationUpload_DoesNotMarkAtlasAsLoaded()
+    {
+        ResultPanelImageUploadTracker tracker = new();
+
+        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+        ResultPanelImageUploadKind completed = tracker.Complete();
+
+        Assert.Equal(ResultPanelImageUploadKind.Calibration, completed);
+        Assert.False(tracker.InFlight);
+        Assert.False(tracker.AtlasLoaded);
+    }
+
+    [Fact]
+    public void CompletedAtlasUpload_MarksAtlasAsLoaded()
+    {
+        ResultPanelImageUploadTracker tracker = new();
+
+        tracker.Begin(ResultPanelImageUploadKind.Atlas);
+        ResultPanelImageUploadKind completed = tracker.Complete();
+
+        Assert.Equal(ResultPanelImageUploadKind.Atlas, completed);
+        Assert.False(tracker.InFlight);
+        Assert.True(tracker.AtlasLoaded);
+    }
+
+    [Fact]
+    public void CalibrationUploadAfterAtlas_InvalidatesAtlasEvenAfterCompletion()
+    {
+        ResultPanelImageUploadTracker tracker = new();
+        tracker.Begin(ResultPanelImageUploadKind.Atlas);
+        tracker.Complete();
+
+        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+        tracker.Complete();
+
+        Assert.False(tracker.AtlasLoaded);
+    }
+
+    [Fact]
+    public void ResetDuringCalibrationUpload_LeavesNoLoadedImageState()
+    {
+        ResultPanelImageUploadTracker tracker = new();
+        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+
+        tracker.Reset();
+
+        Assert.False(tracker.InFlight);
+        Assert.False(tracker.AtlasLoaded);
     }
 }
