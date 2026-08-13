@@ -62,6 +62,54 @@ public sealed class OpenVrOverlayCaptureSequenceTests
 public sealed class ResultPanelTextureTests
 {
     [Theory]
+    [InlineData(173, 202, (int)ResultPanelCalibrationAction.MoveLeft)]
+    [InlineData(484, 202, (int)ResultPanelCalibrationAction.MoveRight)]
+    [InlineData(795, 202, (int)ResultPanelCalibrationAction.MoveUp)]
+    [InlineData(1106, 202, (int)ResultPanelCalibrationAction.MoveDown)]
+    [InlineData(173, 362, (int)ResultPanelCalibrationAction.MoveNear)]
+    [InlineData(484, 362, (int)ResultPanelCalibrationAction.MoveFar)]
+    [InlineData(795, 362, (int)ResultPanelCalibrationAction.MakeSmaller)]
+    [InlineData(1106, 362, (int)ResultPanelCalibrationAction.MakeLarger)]
+    [InlineData(188, 560, (int)ResultPanelCalibrationAction.Reset)]
+    [InlineData(510, 560, (int)ResultPanelCalibrationAction.Cancel)]
+    [InlineData(961, 560, (int)ResultPanelCalibrationAction.Save)]
+    public void CalibrationHitTest_RecognizesLargeButtons(
+        float x,
+        float y,
+        int expectedValue)
+    {
+        Assert.Equal(
+            (ResultPanelCalibrationAction)expectedValue,
+            ResultPanelTexture.HitTestCalibration(x, y));
+    }
+
+    [Theory]
+    [InlineData(10, 10)]
+    [InlineData(320, 200)]
+    [InlineData(640, 400)]
+    [InlineData(1250, 700)]
+    public void CalibrationHitTest_RejectsGapsAndOutside(float x, float y)
+    {
+        Assert.Equal(
+            ResultPanelCalibrationAction.None,
+            ResultPanelTexture.HitTestCalibration(x, y));
+    }
+
+    [Fact]
+    public void RenderRgba_CreatesCalibrationAtlasAtKnownCell()
+    {
+        ResultPanelTexture texture = new();
+        texture.SetCalibration();
+
+        byte[] pixels = texture.RenderRgba();
+
+        Assert.Equal(ResultPanelTexture.CalibrationCell, texture.CurrentResultCell);
+        Assert.Equal(
+            ResultPanelTexture.AtlasPixelWidth * ResultPanelTexture.AtlasPixelHeight * 4,
+            pixels.Length);
+    }
+
+    [Theory]
     [InlineData(1020, 0)]
     [InlineData(1188, 719)]
     [InlineData(1100, 300)]

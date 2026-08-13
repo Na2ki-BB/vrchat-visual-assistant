@@ -17,11 +17,14 @@ internal sealed class SteamVrResultPanel : IDisposable
     private string? _queuedResultTitle;
     private string? _queuedResultBody;
     private ResultPanelPlacement _placement;
+    private ResultPanelPlacement? _calibrationOriginalPlacement;
+    private bool _calibrationActive;
     private bool _disposed;
 
     public event EventHandler? Hidden;
     public event EventHandler? DisplayFailed;
     public event EventHandler? PlacementFallback;
+    public event EventHandler<ResultPanelPlacementCalibrationEventArgs>? PlacementCalibrationFinished;
 
     public bool LastPlacementUsedFallback =>
         _interop?.LastPlacementUsedFallback == true;
@@ -62,6 +65,45 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
         catch
         {
+            Disconnect();
+            throw;
+        }
+    }
+
+    public bool TryShowPlacementCalibration(ResultPanelPlacement placement)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        placement.Validate();
+        if (_calibrationActive || !EnsureConnected() || _imageUploadInFlight)
+        {
+            return false;
+        }
+
+        try
+        {
+            SetInteractive(false);
+            _interop!.Hide();
+            _visible = false;
+            _placement = placement;
+            if (_interop.SetPlacement(placement))
+            {
+                PlacementFallback?.Invoke(this, EventArgs.Empty);
+                return false;
+            }
+
+            _calibrationOriginalPlacement = placement;
+            _calibrationActive = true;
+            _texture.SetCalibration();
+            BeginAtlasUpload();
+            _pendingCell = ResultPanelTexture.CalibrationCell;
+            _showAfterImageLoad = true;
+            _enableInteractionAfterImageLoad = true;
+            _eventTimer.Start();
+            return true;
+        }
+        catch
+        {
+            AbandonPlacementCalibration();
             Disconnect();
             throw;
         }
@@ -197,6 +239,12 @@ internal sealed class SteamVrResultPanel : IDisposable
 
     public void Hide()
     {
+        if (_calibrationActive)
+        {
+            FinishPlacementCalibration(save: false);
+            return;
+        }
+
         if (_disposed
             || (!_visible && !_showAfterImageLoad && !_imageUploadInFlight))
         {
@@ -346,6 +394,15 @@ internal sealed class SteamVrResultPanel : IDisposable
                         }
                         return;
                     case OpenVrEvent.MouseButtonDown
+                        when _calibrationActive
+                            && overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton:
+                        HandlePlacementCalibrationClick(localX, localY);
+                        if (!_calibrationActive)
+                        {
+                            return;
+                        }
+                        break;
+                    case OpenVrEvent.MouseButtonDown
                         when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton
                             && _texture.IsCloseButton(
                                 localX,
@@ -421,8 +478,73 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
     }
 
+    private void HandlePlacementCalibrationClick(float x, float y)
+    {
+        ResultPanelCalibrationAction action = ResultPanelTexture.HitTestCalibration(x, y);
+        switch (action)
+        {
+            case ResultPanelCalibrationAction.None:
+                return;
+            case ResultPanelCalibrationAction.Save:
+                FinishPlacementCalibration(save: true);
+                return;
+            case ResultPanelCalibrationAction.Cancel:
+                FinishPlacementCalibration(save: false);
+                return;
+            default:
+                ResultPanelPlacement updated = ResultPanelCalibration.Apply(_placement, action);
+                if (updated == _placement)
+                {
+                    return;
+                }
+
+                _placement = updated;
+                bool usedFallback = _interop!.SetPlacement(updated);
+                if (usedFallback)
+                {
+                    PlacementFallback?.Invoke(this, EventArgs.Empty);
+                }
+                return;
+        }
+    }
+
+    private void FinishPlacementCalibration(bool save)
+    {
+        ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
+        ResultPanelPlacement completed = save ? _placement : original;
+        _calibrationActive = false;
+        _calibrationOriginalPlacement = null;
+        if (!save)
+        {
+            _placement = original;
+            _ = _interop?.SetPlacement(original);
+        }
+
+        PlacementCalibrationFinished?.Invoke(
+            this,
+            new ResultPanelPlacementCalibrationEventArgs(completed, save));
+        Hide();
+    }
+
+    private void AbandonPlacementCalibration()
+    {
+        if (!_calibrationActive)
+        {
+            return;
+        }
+
+        ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
+        _placement = original;
+        _calibrationActive = false;
+        _calibrationOriginalPlacement = null;
+        PlacementCalibrationFinished?.Invoke(
+            this,
+            new ResultPanelPlacementCalibrationEventArgs(original, SaveRequested: false));
+    }
+
     private void Disconnect()
     {
+        AbandonPlacementCalibration();
         _eventTimer.Stop();
         _visible = false;
         _interactive = false;
@@ -436,3 +558,7 @@ internal sealed class SteamVrResultPanel : IDisposable
         _interop = null;
     }
 }
+
+internal sealed record ResultPanelPlacementCalibrationEventArgs(
+    ResultPanelPlacement Placement,
+    bool SaveRequested);

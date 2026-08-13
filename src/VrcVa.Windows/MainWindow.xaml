@@ -159,6 +159,7 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="220" />
               <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0"
                        Margin="0,0,12,0"
@@ -174,128 +175,18 @@
                        Margin="12,0,0,0"
                        VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondary}"
-                       Text="変更はプレビューへ即時反映" />
-          </Grid>
-
-          <Grid Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0">
-              <TextBlock FontWeight="SemiBold" Text="位置（メートル）" />
-              <Grid Margin="0,5,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="20" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="54" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="X" />
-                <Slider x:Name="ResultPanelXSlider" Grid.Column="1"
-                        Minimum="-1.5" Maximum="1.5" SmallChange="0.01"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelXSlider, Path=Value, StringFormat={}{0:0.00}}" />
-              </Grid>
-              <Grid Margin="0,3,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="20" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="54" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="Y" />
-                <Slider x:Name="ResultPanelYSlider" Grid.Column="1"
-                        Minimum="-1.5" Maximum="1.5" SmallChange="0.01"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelYSlider, Path=Value, StringFormat={}{0:0.00}}" />
-              </Grid>
-              <Grid Margin="0,3,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="20" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="54" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="Z" />
-                <Slider x:Name="ResultPanelZSlider" Grid.Column="1"
-                        Minimum="-1.5" Maximum="1.5" SmallChange="0.01"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelZSlider, Path=Value, StringFormat={}{0:0.00}}" />
-              </Grid>
-            </StackPanel>
-
-            <StackPanel Grid.Column="2">
-              <TextBlock FontWeight="SemiBold" Text="角度（度）" />
-              <Grid Margin="0,5,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="42" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="48" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="上下" />
-                <Slider x:Name="ResultPanelPitchSlider" Grid.Column="1"
-                        Minimum="-180" Maximum="180" SmallChange="1"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelPitchSlider, Path=Value, StringFormat={}{0:0}}" />
-              </Grid>
-              <Grid Margin="0,3,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="42" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="48" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="左右" />
-                <Slider x:Name="ResultPanelYawSlider" Grid.Column="1"
-                        Minimum="-180" Maximum="180" SmallChange="1"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelYawSlider, Path=Value, StringFormat={}{0:0}}" />
-              </Grid>
-              <Grid Margin="0,3,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="42" />
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="48" />
-                </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="傾き" />
-                <Slider x:Name="ResultPanelRollSlider" Grid.Column="1"
-                        Minimum="-180" Maximum="180" SmallChange="1"
-                        ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-                <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                           Text="{Binding ElementName=ResultPanelRollSlider, Path=Value, StringFormat={}{0:0}}" />
-              </Grid>
-            </StackPanel>
-          </Grid>
-
-          <Grid Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="190" />
-              <ColumnDefinition Width="55" />
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Margin="0,0,10,0" VerticalAlignment="Center" Text="横幅" />
-            <Slider x:Name="ResultPanelWidthSlider" Grid.Column="1"
-                    Minimum="0.25" Maximum="1.5" SmallChange="0.01"
-                    ValueChanged="ResultPanelPlacementSlider_ValueChanged" />
-            <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Text="{Binding ElementName=ResultPanelWidthSlider, Path=Value, StringFormat={}{0:0.00}}" />
-            <Button Grid.Column="4" Click="PreviewResultPanelPlacementButton_Click" Content="プレビュー" />
-            <Button Grid.Column="5" Margin="8,0,0,0" Click="ResetResultPanelPlacementButton_Click" Content="初期値" />
-            <Button Grid.Column="6" Margin="8,0,0,0" Click="SaveResultPanelPlacementButton_Click" Content="保存" />
+                       Text="追従先を選び、VR内で位置を調整します" />
+            <Button x:Name="StartResultPanelCalibrationButton"
+                    Grid.Column="3"
+                    Margin="12,0,0,0"
+                    Click="StartResultPanelCalibrationButton_Click"
+                    Content="VRで位置調整" />
           </Grid>
           <TextBlock x:Name="ResultPanelPlacementStatusText"
                      Margin="0,7,0,0"
                      Foreground="{StaticResource TextSecondary}"
                      TextWrapping="Wrap"
-                     Text="調整後に保存すると、次回から同じ配置を使います。" />
+                     Text="VR内の大きなボタンで調整し、そのまま保存できます。" />
         </StackPanel>
       </Expander>
     </Border>

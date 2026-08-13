@@ -241,8 +241,8 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [x] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
 - [x] Device-check automatic interaction, explicit close/input restoration, OSC Action Menu settle delay, and the resized WPF window.
 - [x] Device-check the ordered owned-overlay sequence (immediate acknowledgement, capture, OCR, result), flicker-free page navigation, laser page selection, and explicit close/input restoration. Minor visual polish remains acceptable follow-up work.
-- [x] Add left/right controller-relative transforms, HMD fallback, bounded live calibration, and atomic non-secret settings persistence for a wrist-like position.
-- [ ] Device-check left/right/HMD placement, live preview, and saved placement after a normal VRCVA restart.
+- [x] Add left/right controller-relative transforms, HMD fallback, a large-target in-VR position/size calibration screen, and atomic non-secret settings persistence for a wrist-like position.
+- [ ] Device-check left/right/HMD placement, in-VR adjustment/save/cancel, and saved placement after a normal VRCVA restart.
 - [ ] Add optional SteamVR input actions only after overlay stability is proven.
 
 ## Post-MVP Milestone E — Analyzer expansion

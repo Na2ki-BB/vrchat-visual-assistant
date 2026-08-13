@@ -158,6 +158,84 @@ internal readonly record struct ResultPanelTransform(
     float M10,
     float M11);
 
+internal enum ResultPanelCalibrationAction
+{
+    None,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    MoveNear,
+    MoveFar,
+    MakeSmaller,
+    MakeLarger,
+    Reset,
+    Cancel,
+    Save,
+}
+
+internal static class ResultPanelCalibration
+{
+    private const double PositionStepMeters = 0.03;
+    private const double WidthStepMeters = 0.06;
+
+    public static ResultPanelPlacement Apply(
+        ResultPanelPlacement placement,
+        ResultPanelCalibrationAction action)
+    {
+        placement.Validate();
+        ResultPanelPlacement updated = action switch
+        {
+            ResultPanelCalibrationAction.MoveLeft => placement with
+            {
+                X = ClampPosition(placement.X - PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MoveRight => placement with
+            {
+                X = ClampPosition(placement.X + PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MoveUp => placement with
+            {
+                Y = ClampPosition(placement.Y + PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MoveDown => placement with
+            {
+                Y = ClampPosition(placement.Y - PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MoveNear => placement with
+            {
+                Z = ClampPosition(placement.Z + PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MoveFar => placement with
+            {
+                Z = ClampPosition(placement.Z - PositionStepMeters),
+            },
+            ResultPanelCalibrationAction.MakeSmaller => placement with
+            {
+                WidthMeters = Math.Max(
+                    ResultPanelPlacement.MinimumWidthMeters,
+                    placement.WidthMeters - WidthStepMeters),
+            },
+            ResultPanelCalibrationAction.MakeLarger => placement with
+            {
+                WidthMeters = Math.Min(
+                    ResultPanelPlacement.MaximumWidthMeters,
+                    placement.WidthMeters + WidthStepMeters),
+            },
+            ResultPanelCalibrationAction.Reset =>
+                ResultPanelPlacement.CreateDefault(placement.Anchor),
+            _ => placement,
+        };
+        updated.Validate();
+        return updated;
+    }
+
+    private static double ClampPosition(double value) => Math.Clamp(
+        value,
+        ResultPanelPlacement.MinimumPosition,
+        ResultPanelPlacement.MaximumPosition);
+}
+
 internal sealed class ResultPanelPlacementStore
 {
     private const int CurrentVersion = 1;

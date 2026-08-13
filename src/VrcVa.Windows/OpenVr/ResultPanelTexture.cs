@@ -21,6 +21,7 @@ internal sealed class ResultPanelTexture
     public const int CapturingCell = 1;
     public const int ProcessingCell = 2;
     private const int FirstResultCell = 3;
+    public const int CalibrationCell = FirstResultCell;
     private const int MaximumResultPages = 3;
     private const double BodyTop = 116;
     private const double BodyBottom = 668;
@@ -42,6 +43,7 @@ internal sealed class ResultPanelTexture
     private int _resultPage;
     private int _resultPageCount = 1;
     private bool _resultTruncated;
+    private bool _calibrationMode;
 
     public int CurrentResultCell => FirstResultCell + _resultPage;
 
@@ -53,9 +55,18 @@ internal sealed class ResultPanelTexture
 
     public void SetContent(string title, string body)
     {
+        _calibrationMode = false;
         _title = title;
         _body = body;
         _resultPage = 0;
+    }
+
+    public void SetCalibration()
+    {
+        _calibrationMode = true;
+        _resultPage = 0;
+        _resultPageCount = 1;
+        _resultTruncated = false;
     }
 
     public bool Scroll(float delta)
@@ -119,6 +130,19 @@ internal sealed class ResultPanelTexture
         return previous != _resultPage;
     }
 
+    public static ResultPanelCalibrationAction HitTestCalibration(float x, float y)
+    {
+        foreach ((ResultPanelCalibrationAction action, Rect bounds, _) in CalibrationButtons)
+        {
+            if (bounds.Contains(x, y))
+            {
+                return action;
+            }
+        }
+
+        return ResultPanelCalibrationAction.None;
+    }
+
     public byte[] RenderRgba()
     {
         DrawingVisual visual = new();
@@ -140,15 +164,24 @@ internal sealed class ResultPanelTexture
                 "文字を処理中…",
                 "OCRを実行し、設定時は\n日本語へ翻訳しています。");
 
-            FormattedText body = CreateBodyText();
-            double viewportHeight = BodyBottom - BodyTop;
-            int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
-            _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
-            _resultTruncated = requiredPages > MaximumResultPages;
-            _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
-            for (int page = 0; page < MaximumResultPages; page++)
+            if (_calibrationMode)
             {
-                DrawResultCell(drawing, body, page, viewportHeight);
+                DrawCalibrationCell(drawing);
+                DrawEmptyCell(drawing, FirstResultCell + 1);
+                DrawEmptyCell(drawing, FirstResultCell + 2);
+            }
+            else
+            {
+                FormattedText body = CreateBodyText();
+                double viewportHeight = BodyBottom - BodyTop;
+                int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
+                _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
+                _resultTruncated = requiredPages > MaximumResultPages;
+                _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+                for (int page = 0; page < MaximumResultPages; page++)
+                {
+                    DrawResultCell(drawing, body, page, viewportHeight);
+                }
             }
         }
 
@@ -235,6 +268,83 @@ internal sealed class ResultPanelTexture
 
         drawing.Pop();
     }
+
+    private void DrawCalibrationCell(DrawingContext drawing)
+    {
+        drawing.PushTransform(GetCellTransform(CalibrationCell));
+        DrawBackground(drawing);
+        FormattedText title = CreateText(
+            "VR結果パネルの位置調整",
+            34,
+            FontWeights.SemiBold,
+            Brushes.White,
+            1180);
+        drawing.DrawText(title, new Point(48, 25));
+        FormattedText hint = CreateText(
+            "レーザーで選択すると、この画面がその場で動きます",
+            22,
+            FontWeights.Normal,
+            new SolidColorBrush(Color.FromRgb(190, 205, 225)),
+            1180);
+        drawing.DrawText(hint, new Point(48, 68));
+
+        foreach ((ResultPanelCalibrationAction action, Rect bounds, string label) in CalibrationButtons)
+        {
+            Color color = action switch
+            {
+                ResultPanelCalibrationAction.Save => Color.FromRgb(22, 115, 154),
+                ResultPanelCalibrationAction.Cancel => Color.FromRgb(92, 74, 80),
+                ResultPanelCalibrationAction.Reset => Color.FromRgb(67, 79, 96),
+                _ => Color.FromRgb(53, 72, 96),
+            };
+            drawing.DrawRoundedRectangle(
+                new SolidColorBrush(color),
+                new System.Windows.Media.Pen(
+                    new SolidColorBrush(Color.FromRgb(113, 143, 181)),
+                    2),
+                bounds,
+                14,
+                14);
+            FormattedText text = CreateText(
+                label,
+                action is ResultPanelCalibrationAction.Save
+                    or ResultPanelCalibrationAction.Cancel
+                    or ResultPanelCalibrationAction.Reset
+                    ? 27
+                    : 31,
+                FontWeights.SemiBold,
+                Brushes.White,
+                bounds.Width - 20);
+            text.TextAlignment = TextAlignment.Center;
+            drawing.DrawText(
+                text,
+                new Point(bounds.Left + 10, bounds.Top + ((bounds.Height - text.Height) / 2)));
+        }
+
+        drawing.Pop();
+    }
+
+    private static void DrawEmptyCell(DrawingContext drawing, int cell)
+    {
+        drawing.PushTransform(GetCellTransform(cell));
+        DrawBackground(drawing);
+        drawing.Pop();
+    }
+
+    private static readonly (ResultPanelCalibrationAction Action, Rect Bounds, string Label)[] CalibrationButtons =
+    [
+        (ResultPanelCalibrationAction.MoveLeft, new Rect(48, 140, 250, 125), "←  左へ"),
+        (ResultPanelCalibrationAction.MoveRight, new Rect(359, 140, 250, 125), "右へ  →"),
+        (ResultPanelCalibrationAction.MoveUp, new Rect(670, 140, 250, 125), "↑  上へ"),
+        (ResultPanelCalibrationAction.MoveDown, new Rect(981, 140, 250, 125), "↓  下へ"),
+        (ResultPanelCalibrationAction.MoveNear, new Rect(48, 300, 250, 125), "近く"),
+        (ResultPanelCalibrationAction.MoveFar, new Rect(359, 300, 250, 125), "遠く"),
+        (ResultPanelCalibrationAction.MakeSmaller, new Rect(670, 300, 250, 125), "小さく"),
+        (ResultPanelCalibrationAction.MakeLarger, new Rect(981, 300, 250, 125), "大きく"),
+        (ResultPanelCalibrationAction.Reset, new Rect(48, 500, 280, 120), "初期値"),
+        (ResultPanelCalibrationAction.Cancel, new Rect(370, 500, 280, 120), "中止"),
+        (ResultPanelCalibrationAction.Save, new Rect(692, 500, 539, 120), "保存して閉じる"),
+    ];
 
     private static TranslateTransform GetCellTransform(int cell) => new(
         (cell % AtlasColumns) * PixelWidth,

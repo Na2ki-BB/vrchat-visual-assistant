@@ -71,6 +71,81 @@ public sealed class ResultPanelPlacementTests
         Assert.Throws<InvalidDataException>(placement.Validate);
     }
 
+    [Theory]
+    [InlineData((int)ResultPanelCalibrationAction.MoveLeft, -0.03, 0, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MoveRight, 0.03, 0, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MoveUp, 0, 0.03, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MoveDown, 0, -0.03, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MoveNear, 0, 0, 0.03, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MoveFar, 0, 0, -0.03, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.MakeSmaller, 0, 0, 0, -0.06)]
+    [InlineData((int)ResultPanelCalibrationAction.MakeLarger, 0, 0, 0, 0.06)]
+    public void CalibrationApply_UsesVisibleThreeCentimeterSteps(
+        int actionValue,
+        double xChange,
+        double yChange,
+        double zChange,
+        double widthChange)
+    {
+        ResultPanelPlacement original = new(
+            ResultPanelAnchor.LeftHand,
+            X: 0,
+            Y: 0,
+            Z: -0.5,
+            PitchDegrees: 0,
+            YawDegrees: 0,
+            RollDegrees: 0,
+            WidthMeters: 0.7);
+
+        ResultPanelPlacement updated = ResultPanelCalibration.Apply(
+            original,
+            (ResultPanelCalibrationAction)actionValue);
+
+        Assert.Equal(original.X + xChange, updated.X, precision: 5);
+        Assert.Equal(original.Y + yChange, updated.Y, precision: 5);
+        Assert.Equal(original.Z + zChange, updated.Z, precision: 5);
+        Assert.Equal(original.WidthMeters + widthChange, updated.WidthMeters, precision: 5);
+    }
+
+    [Fact]
+    public void CalibrationApply_ClampsAtSafetyBounds()
+    {
+        ResultPanelPlacement placement = ResultPanelPlacement.Default with
+        {
+            X = ResultPanelPlacement.MinimumPosition,
+            WidthMeters = ResultPanelPlacement.MinimumWidthMeters,
+        };
+
+        ResultPanelPlacement updated = ResultPanelCalibration.Apply(
+            ResultPanelCalibration.Apply(
+                placement,
+                ResultPanelCalibrationAction.MoveLeft),
+            ResultPanelCalibrationAction.MakeSmaller);
+
+        Assert.Equal(ResultPanelPlacement.MinimumPosition, updated.X);
+        Assert.Equal(ResultPanelPlacement.MinimumWidthMeters, updated.WidthMeters);
+    }
+
+    [Fact]
+    public void CalibrationApply_ResetUsesSelectedAnchorPreset()
+    {
+        ResultPanelPlacement changed = ResultPanelPlacement.CreateDefault(
+            ResultPanelAnchor.RightHand) with
+        {
+            X = 0.5,
+            Y = -0.5,
+            WidthMeters = 1.2,
+        };
+
+        ResultPanelPlacement reset = ResultPanelCalibration.Apply(
+            changed,
+            ResultPanelCalibrationAction.Reset);
+
+        Assert.Equal(
+            ResultPanelPlacement.CreateDefault(ResultPanelAnchor.RightHand),
+            reset);
+    }
+
     [Fact]
     public void Store_WhenFileIsAbsent_ReturnsDefault()
     {
