@@ -213,13 +213,15 @@ Current state: publication, authentication, and the initial CI run are complete.
 
 ## Post-MVP Milestone C — VRChat OSC trigger
 
-- [ ] Implement OSCQuery discovery and advertise a dynamic localhost receive port; do not claim fixed port 9001 because XSOverlay already uses it on this PC.
-- [ ] Implement a localhost-bound OSC listener on the discovered/configured port.
-- [ ] Parse only the configured address and expected Boolean/int value.
-- [ ] Trigger on a rising edge and debounce duplicate/menu-reset packets.
-- [ ] Handle avatar changes and explain generated OSC config behavior.
-- [ ] Document an unsaved/unsynced Expression Parameter and Button setup.
-- [ ] Keep OSC disabled by default until explicitly enabled in both apps.
+- [x] Advertise dynamic OSC and OSCQuery ports through Windows DNS-SD and confirm VRChat auto-discovery plus a first-press trigger on PCVR while XSOverlay continues using 9001. Do not claim fixed port 9001.
+- [x] Implement dynamic OSC/OSCQuery listeners that reject non-local senders. Windows DNS-SD cannot register a strict loopback bind, so `HOST_INFO` advertises `127.0.0.1` and callbacks allow only loopback or this PC's own addresses.
+- [x] Parse only the configured address and expected Boolean/int value; reject malformed, oversized, bundled, multi-value, or differently typed packets.
+- [x] Trigger on a rising edge using a monotonic clock and debounce duplicate/menu-reset packets.
+- [x] Handle `/avatar/change` without logging its value; suppress an active state observed during the settling window until a fresh inactive value arrives, while allowing the first press after a quiet startup.
+- [x] Document an unsaved/unsynced Expression Parameter and Button setup plus a no-capture OSC diagnostic.
+- [x] Keep OSC disabled by default until explicitly enabled in both apps.
+
+Current state: the Windows listener, minimal receive-only OSCQuery namespace, DNS-SD registration, parser, edge gate, diagnostics, and unit tests are implemented. PCVR confirmed that VRChat discovers `VRChat Visual Assistant` and sends the configured Bool parameter to its dynamic port while XSOverlay continues using 9001. The remaining gate is confirming from a second LAN device that OSCQuery receives no usable response.
 
 ## Post-MVP Milestone D — Interactive SteamVR result panel
 
@@ -234,7 +236,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Keep the WPF renderer and short XSOverlay progress/fallback notifications when SteamVR is unavailable.
 - [x] Stop sending successful long-form results as fixed-duration XSOverlay notifications.
 - [x] Verify that overlay rendering never logs or persists OCR/translation content.
-- [ ] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
+- [x] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
 - [ ] Add controller-relative transform and user calibration for a wrist-like position.
 - [ ] Test compositor restarts, headset disconnects, overlay cleanup, and WPF fallback.
 - [ ] Add optional SteamVR input actions only after overlay stability is proven.

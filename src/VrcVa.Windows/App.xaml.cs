@@ -15,6 +15,30 @@ public partial class App : System.Windows.Application
 
         if (eventArgs.Args.Length > 0
             && eventArgs.Args[0].Equals(
+                "--osc-trigger-check",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            AttachDiagnosticConsole();
+            int exitCode;
+            try
+            {
+                exitCode = await OscTriggerDiagnosticRunner.RunAsync(eventArgs.Args);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"OSC trigger diagnostic failed: {exception.GetType().Name}: {exception.Message} "
+                    + $"HResult=0x{exception.HResult:X8} "
+                    + $"Inner={exception.InnerException?.GetType().Name}:0x{exception.InnerException?.HResult:X8}");
+                exitCode = 9;
+            }
+
+            Shutdown(exitCode);
+            return;
+        }
+
+        if (eventArgs.Args.Length > 0
+            && eventArgs.Args[0].Equals(
                 "--capture-route-check",
                 StringComparison.OrdinalIgnoreCase))
         {

@@ -105,7 +105,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 
 - **MVP: global hotkey.** Win32 `RegisterHotKey` works outside the focused WPF window and does not touch the VRChat process. It is the fastest way to validate the whole pipeline.
 - **Phase 1.5 controller bridge: OVR Advanced Settings.** Its documented SteamVR actions can send configured keyboard shortcuts from a controller. `Keyboard Shortcut Two` maps to SCAN and `Keyboard Shortcut Three` maps to the nano/Luna toggle. This avoids the observed XSOverlay pointer failure and requires no VRChat/avatar modification.
-- **Recommended later trigger: VRChat OSC avatar parameter discovered through OSCQuery.** A custom unsaved/unsynced Boolean such as `VRCVA/Scan` can be exposed as an Expression Menu button. Do not bind the listener blindly to default port 9001: installed XSOverlay already occupies it, and VRChat documents OSCQuery for multiple receivers/dynamic ports.
+- **Current Phase 2 trigger: VRChat OSC avatar parameter advertised through OSCQuery.** A custom unsaved/unsynced Boolean `VRCVA_Scan` is exposed as an Expression Menu button. VRCVA uses Windows-assigned dynamic ports instead of 9001 because installed XSOverlay already occupies it. Windows DNS-SD rejects a strict loopback service registration, so the sockets are registered on Windows network interfaces while every OSC/HTTP callback rejects senders that are neither loopback nor one of this PC's own addresses; `HOST_INFO.OSC_IP` remains `127.0.0.1`.
 - **Later alternative: SteamVR/OpenVR input action.** It avoids avatar dependency and can be controller-bindable, but requires an OpenVR application manifest, action manifest, bindings, runtime lifecycle, and more device testing.
 - Do not emulate VRChat controls or modify its input pipeline.
 
@@ -183,7 +183,7 @@ With SteamVR stopped, the production composition reached `VrChatWindowCaptureSou
 - **Phase 1.5 (superseded for final results): XSOverlay notifications.** A localhost UDP renderer sends a one-second compact SCAN progress notification and remains available for short status/error messages. Fixed-duration result notifications were useful for the first headset test but cannot support dismiss-on-demand or long-text scrolling. The WPF view remains a parallel diagnostic renderer.
 - **Rejected for normal use: XSOverlay Window Capture of the WPF app.** Real-device evaluation found too many setup interactions, an oversized panel, and a controller-click failure. It is no longer part of the normal instructions.
 - **Phase 1.7 (selected after notification feedback): VRCVA-owned OpenVR result overlay.** Initialize only while SteamVR is already running and present the latest result over the scene until the user closes it or starts another scan. The panel is non-interactive by default so VRChat keeps controller input; an existing global-hotkey/OVRAS bridge toggles laser input only while the user needs scrolling or close. Closing, hiding, disconnecting, or disposing always clears interaction. The first placement is HMD-relative; wrist calibration and native input actions remain separate follow-up work.
-- **Phase 2 capture (implemented):** prefer one OpenVR compositor eye mirror with automatic window fallback. OSCQuery-based VRChat triggering remains a separate follow-up.
+- **Current capture:** prefer one OpenVR compositor eye mirror with automatic window fallback. Phase 2 adds the separate opt-in OSCQuery trigger without changing this capture path.
 
 ## 6. Implementation alternatives
 
@@ -207,7 +207,7 @@ With SteamVR stopped, the production composition reached `VrChatWindowCaptureSou
 
 ```mermaid
 flowchart LR
-    T[Trigger<br/>button / global hotkey<br/>OVRAS controller bridge] --> P[ScanPipeline]
+    T[Trigger<br/>button / global hotkey / OVRAS<br/>opt-in VRChat OSC] --> P[ScanPipeline]
     P --> C[FallbackCaptureSource]
     C --> E[OpenVR eye mirror<br/>preferred]
     C --> H[VRChat HWND<br/>fallback]
@@ -241,7 +241,7 @@ The project count is deliberately small. OpenVR remains a Windows adapter behind
 
 ### Core contracts
 
-- `IScanTrigger`: emits an explicit user-requested scan.
+- Button, hotkey, and OSC adapters converge on the WPF composition root, which creates a `ScanRequest`; there is no separate trigger contract in Core.
 - `ICaptureSource`: returns one `CapturedFrame`; implementations own platform APIs.
 - `IAnalyzer`: turns one frame and request context into an `AnalysisResult`.
 - `IOcrEngine`: extracts source text from a frame.
@@ -254,7 +254,7 @@ The project count is deliberately small. OpenVR remains a Windows adapter behind
 
 ## 8. Data flow and lifecycle
 
-1. Trigger produces a `ScanRequest` with a new correlation ID and timestamp.
+1. Button, hotkey, or an armed OSC inactive→active edge produces a `ScanRequest` with a new correlation ID and timestamp. OSC is disabled by default, accepts only the configured address/type/value, resets its armed state on `/avatar/change`, and never queues a trigger while another scan is active.
 2. The pipeline rejects or cancels overlapping work according to single-flight policy.
 3. Capture first tries the configured OpenVR eye while SteamVR is already running. It hides and drains the result overlay, discards one stale mirror acquisition, adopts the next, and encodes one in-memory PNG. Any OpenVR acquisition failure falls back to the `VRChat.exe` HWND path; a minimized window is restored only for this fallback.
 4. OCR first decodes the complete in-memory frame using a scale selected from root dimensions and output-pixel budget. A weak result triggers three overlapping, full-width band passes across the entire view; primary and band-only lines are unioned with conservative approximate deduplication, and temporary band buffers are disposed immediately. An empty result remains a typed, user-actionable failure.
@@ -268,6 +268,7 @@ Failure categories are stable UI concepts: `Trigger`, `CaptureTargetNotFound`, `
 ## 9. Security, privacy, and public-repository policy
 
 - Never inject code, load a DLL into VRChat, patch files, read process memory, bypass EAC, or depend on non-public VRChat APIs.
+- Opt-in OSC uses DNS-SD link-local advertisement, so the service name and dynamic ports are visible on the LAN. Windows will not register a DNS-SD service bound only to loopback; callbacks therefore apply a local-host address allowlist before parsing or responding, and OSCQuery tells VRChat to send OSC to `127.0.0.1`. Raw packets, sender addresses, and `/avatar/change` values are never logged.
 - Capture only after an explicit click/hotkey/OSC edge. There is no timer-based capture loop.
 - Keep frame bytes in memory and dispose them. Debug image export is disabled by default and, if later added, must require an explicit user action and write only to a documented local directory.
 - Capture and OCR are local. No OCR text leaves the PC in the default unselected state. Any future cloud provider or image-upload analyzer must have an unmistakable UI disclosure and explicit opt-in configuration.
@@ -309,7 +310,7 @@ Measure latency and OCR accuracy in representative worlds. Validate occluded-win
 
 ### Phase 2 — natural in-VR trigger
 
-Use OSCQuery discovery to coexist with XSOverlay and other OSC clients, then add a localhost-only avatar-parameter listener with rising-edge/debounce behavior. Document the Expression Menu parameter and keep the keyboard/OVRAS trigger as recovery path.
+The receive-only OSCQuery subset now advertises Windows-assigned OSC/HTTP ports, serves `/avatar` plus `HOST_INFO`, and accepts only a configured Bool or Int avatar parameter. A monotonic rising-edge gate allows the first press after quiet startup, while suppressing an active state observed during avatar-change settling, menu-reset duplicates, and rapid repeated triggers. It is opt-in and keeps the keyboard/OVRAS trigger as the recovery path. PCVR has confirmed VRChat auto-discovery and first-press delivery while XSOverlay continues using 9001; verification from a second LAN device that no OSCQuery response is usable remains outstanding.
 
 ### Phase 1.7 — interactive VR result panel
 
@@ -357,10 +358,12 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Prefer one OpenVR eye mirror and fall back to the VRChat window | The left eye restored vertical FOV and cut measured capture-plus-OCR from about 4.17 s to 2.29 s; SteamVR is never auto-started and the retained HWND path covers OpenVR acquisition failures |
 | 2026-08-12 | Disable OCR upscaling at 8 MP and cap transformed output at 16.8 MP | Quest eye OCR fell from 4.65 s to 1.21 s with equal full-path coverage, while the lower-resolution window result remained identical; parent dimensions keep high-resolution bands at 1× |
 | 2026-08-12 | Apply `BitmapTransform` scaling once and convert crop bounds into scaled coordinates | Microsoft documents scale before crop; the previous band transform could double-scale and made middle/lower 1× crops invalid |
+| 2026-08-13 | Implement a receive-only OSCQuery subset with no new dependency | VRChat only needs the advertised `/avatar` namespace and dynamic OSC target; a full OSCQuery/WebSocket client would add unrelated surface area |
+| 2026-08-13 | Register DNS-SD on Windows interfaces but reject non-local senders | Windows returned `0x8007232A` when registering a strict loopback DNS-SD socket; local-address filtering and `OSC_IP=127.0.0.1` preserve same-PC processing without falling back to fixed port 9001 |
 
 ## 13. Official sources reviewed
 
-All sources below were checked on 2026-08-11 or 2026-08-12.
+All sources below were checked on 2026-08-11 through 2026-08-13.
 
 - VRChat OSC overview and ports: <https://docs.vrchat.com/docs/osc-overview>
 - VRChat OSCQuery and multiple-receiver discovery: <https://docs.vrchat.com/docs/oscquery>
