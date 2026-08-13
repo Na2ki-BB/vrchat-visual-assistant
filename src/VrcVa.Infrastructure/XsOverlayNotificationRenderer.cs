@@ -88,14 +88,7 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
 
     public Task RenderProgressAsync(
         ScanProgress progress,
-        CancellationToken cancellationToken) =>
-        progress.Stage == ScanStage.Trigger
-            ? sink.SendAsync(
-                "SCAN中…",
-                "画面を取得しています。",
-                XsOverlayNotificationKind.Progress,
-                cancellationToken)
-            : Task.CompletedTask;
+        CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task RenderOutcomeAsync(
         ScanOutcome outcome,

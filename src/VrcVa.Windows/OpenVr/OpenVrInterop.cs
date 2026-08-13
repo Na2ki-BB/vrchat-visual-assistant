@@ -17,6 +17,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private readonly IsOverlayVisibleDelegate _isOverlayVisible;
     private readonly WaitFrameSyncDelegate _waitFrameSync;
     private readonly SetOverlayWidthInMetersDelegate _setOverlayWidthInMeters;
+    private readonly SetOverlayTextureBoundsDelegate _setOverlayTextureBounds;
     private readonly SetOverlayTransformTrackedDeviceRelativeDelegate _setOverlayTransform;
     private readonly SetOverlayInputMethodDelegate _setOverlayInputMethod;
     private readonly SetOverlayMouseScaleDelegate _setOverlayMouseScale;
@@ -43,6 +44,9 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         _setOverlayWidthInMeters = OpenVrRuntime.GetFunction<SetOverlayWidthInMetersDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayWidthInMeters);
+        _setOverlayTextureBounds = OpenVrRuntime.GetFunction<SetOverlayTextureBoundsDelegate>(
+            overlayFunctionTable,
+            OverlaySlot.SetOverlayTextureBounds);
         _setOverlayTransform = OpenVrRuntime.GetFunction<SetOverlayTransformTrackedDeviceRelativeDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayTransformTrackedDeviceRelative);
@@ -120,6 +124,28 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
                     4));
             }
         }
+    }
+
+    public void SelectAtlasCell(int cell, int columns, int rows)
+    {
+        ThrowIfDisposed();
+        if (columns <= 0 || rows <= 0 || cell < 0 || cell >= columns * rows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cell));
+        }
+
+        float cellWidth = 1f / columns;
+        float cellHeight = 1f / rows;
+        int column = cell % columns;
+        int row = cell / columns;
+        float halfTexelU = 0.5f / ResultPanelTexture.AtlasPixelWidth;
+        float halfTexelV = 0.5f / ResultPanelTexture.AtlasPixelHeight;
+        VrTextureBounds bounds = new(
+            (column * cellWidth) + halfTexelU,
+            (row * cellHeight) + halfTexelV,
+            ((column + 1) * cellWidth) - halfTexelU,
+            ((row + 1) * cellHeight) - halfTexelV);
+        EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref bounds));
     }
 
     public void Show()
@@ -241,9 +267,6 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         EnsureSuccess(_setOverlayMouseScale(_overlayHandle, ref mouseScale));
         SetFlag(VrOverlayFlag.MakeOverlaysInteractiveIfVisible, false);
         SetFlag(VrOverlayFlag.SendVrDiscreteScrollEvents);
-        SetFlag(VrOverlayFlag.SendVrSmoothScrollEvents);
-        SetFlag(VrOverlayFlag.EnableControlBar);
-        SetFlag(VrOverlayFlag.EnableControlBarClose);
         SetFlag(VrOverlayFlag.EnableClickStabilization);
     }
 
@@ -268,6 +291,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         public const int DestroyOverlay = 2;
         public const int SetOverlayFlag = 10;
         public const int SetOverlayWidthInMeters = 21;
+        public const int SetOverlayTextureBounds = 29;
         public const int SetOverlayTransformTrackedDeviceRelative = 34;
         public const int ShowOverlay = 41;
         public const int HideOverlay = 42;
@@ -298,6 +322,11 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private delegate EvrOverlayError SetOverlayWidthInMetersDelegate(
         ulong overlayHandle,
         float widthInMeters);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate EvrOverlayError SetOverlayTextureBoundsDelegate(
+        ulong overlayHandle,
+        ref VrTextureBounds textureBounds);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate EvrOverlayError SetOverlayTransformTrackedDeviceRelativeDelegate(
@@ -398,6 +427,15 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         public float Y = y;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct VrTextureBounds(float uMin, float vMin, float uMax, float vMax)
+    {
+        public float UMin = uMin;
+        public float VMin = vMin;
+        public float UMax = uMax;
+        public float VMax = vMax;
+    }
+
     // On 64-bit Windows, VREvent_Data_t is 8-byte aligned because the native
     // union includes uint64 members. The payload therefore starts at byte 16,
     // and the complete VREvent_t is 64 bytes. Using a sequential managed union
@@ -457,8 +495,12 @@ internal readonly record struct OpenVrEvent(
     float ScrollY)
 {
     public const uint LeftMouseButton = 1;
+    public const uint MouseMove = 300;
     public const uint MouseButtonDown = 301;
+    public const uint MouseButtonUp = 302;
     public const uint ScrollDiscrete = 305;
     public const uint ScrollSmooth = 309;
+    public const uint ImageLoaded = 508;
+    public const uint ImageFailed = 517;
     public const uint OverlayClosed = 534;
 }

@@ -5,7 +5,7 @@ namespace VrcVa.Infrastructure.Tests;
 public sealed class XsOverlayNotificationRendererTests
 {
     [Fact]
-    public async Task RenderProgressAsync_NotifiesOnlyWhenScanStarts()
+    public async Task RenderProgressAsync_DoesNotQueueDelayedXsOverlayNotifications()
     {
         RecordingSink sink = new();
         XsOverlayNotificationRenderer renderer = new(sink);
@@ -17,11 +17,11 @@ public sealed class XsOverlayNotificationRendererTests
         await renderer.RenderProgressAsync(
             new ScanProgress(correlationId, ScanStage.Capture, "capture", TimeSpan.Zero),
             CancellationToken.None);
+        await renderer.RenderProgressAsync(
+            new ScanProgress(correlationId, ScanStage.Ocr, "ocr", TimeSpan.Zero),
+            CancellationToken.None);
 
-        Notification notification = Assert.Single(sink.Notifications);
-        Assert.Equal("SCAN中…", notification.Title);
-        Assert.Equal("画面を取得しています。", notification.Content);
-        Assert.Equal(XsOverlayNotificationKind.Progress, notification.Kind);
+        Assert.Empty(sink.Notifications);
     }
 
     [Fact]

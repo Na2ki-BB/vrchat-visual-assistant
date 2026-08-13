@@ -9,9 +9,17 @@ internal sealed class SteamVrResultPanel : IDisposable
     private OpenVrInterop? _interop;
     private bool _visible;
     private bool _interactive;
+    private bool _atlasLoaded;
+    private bool _imageUploadInFlight;
+    private bool _showAfterImageLoad;
+    private bool _enableInteractionAfterImageLoad;
+    private int _pendingCell;
+    private string? _queuedResultTitle;
+    private string? _queuedResultBody;
     private bool _disposed;
 
     public event EventHandler? Hidden;
+    public event EventHandler? DisplayFailed;
 
     public SteamVrResultPanel(Dispatcher dispatcher)
     {
@@ -34,10 +42,22 @@ internal sealed class SteamVrResultPanel : IDisposable
         try
         {
             SetInteractive(false);
+            _interop!.Hide();
+            _visible = false;
+            if (_imageUploadInFlight)
+            {
+                _queuedResultTitle = title;
+                _queuedResultBody = body;
+                _showAfterImageLoad = false;
+                _enableInteractionAfterImageLoad = false;
+                return true;
+            }
+
             _texture.SetContent(title, body);
-            UploadTexture();
-            _interop!.Show();
-            _visible = true;
+            BeginAtlasUpload();
+            _pendingCell = _texture.CurrentResultCell;
+            _showAfterImageLoad = true;
+            _enableInteractionAfterImageLoad = true;
             _eventTimer.Start();
             return true;
         }
@@ -48,13 +68,106 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
     }
 
-    public void Hide()
+    public bool PreloadStatusAtlas()
     {
-        if (_disposed || !_visible)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!EnsureConnected())
+        {
+            return false;
+        }
+
+        try
+        {
+            SetInteractive(false);
+            _interop!.Hide();
+            _visible = false;
+            _texture.SetContent(string.Empty, string.Empty);
+            BeginAtlasUpload();
+            _pendingCell = ResultPanelTexture.WaitingCell;
+            _showAfterImageLoad = false;
+            _enableInteractionAfterImageLoad = false;
+            _eventTimer.Start();
+            return true;
+        }
+        catch
+        {
+            Disconnect();
+            throw;
+        }
+    }
+
+    public bool TryShowStatus(int atlasCell)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!EnsureConnected())
+        {
+            return false;
+        }
+
+        try
+        {
+            SetInteractive(false);
+            if (!_atlasLoaded)
+            {
+                if (!_imageUploadInFlight)
+                {
+                    _texture.SetContent(string.Empty, string.Empty);
+                    BeginAtlasUpload();
+                }
+
+                _pendingCell = atlasCell;
+                _showAfterImageLoad = true;
+                _enableInteractionAfterImageLoad = false;
+                _eventTimer.Start();
+                return true;
+            }
+
+            SelectAtlasCell(atlasCell);
+            _interop!.Show();
+            _visible = true;
+            _eventTimer.Start();
+            return _interop.IsVisible();
+        }
+        catch
+        {
+            Disconnect();
+            throw;
+        }
+    }
+
+    public void ShowStatus(int atlasCell)
+    {
+        if (_disposed || _interop is null)
         {
             return;
         }
 
+        SetInteractive(false);
+        if (_imageUploadInFlight)
+        {
+            _pendingCell = atlasCell;
+            _showAfterImageLoad = true;
+            _enableInteractionAfterImageLoad = false;
+            return;
+        }
+
+        if (!_visible)
+        {
+            return;
+        }
+
+        SelectAtlasCell(atlasCell);
+    }
+
+    public void Hide()
+    {
+        if (_disposed
+            || (!_visible && !_showAfterImageLoad && !_imageUploadInFlight))
+        {
+            return;
+        }
+
+        bool notifyHidden = _visible;
         try
         {
             try
@@ -66,34 +179,32 @@ internal sealed class SteamVrResultPanel : IDisposable
                 _interop?.Hide();
             }
         }
+        catch
+        {
+            bool resultFailed = _enableInteractionAfterImageLoad
+                || _queuedResultTitle is not null;
+            Disconnect();
+            if (resultFailed)
+            {
+                DisplayFailed?.Invoke(this, EventArgs.Empty);
+            }
+        }
         finally
         {
             _visible = false;
             _interactive = false;
-            _eventTimer.Stop();
-            Hidden?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    public SteamVrPanelInteractionChange ToggleInteraction()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_visible || _interop is null)
-        {
-            return SteamVrPanelInteractionChange.NoVisiblePanel;
-        }
-
-        try
-        {
-            SetInteractive(!_interactive);
-            return _interactive
-                ? SteamVrPanelInteractionChange.Enabled
-                : SteamVrPanelInteractionChange.Disabled;
-        }
-        catch
-        {
-            Disconnect();
-            throw;
+            _showAfterImageLoad = false;
+            _enableInteractionAfterImageLoad = false;
+            _queuedResultTitle = null;
+            _queuedResultBody = null;
+            if (!_imageUploadInFlight)
+            {
+                _eventTimer.Stop();
+            }
+            if (notifyHidden)
+            {
+                Hidden?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 
@@ -137,36 +248,95 @@ internal sealed class SteamVrResultPanel : IDisposable
 
     private void PollEvents(object? sender, EventArgs eventArgs)
     {
-        if (!_visible || _interop is null)
+        if ((!_visible && !_imageUploadInFlight) || _interop is null)
         {
             return;
         }
 
         try
         {
+            bool textureChanged = false;
             while (_interop.TryPollEvent(out OpenVrEvent overlayEvent))
             {
+                (float localX, float localY) = ResultPanelTexture.MapOpenVrPointer(
+                    overlayEvent.MouseX,
+                    overlayEvent.MouseY,
+                    _texture.CurrentResultCell);
                 switch (overlayEvent.EventType)
                 {
                     case OpenVrEvent.OverlayClosed:
                         Hide();
                         return;
-                    case OpenVrEvent.MouseButtonDown
-                        when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton
-                            && _texture.IsCloseButton(
-                                overlayEvent.MouseX,
-                                overlayEvent.MouseY):
-                        Hide();
-                        return;
-                    case OpenVrEvent.ScrollDiscrete:
-                    case OpenVrEvent.ScrollSmooth:
-                        if (_texture.Scroll(overlayEvent.ScrollY))
+                    case OpenVrEvent.ImageLoaded when _imageUploadInFlight:
+                        _imageUploadInFlight = false;
+                        _atlasLoaded = true;
+                        if (_queuedResultTitle is not null && _queuedResultBody is not null)
                         {
-                            UploadTexture();
+                            string title = _queuedResultTitle;
+                            string body = _queuedResultBody;
+                            _queuedResultTitle = null;
+                            _queuedResultBody = null;
+                            _texture.SetContent(title, body);
+                            BeginAtlasUpload(drainEvents: false);
+                            _pendingCell = _texture.CurrentResultCell;
+                            _showAfterImageLoad = true;
+                            _enableInteractionAfterImageLoad = true;
+                        }
+                        else if (_showAfterImageLoad)
+                        {
+                            SelectAtlasCell(_pendingCell);
+                            _interop.Show();
+                            _visible = _interop.IsVisible();
+                            _showAfterImageLoad = false;
+                            if (_visible && _enableInteractionAfterImageLoad)
+                            {
+                                SetInteractive(true);
+                            }
+
+                            if (!_visible && _enableInteractionAfterImageLoad)
+                            {
+                                DisplayFailed?.Invoke(this, EventArgs.Empty);
+                            }
                         }
 
                         break;
+                    case OpenVrEvent.ImageFailed:
+                        bool resultFailed = _enableInteractionAfterImageLoad
+                            || _queuedResultTitle is not null;
+                        Disconnect();
+                        if (resultFailed)
+                        {
+                            DisplayFailed?.Invoke(this, EventArgs.Empty);
+                        }
+                        return;
+                    case OpenVrEvent.MouseButtonDown
+                        when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton
+                            && _texture.IsCloseButton(
+                                localX,
+                                localY):
+                        Hide();
+                        return;
+                    case OpenVrEvent.MouseButtonDown
+                        when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton:
+                        textureChanged |= _texture.BeginScrollbarInteraction(
+                            localX,
+                            localY);
+                        break;
+                    case OpenVrEvent.ScrollDiscrete:
+                    case OpenVrEvent.ScrollSmooth:
+                        textureChanged |= _texture.Scroll(overlayEvent.ScrollY);
+                        break;
                 }
+            }
+
+            if (textureChanged)
+            {
+                SelectAtlasCell(_texture.CurrentResultCell);
+            }
+
+            if (!_visible && !_imageUploadInFlight)
+            {
+                _eventTimer.Stop();
             }
         }
         catch
@@ -175,14 +345,28 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
     }
 
-    private void UploadTexture()
+    private void BeginAtlasUpload(bool drainEvents = true)
     {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        while (drainEvents && interop.TryPollEvent(out _))
+        {
+            // Associate the next image completion event with this upload.
+        }
+
+        _atlasLoaded = false;
+        _imageUploadInFlight = true;
         byte[] pixels = _texture.RenderRgba();
-        _interop!.SetImage(
+        interop.SetImage(
             pixels,
-            ResultPanelTexture.PixelWidth,
-            ResultPanelTexture.PixelHeight);
+            ResultPanelTexture.AtlasPixelWidth,
+            ResultPanelTexture.AtlasPixelHeight);
     }
+
+    private void SelectAtlasCell(int cell) => _interop!.SelectAtlasCell(
+        cell,
+        ResultPanelTexture.AtlasColumns,
+        ResultPanelTexture.AtlasRows);
 
     private void SetInteractive(bool enabled)
     {
@@ -195,14 +379,13 @@ internal sealed class SteamVrResultPanel : IDisposable
         _eventTimer.Stop();
         _visible = false;
         _interactive = false;
+        _atlasLoaded = false;
+        _imageUploadInFlight = false;
+        _showAfterImageLoad = false;
+        _enableInteractionAfterImageLoad = false;
+        _queuedResultTitle = null;
+        _queuedResultBody = null;
         _interop?.Dispose();
         _interop = null;
     }
-}
-
-internal enum SteamVrPanelInteractionChange
-{
-    NoVisiblePanel,
-    Enabled,
-    Disabled,
 }

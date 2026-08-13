@@ -41,13 +41,8 @@ internal static class OpenVrDiagnosticRunner
             return 2;
         }
 
-        if (panel.ToggleInteraction() != SteamVrPanelInteractionChange.Enabled)
-        {
-            Console.Error.WriteLine("SteamVR overlay interaction could not be enabled.");
-            return 4;
-        }
-
-        Console.WriteLine("Overlay displayed. Scroll it and select Close in VR within two minutes.");
+        Console.WriteLine(
+            "Overlay displayed with interaction enabled. Movement is unavailable until Close is selected.");
         Task completed = await Task.WhenAny(closed.Task, Task.Delay(TestTimeout));
         if (completed != closed.Task)
         {

@@ -6,24 +6,44 @@ using VrcVa.Windows.OpenVr;
 
 namespace VrcVa.Windows.Rendering;
 
-internal sealed class SteamVrOverlayResultRenderer(
-    Dispatcher dispatcher,
-    SteamVrResultPanel panel,
-    IXsOverlayNotificationSink fallbackNotificationSink,
-    IPrivacySafeLogger logger) : IResultRenderer
+internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
 {
+    private readonly Dispatcher _dispatcher;
+    private readonly SteamVrResultPanel _panel;
+    private readonly IXsOverlayNotificationSink _fallbackNotificationSink;
+    private readonly IPrivacySafeLogger _logger;
     private bool _fallbackReported;
+
+    public SteamVrOverlayResultRenderer(
+        Dispatcher dispatcher,
+        SteamVrResultPanel panel,
+        IXsOverlayNotificationSink fallbackNotificationSink,
+        IPrivacySafeLogger logger)
+    {
+        _dispatcher = dispatcher;
+        _panel = panel;
+        _fallbackNotificationSink = fallbackNotificationSink;
+        _logger = logger;
+        _panel.DisplayFailed += Panel_DisplayFailed;
+    }
 
     public async Task RenderProgressAsync(
         ScanProgress progress,
         CancellationToken cancellationToken)
     {
-        if (progress.Stage != ScanStage.Trigger)
+        if (progress.Stage == ScanStage.Trigger || progress.Stage == ScanStage.Capture)
         {
+            await _dispatcher.InvokeAsync(_panel.Hide, DispatcherPriority.Normal, cancellationToken);
             return;
         }
 
-        await dispatcher.InvokeAsync(panel.Hide, DispatcherPriority.Normal, cancellationToken);
+        if (progress.Stage == ScanStage.Ocr)
+        {
+            await _dispatcher.InvokeAsync(
+                () => _panel.TryShowStatus(ResultPanelTexture.ProcessingCell),
+                DispatcherPriority.Normal,
+                cancellationToken);
+        }
     }
 
     public async Task RenderOutcomeAsync(
@@ -32,7 +52,7 @@ internal sealed class SteamVrOverlayResultRenderer(
     {
         if (!outcome.IsSuccess || outcome.Result is null)
         {
-            await dispatcher.InvokeAsync(panel.Hide, DispatcherPriority.Normal, cancellationToken);
+            await _dispatcher.InvokeAsync(_panel.Hide, DispatcherPriority.Normal, cancellationToken);
             return;
         }
 
@@ -45,8 +65,8 @@ internal sealed class SteamVrOverlayResultRenderer(
 
         try
         {
-            bool displayed = await dispatcher.InvokeAsync(
-                () => panel.TryShow(title, body),
+            bool displayed = await _dispatcher.InvokeAsync(
+                () => _panel.TryShow(title, body),
                 DispatcherPriority.Normal,
                 cancellationToken);
             if (displayed)
@@ -57,7 +77,7 @@ internal sealed class SteamVrOverlayResultRenderer(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.Error(
+            _logger.Error(
                 "rendering.steamvr_overlay_failed",
                 outcome.CorrelationId,
                 ScanStage.Rendering,
@@ -78,7 +98,7 @@ internal sealed class SteamVrOverlayResultRenderer(
         _fallbackReported = true;
         try
         {
-            await fallbackNotificationSink.SendAsync(
+            await _fallbackNotificationSink.SendAsync(
                 "VR結果パネルを表示できません",
                 "SteamVRを確認してください。結果はPC側の画面に残っています。",
                 XsOverlayNotificationKind.Error,
@@ -86,8 +106,25 @@ internal sealed class SteamVrOverlayResultRenderer(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.Error(
+            _logger.Error(
                 "rendering.steamvr_overlay_fallback_notification_failed",
+                Guid.Empty,
+                ScanStage.Rendering,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+    }
+
+    private async void Panel_DisplayFailed(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            await ReportFallbackOnceAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(
+                "rendering.steamvr_overlay_async_failure_notification_failed",
                 Guid.Empty,
                 ScanStage.Rendering,
                 ScanFailureCode.Unexpected,

@@ -13,46 +13,110 @@ internal sealed class ResultPanelTexture
 {
     public const int PixelWidth = 1280;
     public const int PixelHeight = 720;
+    public const int AtlasColumns = 2;
+    public const int AtlasRows = 3;
+    public const int AtlasPixelWidth = PixelWidth * AtlasColumns;
+    public const int AtlasPixelHeight = PixelHeight * AtlasRows;
+    public const int WaitingCell = 0;
+    public const int CapturingCell = 1;
+    public const int ProcessingCell = 2;
+    private const int FirstResultCell = 3;
+    private const int MaximumResultPages = 3;
     private const double BodyTop = 116;
     private const double BodyBottom = 668;
     private const double BodyLeft = 54;
-    private const double BodyRight = 1214;
-    private const double ScrollStep = 150;
+    private const double BodyRight = 1000;
+    private const double ScrollTrackLeft = 1218;
+    private const double ScrollTrackRight = 1252;
+    private const double ScrollHitLeft = 1198;
+    private const double ScrollHitRight = 1268;
+    private const double MinimumThumbHeight = 64;
+    private const float CloseLeft = 1020;
+    private const float CloseRight = 1188;
+    private const float CloseTop = (float)BodyTop;
+    private const float CloseBottom = (float)BodyBottom;
 
     private readonly Typeface _bodyTypeface = new("Yu Gothic UI");
     private string _title = string.Empty;
     private string _body = string.Empty;
-    private double _scrollOffset;
-    private double _maximumScrollOffset;
+    private int _resultPage;
+    private int _resultPageCount = 1;
+    private bool _resultTruncated;
+
+    public int CurrentResultCell => FirstResultCell + _resultPage;
+
+    internal int CurrentResultPage => _resultPage;
+
+    internal int ResultPageCount => _resultPageCount;
+
+    internal bool ResultTruncated => _resultTruncated;
 
     public void SetContent(string title, string body)
     {
         _title = title;
         _body = body;
-        _scrollOffset = 0;
+        _resultPage = 0;
     }
 
     public bool Scroll(float delta)
     {
-        if (Math.Abs(delta) < float.Epsilon)
+        if (Math.Abs(delta) < float.Epsilon || _resultPageCount <= 1)
         {
             return false;
         }
 
-        double previous = _scrollOffset;
-        _scrollOffset = Math.Clamp(
-            _scrollOffset - (delta * ScrollStep),
+        int previous = _resultPage;
+        _resultPage = Math.Clamp(
+            _resultPage - Math.Sign(delta),
             0,
-            _maximumScrollOffset);
-        return Math.Abs(previous - _scrollOffset) > 0.1;
+            _resultPageCount - 1);
+        return previous != _resultPage;
     }
 
-    public bool IsCloseButton(float x, float y)
+    public bool IsCloseButton(float x, float y) =>
+        x is >= CloseLeft and <= CloseRight;
+
+    internal static (float X, float Y) MapOpenVrPointer(
+        float openVrX,
+        float openVrY,
+        int atlasCell)
     {
-        bool horizontalMatch = x is >= 1150 and <= 1260;
-        bool topOriginMatch = y is >= 22 and <= 102;
-        bool bottomOriginMatch = y is >= 618 and <= 698;
-        return horizontalMatch && (topOriginMatch || bottomOriginMatch);
+        if (atlasCell < 0 || atlasCell >= AtlasColumns * AtlasRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(atlasCell));
+        }
+
+        int column = atlasCell % AtlasColumns;
+        int row = atlasCell / AtlasColumns;
+        float localX = (openVrX * AtlasColumns) - (column * PixelWidth);
+        float localY = ((PixelHeight - openVrY) * AtlasRows) - (row * PixelHeight);
+        return (localX, localY);
+    }
+
+    public bool BeginScrollbarInteraction(float x, float y)
+    {
+        if (_resultPageCount <= 1
+            || x < ScrollHitLeft
+            || x > ScrollHitRight
+            || y < BodyTop
+            || y > BodyBottom)
+        {
+            return false;
+        }
+
+        (_, double thumbHeight, double travel) = GetScrollbarMetrics();
+        double thumbTop = Math.Clamp(
+            y - (thumbHeight / 2),
+            BodyTop,
+            BodyBottom - thumbHeight);
+        double ratio = travel <= 0 ? 0 : (thumbTop - BodyTop) / travel;
+        int nextPage = Math.Clamp(
+            (int)Math.Round(ratio * (_resultPageCount - 1)),
+            0,
+            _resultPageCount - 1);
+        int previous = _resultPage;
+        _resultPage = nextPage;
+        return previous != _resultPage;
     }
 
     public byte[] RenderRgba()
@@ -60,30 +124,44 @@ internal sealed class ResultPanelTexture
         DrawingVisual visual = new();
         using (DrawingContext drawing = visual.RenderOpen())
         {
-            drawing.DrawRectangle(
-                new SolidColorBrush(Color.FromRgb(18, 23, 32)),
-                null,
-                new Rect(0, 0, PixelWidth, PixelHeight));
-            drawing.DrawRectangle(
-                new SolidColorBrush(Color.FromRgb(35, 45, 60)),
-                null,
-                new Rect(0, 0, PixelWidth, 108));
+            DrawStatusCell(
+                drawing,
+                WaitingCell,
+                "SCANを受け付けました",
+                "Action Menuを閉じてください。\n1秒後に撮影します。");
+            DrawStatusCell(
+                drawing,
+                CapturingCell,
+                "撮影を開始します",
+                "表示を消して画面を取得します…");
+            DrawStatusCell(
+                drawing,
+                ProcessingCell,
+                "OCR処理中…",
+                "画面取得が完了しました。\n文字を認識しています。");
 
-            DrawHeader(drawing);
-            DrawBody(drawing);
-            DrawScrollIndicator(drawing);
+            FormattedText body = CreateBodyText();
+            double viewportHeight = BodyBottom - BodyTop;
+            int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
+            _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
+            _resultTruncated = requiredPages > MaximumResultPages;
+            _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+            for (int page = 0; page < MaximumResultPages; page++)
+            {
+                DrawResultCell(drawing, body, page, viewportHeight);
+            }
         }
 
         RenderTargetBitmap bitmap = new(
-            PixelWidth,
-            PixelHeight,
+            AtlasPixelWidth,
+            AtlasPixelHeight,
             96,
             96,
             PixelFormats.Pbgra32);
         bitmap.Render(visual);
 
-        byte[] bgra = new byte[PixelWidth * PixelHeight * 4];
-        bitmap.CopyPixels(bgra, PixelWidth * 4, 0);
+        byte[] bgra = new byte[AtlasPixelWidth * AtlasPixelHeight * 4];
+        bitmap.CopyPixels(bgra, AtlasPixelWidth * 4, 0);
         byte[] rgba = new byte[bgra.Length];
         for (int index = 0; index < bgra.Length; index += 4)
         {
@@ -96,6 +174,84 @@ internal sealed class ResultPanelTexture
         return rgba;
     }
 
+    private void DrawStatusCell(
+        DrawingContext drawing,
+        int cell,
+        string title,
+        string message)
+    {
+        drawing.PushTransform(GetCellTransform(cell));
+        DrawBackground(drawing);
+        FormattedText heading = CreateText(
+            title,
+            42,
+            FontWeights.SemiBold,
+            Brushes.White,
+            1120);
+        drawing.DrawText(heading, new Point(72, 225));
+        FormattedText detail = CreateText(
+            message,
+            30,
+            FontWeights.Normal,
+            new SolidColorBrush(Color.FromRgb(205, 217, 234)),
+            1120);
+        detail.LineHeight = 48;
+        drawing.DrawText(detail, new Point(72, 310));
+        drawing.Pop();
+    }
+
+    private void DrawResultCell(
+        DrawingContext drawing,
+        FormattedText body,
+        int page,
+        double viewportHeight)
+    {
+        drawing.PushTransform(GetCellTransform(FirstResultCell + page));
+        DrawBackground(drawing);
+        DrawHeader(drawing);
+
+        if (page < _resultPageCount)
+        {
+            drawing.PushClip(new RectangleGeometry(
+                new Rect(BodyLeft, BodyTop, BodyRight - BodyLeft, viewportHeight)));
+            drawing.DrawText(body, new Point(BodyLeft, BodyTop - (page * viewportHeight)));
+            drawing.Pop();
+
+            string pageLabel = $"{page + 1} / {_resultPageCount} ページ";
+            if (_resultTruncated && page == _resultPageCount - 1)
+            {
+                pageLabel += "（続きはPC画面）";
+            }
+
+            FormattedText hint = CreateText(
+                pageLabel,
+                20,
+                FontWeights.Normal,
+                new SolidColorBrush(Color.FromRgb(177, 191, 211)),
+                500);
+            drawing.DrawText(hint, new Point(48, 680));
+            DrawScrollIndicator(drawing, page);
+        }
+
+        drawing.Pop();
+    }
+
+    private static TranslateTransform GetCellTransform(int cell) => new(
+        (cell % AtlasColumns) * PixelWidth,
+        (cell / AtlasColumns) * PixelHeight);
+
+    private static void DrawBackground(DrawingContext drawing)
+    {
+        drawing.DrawRectangle(
+            new SolidColorBrush(Color.FromRgb(18, 23, 32)),
+            null,
+            new Rect(0, 0, PixelWidth, PixelHeight));
+        drawing.DrawRectangle(
+            new SolidColorBrush(Color.FromRgb(35, 45, 60)),
+            null,
+            new Rect(0, 0, PixelWidth, 108));
+    }
+
     private void DrawHeader(DrawingContext drawing)
     {
         FormattedText title = CreateText(
@@ -103,10 +259,10 @@ internal sealed class ResultPanelTexture
             34,
             FontWeights.SemiBold,
             Brushes.White,
-            1030);
+            1130);
         drawing.DrawText(title, new Point(48, 31));
 
-        Rect closeButton = new(1150, 22, 110, 80);
+        Rect closeButton = new(CloseLeft, CloseTop, CloseRight - CloseLeft, CloseBottom - CloseTop);
         drawing.DrawRoundedRectangle(
             new SolidColorBrush(Color.FromRgb(79, 91, 109)),
             null,
@@ -114,71 +270,63 @@ internal sealed class ResultPanelTexture
             14,
             14);
         FormattedText closeText = CreateText(
-            "閉じる",
-            25,
+            "閉\nじ\nる\n\nC\nL\nO\nS\nE",
+            28,
             FontWeights.SemiBold,
             Brushes.White,
-            90);
-        drawing.DrawText(closeText, new Point(1168, 43));
+            150);
+        closeText.TextAlignment = TextAlignment.Center;
+        closeText.LineHeight = 43;
+        drawing.DrawText(closeText, new Point(1029, 170));
     }
 
-    private void DrawBody(DrawingContext drawing)
+    private FormattedText CreateBodyText()
     {
-        double viewportHeight = BodyBottom - BodyTop;
         FormattedText body = CreateText(
             _body,
             30,
             FontWeights.Normal,
             Brushes.White,
-            BodyRight - BodyLeft - 26);
+            BodyRight - BodyLeft - 20);
         body.LineHeight = 43;
-        _maximumScrollOffset = Math.Max(0, body.Height - viewportHeight);
-        _scrollOffset = Math.Clamp(_scrollOffset, 0, _maximumScrollOffset);
-
-        drawing.PushClip(new RectangleGeometry(
-            new Rect(BodyLeft, BodyTop, BodyRight - BodyLeft, viewportHeight)));
-        drawing.DrawText(body, new Point(BodyLeft, BodyTop - _scrollOffset));
-        drawing.Pop();
-
-        if (_maximumScrollOffset > 0)
-        {
-            FormattedText hint = CreateText(
-                "上下にスクロールできます",
-                20,
-                FontWeights.Normal,
-                new SolidColorBrush(Color.FromRgb(177, 191, 211)),
-                400);
-            drawing.DrawText(hint, new Point(48, 680));
-        }
+        return body;
     }
 
-    private void DrawScrollIndicator(DrawingContext drawing)
+    private void DrawScrollIndicator(DrawingContext drawing, int page)
     {
-        if (_maximumScrollOffset <= 0)
+        if (_resultPageCount <= 1)
         {
             return;
         }
 
+        (double thumbTop, double thumbHeight, _) = GetScrollbarMetrics(page);
         double trackHeight = BodyBottom - BodyTop;
-        double contentRatio = trackHeight / (trackHeight + _maximumScrollOffset);
-        double thumbHeight = Math.Max(56, trackHeight * contentRatio);
-        double travel = trackHeight - thumbHeight;
-        double position = _maximumScrollOffset == 0
-            ? 0
-            : travel * (_scrollOffset / _maximumScrollOffset);
-
         drawing.DrawRoundedRectangle(
             new SolidColorBrush(Color.FromRgb(55, 66, 82)),
             null,
-            new Rect(1230, BodyTop, 14, trackHeight),
-            7,
-            7);
+            new Rect(ScrollTrackLeft, BodyTop, ScrollTrackRight - ScrollTrackLeft, trackHeight),
+            17,
+            17);
         drawing.DrawRoundedRectangle(
             new SolidColorBrush(Color.FromRgb(115, 171, 255)),
             null,
-            new Rect(1230, BodyTop + position, 14, thumbHeight),
-            7,
-            7);
+            new Rect(ScrollTrackLeft, thumbTop, ScrollTrackRight - ScrollTrackLeft, thumbHeight),
+            17,
+            17);
+    }
+
+    private (double Top, double Height, double Travel) GetScrollbarMetrics() =>
+        GetScrollbarMetrics(_resultPage);
+
+    private (double Top, double Height, double Travel) GetScrollbarMetrics(int page)
+    {
+        double trackHeight = BodyBottom - BodyTop;
+        double thumbHeight = Math.Max(MinimumThumbHeight, trackHeight / _resultPageCount);
+        double travel = trackHeight - thumbHeight;
+        double position = _resultPageCount <= 1
+            ? 0
+            : travel * page / (_resultPageCount - 1);
+        return (BodyTop + position, thumbHeight, travel);
     }
 
     private FormattedText CreateText(

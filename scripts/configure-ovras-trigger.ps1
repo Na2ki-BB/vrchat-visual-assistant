@@ -5,7 +5,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$interactionSequence = "^>i"
 $scanSequence = "^>t"
 $modelSequence = "^>g"
 
@@ -22,12 +21,8 @@ if (-not $sectionMatch.Success) {
 }
 
 $body = $sectionMatch.Groups["body"].Value
-$interactionSettingMatch = [regex]::Match($body, '(?m)^keyboardOne=(?<value>.*)$')
 $scanSettingMatch = [regex]::Match($body, '(?m)^keyboardTwo=(?<value>.*)$')
 $modelSettingMatch = [regex]::Match($body, '(?m)^keyboardThree=(?<value>.*)$')
-$currentInteractionSequence = if ($interactionSettingMatch.Success) {
-    $interactionSettingMatch.Groups["value"].Value.TrimEnd("`r")
-} else { "<not set>" }
 $currentScanSequence = if ($scanSettingMatch.Success) {
     $scanSettingMatch.Groups["value"].Value.TrimEnd("`r")
 } else { "<not set>" }
@@ -36,10 +31,9 @@ $currentModelSequence = if ($modelSettingMatch.Success) {
 } else { "<not set>" }
 
 Write-Host "OVR Advanced Settings config: $ConfigPath"
-Write-Host "Keyboard Shortcut One / result interaction: $currentInteractionSequence"
 Write-Host "Keyboard Shortcut Two / SCAN: $currentScanSequence"
 Write-Host "Keyboard Shortcut Three / model toggle: $currentModelSequence"
-Write-Host "VRCVA targets: Ctrl+Shift+I ($interactionSequence), Ctrl+Shift+T ($scanSequence), Ctrl+Shift+G ($modelSequence)"
+Write-Host "VRCVA targets: Ctrl+Shift+T ($scanSequence), Ctrl+Shift+G ($modelSequence)"
 
 if (-not $Apply) {
     Write-Host "No changes made. Close SteamVR/OVR Advanced Settings, then rerun with -Apply."
@@ -51,8 +45,7 @@ if ($null -ne $running -and -not $WhatIfPreference) {
     throw "OVR Advanced Settings is running. Close SteamVR first so it does not overwrite the edited setting."
 }
 
-if ($currentInteractionSequence -eq $interactionSequence `
-    -and $currentScanSequence -eq $scanSequence `
+if ($currentScanSequence -eq $scanSequence `
     -and $currentModelSequence -eq $modelSequence) {
     Write-Host "All VRCVA shortcuts are already configured."
     exit 0
@@ -61,7 +54,6 @@ if ($currentInteractionSequence -eq $interactionSequence `
 $newline = if ($content.Contains("`r`n")) { "`r`n" } else { "`n" }
 $updatedBody = $body
 foreach ($setting in @(
-    @{ Name = "keyboardOne"; Value = $interactionSequence },
     @{ Name = "keyboardTwo"; Value = $scanSequence },
     @{ Name = "keyboardThree"; Value = $modelSequence }
 )) {
@@ -91,5 +83,5 @@ if ($PSCmdlet.ShouldProcess($ConfigPath, "Back up the file and set VRCVA shortcu
         $updatedContent,
         [System.Text.UTF8Encoding]::new($false))
     Write-Host "Updated VRCVA shortcuts. Backup: $backupPath"
-    Write-Host "Restart SteamVR, then bind OVRAS actions 'Keyboard Shortcut One' (result interaction), 'Keyboard Shortcut Two' (SCAN), and 'Keyboard Shortcut Three' (model toggle)."
+    Write-Host "Restart SteamVR, then bind OVRAS actions 'Keyboard Shortcut Two' (SCAN) and 'Keyboard Shortcut Three' (model toggle). Result panel interaction is automatic and needs no shortcut."
 }
