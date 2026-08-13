@@ -192,7 +192,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Add a safe OVR Advanced Settings helper for SCAN and model-toggle keyboard actions; do not modify user settings unless `-Apply` is explicit.
 - [x] Confirm the XSOverlay test notification and latest VRCVA result notification are visible in the headset.
 - [x] Apply the OVRAS shortcut helper and validate `KeyboardTwo` from a left-grip + right-grip chord on Quest controllers.
-- [x] Reduce the SCAN progress notification to one second so the completed result is not queued behind it.
+- [x] Keep the progress notification to one second and move it after capture so neither it nor the Action Menu enters the captured eye image.
 - [ ] Run five representative scans and record total latency, OCR accuracy, readability, and self-capture failures.
 
 ## Post-MVP Milestone B — OCR/capture hardening
@@ -230,13 +230,15 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [x] Feed a text texture from the existing `IResultRenderer` contract.
 - [x] Keep the latest result visible until explicit close or the next scan.
 - [x] Handle and device-check OpenVR pointer click and scroll events for close and long-text navigation.
-- [x] Default the result panel to non-interactive and toggle close/scroll input through the existing global-hotkey/OVRAS bridge.
+- [x] Automatically enable close/scroll input while the result panel is visible, then release input on close, next scan, disconnect, or disposal; no interaction hotkey/OVRAS binding is required.
 - [x] Clear overlay interaction on close, next-scan hide, disconnect, and disposal; never add time-based result dismissal.
 - [x] Implement HMD-relative placement before tracked-device-relative placement.
-- [x] Keep the WPF renderer and short XSOverlay progress/fallback notifications when SteamVR is unavailable.
+- [x] Keep the WPF renderer and XSOverlay error fallback when SteamVR is unavailable.
 - [x] Stop sending successful long-form results as fixed-duration XSOverlay notifications.
 - [x] Verify that overlay rendering never logs or persists OCR/translation content.
 - [x] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
+- [x] Device-check automatic interaction, explicit close/input restoration, OSC Action Menu settle delay, and the resized WPF window.
+- [x] Device-check the ordered owned-overlay sequence (immediate acknowledgement, capture, OCR, result), flicker-free page navigation, laser page selection, and explicit close/input restoration. Minor visual polish remains acceptable follow-up work.
 - [ ] Add controller-relative transform and user calibration for a wrist-like position.
 - [ ] Test compositor restarts, headset disconnects, overlay cleanup, and WPF fallback.
 - [ ] Add optional SteamVR input actions only after overlay stability is proven.

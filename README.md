@@ -2,7 +2,7 @@
 
 VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 2のOSCトリガー実装・実機接続待ち** です。キャプチャ、OCR、操作可能なSteamVR結果パネルは実装・実機確認済みです。VRChat OSCトリガーも受信側を実装しましたが既定では無効で、OSCQuery自動接続は次の実機ゲートです。翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首追従は後続です。
+現在は **Phase 2のOSCトリガー実機接続まで完了** しています。キャプチャ、OCR、操作可能なSteamVR結果パネル、VRChat OSCQuery自動接続を実機確認済みです。OSCは既定では無効です。翻訳バックエンドは比較・判断中のため既定では無効で、既定状態でもOCRした英語は結果として表示します。手首追従は後続です。
 
 確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
@@ -12,15 +12,15 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
 - 明示的に有効化した場合、VRChatのExpression MenuボタンからOSCQuery経由で1回だけスキャン
-- 結果パネルは既定で非インタラクティブ。`Ctrl+Shift+I`またはOVRAS操作でレーザー操作をON/OFF
+- 結果パネル表示中はレーザー操作を自動で有効化。閉じるとVRChat操作へ自動復帰
 - SteamVR起動中はコンポジタの片眼アイミラーを1回取得。既定の左眼はデスクトップミラーより広い縦視野を使う
 - SteamVRやアイミラー取得が利用できない場合は、Windows Graphics Captureによる`VRChat.exe`取得へ自動フォールバック
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
 - 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
 - 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
-- 約1秒のSCAN中通知と失敗段階をXSOverlay通知としてVR内表示
+- 画面取得後のOCR中通知と失敗段階をXSOverlay通知としてVR内表示
 - OCR/翻訳結果をSteamVR内の操作可能なパネルへ表示し、閉じるまで保持
-- 長い結果をVRコントローラーで上下スクロール
+- 長い結果をVRコントローラーのジョイスティック、または右端のバーのクリックでページ移動
 - OpenAI利用時は`Ctrl+Shift+G`、またはOVR Advanced Settingsに割り当てたVR操作で`GPT-5.4 nano`と`GPT-5.6 Luna`を切り替え
 - 英語OCR、翻訳、処理時間、失敗段階、相関IDをWPF画面に表示
 - 任意のローカル画像からOCR/翻訳を診断
@@ -159,20 +159,21 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 2. VRChat Visual Assistantを起動します。
 3. アプリのデスクトップ窓はそのままでも、最小化しても構いません。VRChat窓と重なってもキャプチャへ混ざりません。
 4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
-5. XSOverlay起動中は約1秒の「SCAN中…」が表示され、その後に結果がVRCVAのSteamVRパネルへ表示されます。見出しには`SteamVRアイミラー（左眼）`など実際の取得経路も表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
-6. 結果は自動では消えません。コントローラーでスクロールし、読み終えたら右上の「閉じる」を選びます。次のSCANを始めると古い結果は閉じます。
+5. OSCのSCANを受け付けると、VRCVAのSteamVRパネルへすぐ「SCANを受け付けました」と表示されます。Action Menuを閉じる1秒後に「撮影を開始します」へ変わり、撮影中だけパネルが消えます。
+6. 画面取得後は同じパネルに「OCR処理中…」、続いて結果が表示されます。見出しには`SteamVRアイミラー（左眼）`など実際の取得経路も表示されます。翻訳未設定なら英語OCR、OpenAIを明示設定した場合は日本語訳です。
+7. 結果は自動では消えません。ジョイスティック、または右端の青いバー上・中央・下のクリックでページを切り替え、読み終えたら本文右側の「閉じる / CLOSE」を選びます。切替時に画像を再転送しないため、細かな再描画の点滅を避けます。VR表示は最大3ページで、続きはPC画面に残ります。次のSCANを始めると古い結果は閉じます。
 
 SCAN中もVRCVAの窓は消えたり再表示されたりしません。SteamVR起動中はデスクトップ側のVRChat窓をキャプチャしないため、前面化や復元も不要です。SteamVR経路が失敗した場合だけVRChat窓を直接取得します。
 
 ## Meta Quest 3S + SteamVRで結果パネルを使う
 
-**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。結果パネルはVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）へ送るのは、短い進行通知とエラーだけです。
+**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。受付・処理中・結果はVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）はエラー時の補助だけです。
 
 1. Quest 3SをPCVR接続し、SteamVR、XSOverlay、VRChat、VRChat Visual Assistantを起動します。
 2. `Ctrl+Shift+T`を1回押します。
-3. 約1秒の「SCAN中…」に続いて「OCR結果（翻訳未設定）」または「日本語訳」が出ることを確認します。
+3. 「SCANを受け付けました」→「撮影を開始します」→「OCR処理中…」→「OCR結果（翻訳未設定）」または「日本語訳」の順に出ることを確認します。
 
-開始通知は結果を待たせないよう1秒・小型です。結果パネルは閉じるまで残り、長文を省略しません。SteamVRパネルを初期化できない場合もSCANは失敗せず、結果はデスクトップ窓に残り、XSOverlayが起動中ならエラー通知を出します。
+結果パネルは閉じるまで残ります。VR表示は3ページまでで、それを超える長文はPC画面に全文を残します。SteamVRパネルを初期化できない場合もSCANは失敗せず、結果はデスクトップ窓に残り、XSOverlayが起動中ならエラー通知を出します。
 
 ### 結果パネルだけを診断する
 
@@ -182,7 +183,7 @@ SteamVRを起動した状態で、Windows PowerShellから次を実行します�
 dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --steamvr-overlay-check
 ```
 
-ヘッドセット内でパネルを上下にスクロールし、右上の「閉じる」を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
+ヘッドセット内でパネルをページ移動し、本文右側の「閉じる / CLOSE」を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
 
 ### OpenVRアイミラー取得を診断する（第1段階スパイク）
 
@@ -240,7 +241,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1
 ```
 
-3. 表示内容を確認後、バックアップ付きでShortcut Oneを結果パネル操作、Shortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。
+3. 表示内容を確認後、バックアップ付きでShortcut TwoをSCAN、Shortcut Threeをモデル切替へ設定します。結果パネル操作にShortcut Oneは不要です。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-ovras-trigger.ps1 -Apply
@@ -253,12 +254,11 @@ http://127.0.0.1:27062/dashboard/controllerbinding.html?desktop=1&app=steam.over
 ```
 
 5. `OVR Advanced Settings`の現在のバインドを編集し、`Misc`アクションへ進みます。
-6. 結果パネルの操作切替には`KeyboardOne`（内部出力`/actions/misc/in/keyboardone`）を未使用の操作へ割り当てます。結果は既定で非インタラクティブなので、表示したままVRChat内を移動できます。読む位置を動かす、または閉じるときだけ1回押してレーザー操作をONにし、読み終わったらもう1回押してOFFへ戻します。パネルを閉じた場合も自動的にOFFへ戻ります。
-7. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
-8. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
-9. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
+6. SCANには`KeyboardTwo`（内部出力`/actions/misc/in/keyboardtwo`）を割り当てます。この実機では左グリップと右グリップのChordを作り、両方とも`Button Single`にして、左右同時グリップでSCANできることを確認済みです。`Button Click`へ変える必要はありません。
+7. OpenAI利用時だけ、別の未使用操作へ`KeyboardThree`を割り当てます。これがnano/Luna切替です。
+8. 保存表示が「アップロード中」のままでもローカルバインドが自動保存されている場合があります。ページを閉じ、VR内で操作して反応するかを先に確認してください。GitHub等の再認証は関係ありません。
 
-OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の3値だけを変更し、同じフォルダーに日時付きバックアップを作ります。この実機では変更前の`KeyboardOne`が`Ctrl+Shift+M`なので、`-Apply`によりVRCVA用の`Ctrl+Shift+I`へ置き換わります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
+OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の`KeyboardTwo`と`KeyboardThree`だけを変更し、同じフォルダーに日時付きバックアップを作ります。`KeyboardOne`は変更しません。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
 
 ### 任意: VRChat Expression MenuからSCANする
 
@@ -278,6 +278,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
 ```
 
 VRCVA上部の詳細表示が`OSCトリガー: 有効 / 動的ポート ...`になれば待受開始です。起動直後の最初の押下からSCANとして扱います。アバター切替直後は短い安定待ち時間を置き、その間にParameterのONを受信した場合だけ一度OFFになるまで発火を抑えます。短時間の重複送信も無視し、SCAN中の追加操作はキューへ残しません。
+
+OSCからSCANした場合は、起動時に準備したVRCVAパネルへ受付を即時表示し、Action Menuを閉じるため1秒待ちます。次に撮影開始を短く表示し、そのパネルを消してから画面を取得します。取得後にOCR処理中を表示するため、VRCVA自身の表示が取得画像へ混入しない順序です。`SCAN`を押したらすぐAction Menuを閉じ、読みたい文字を正面にしたまま待ってください。
 
 VRCVAは固定ポート`9001`を使いません。Windowsが割り当てた動的ポートを`_osc._udp`と`_oscjson._tcp`のDNS-SDで広告し、VRChatに自動検出させます。WindowsのDNS-SDはloopbackだけにbindしたサービスを登録できないため、ソケット登録後に送信元をこのPCのIPアドレスへ限定しています。広告や接続に失敗した場合はOSCを無効のままにし、SCANボタンと`Ctrl+Shift+T`は引き続き使えます。
 
@@ -303,7 +305,6 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
 | `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
-| `VRCVA_PANEL_INTERACTION_HOTKEY` | `Ctrl+Shift+I` | 結果パネルのレーザー操作をON/OFFするグローバルホットキー |
 | `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 | `VRCVA_OPENVR_EYE` | `left` | 通常SCANで使う片眼。`left`または`right`。不正値は警告して左眼へ戻る |
 | `VRCVA_OSC_TRIGGER_ENABLED` | `false` | `true`のときだけローカル送信元限定のOSC/OSCQuery待受とDNS-SD広告を開始 |
@@ -382,7 +383,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | SteamVR結果パネルが出ない | Rendering | SteamVRを先に起動し、上の`--steamvr-overlay-check`を実行。失敗しても結果はデスクトップ窓に残る |
 | 結果見出しが`VRChatウィンドウ（フォールバック）`になる | Capture | SteamVR未起動、OpenVRインターフェース、GPU選択、またはコピー失敗時の正常な代替動作。SteamVRを使う場合は先に起動して再度SCAN |
 | 結果パネルを操作できない | Rendering | `--steamvr-overlay-check`でスクロールと「閉じる」を分離確認。SteamVR Dashboardのコントローラーポインターが他パネルで反応するかも確認 |
-| 結果パネル表示中にVRChatを操作できない | Rendering | `Ctrl+Shift+I`またはOVRASの`KeyboardOne`をもう一度押し、結果パネル操作をOFFにする。パネル自体は閉じずに表示を続けます |
+| 結果パネル表示中にVRChatを操作できない | Rendering | 仕様です。レーザーで本文右側の`閉じる / CLOSE`を選ぶと結果パネルが消え、VRChat操作へ自動復帰します |
 | OVRAS操作が反応しない | Trigger | 補助スクリプト適用後にSteamVRを再起動したか、Shortcut Twoをコントローラーへバインドしたか |
 
 ログは次にあります。
@@ -397,8 +398,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 - SteamVR起動中の通常SCANは設定した片眼のコンポジタ画像を取得します。両眼合成は行いません。
 - SteamVR未起動またはアイミラー取得失敗時はWindows Graphics Captureへ自動フォールバックします。他ウィンドウの遮蔽には依存しませんが、VRChatが最小化中なら描画再開のため短時間だけ自動復元します。
-- 現在のVR結果表示はHMD相対のSteamVRパネルです。利用者が閉じるか次のSCANで置き換えるまで保持します。既定ではVRChat操作を妨げない非インタラクティブ表示で、`Ctrl+Shift+I`またはOVRASの`KeyboardOne`を押した間だけスクロール・閉じる操作が可能です。手首追従位置の調整はまだ実装していません。
-- VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする方式を回復経路として維持します。任意のVRChat OSCトリガーは実装済みですが実機接続待ちで、アバター設定を必要としないVRCVAネイティブSteamVR入力は後続です。
+- 現在のVR結果表示はHMD相対のSteamVRパネルです。表示中はレーザー操作を自動で有効化するため、その間はVRChat内を歩けません。ページ移動して読み、本文右側の`閉じる / CLOSE`を選ぶと入力を解放してVRChat操作へ自動復帰します。追加バインドやキーボード操作は不要です。次のSCAN、SteamVR切断、VRCVA終了時にも入力を解放します。手首追従位置の調整はまだ実装していません。
+- VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする方式を回復経路として維持します。任意のVRChat OSCトリガーは実装・実機接続済みで、アバター設定を必要としないVRCVAネイティブSteamVR入力は後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。
 - OpenAI APIの実通信は、リポジトリやCIに秘密を置かないため利用者が明示選択した場合だけ行います。自動テストは偽HTTP応答を使います。

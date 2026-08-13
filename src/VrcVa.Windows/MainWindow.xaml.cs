@@ -17,8 +17,10 @@ namespace VrcVa.Windows;
 public partial class MainWindow : Window
 {
     private const int ScanHotKeyIdentifier = 0x565243;
-    private const int PanelInteractionHotKeyIdentifier = ScanHotKeyIdentifier + 1;
-    private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 2;
+    private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 1;
+    private const double WindowWorkAreaMargin = 16;
+    private static readonly TimeSpan OscActionMenuSettleDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan CaptureNoticeDuration = TimeSpan.FromMilliseconds(250);
     private readonly HttpClient _httpClient = new();
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly PrivacySafeFileLogger _logger;
@@ -37,7 +39,6 @@ public partial class MainWindow : Window
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
     private GlobalHotKey? _globalHotKey;
-    private GlobalHotKey? _panelInteractionHotKey;
     private GlobalHotKey? _modelToggleHotKey;
     private OscTriggerService? _oscTriggerService;
     private CancellationTokenSource? _activeScanCancellation;
@@ -47,6 +48,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        FitWindowToWorkingArea();
 
         string logDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -223,6 +225,20 @@ public partial class MainWindow : Window
                 : "英語OCRが未導入です。上の警告を確認してください。SCANは引き続き使用できます。");
         UpdateEnvironmentDetails();
 
+        try
+        {
+            _ = _steamVrResultPanel.PreloadStatusAtlas();
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(
+                "startup.steamvr_status_preload_failed",
+                Guid.Empty,
+                ScanStage.Rendering,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+
         if (_oscTriggerOptions?.Enabled == true)
         {
             await StartOscTriggerAsync(_oscTriggerOptions);
@@ -281,7 +297,10 @@ public partial class MainWindow : Window
         try
         {
             await Dispatcher
-                .InvokeAsync(() => RunPipelineAsync(_vrChatPipeline, "vrchat-osc"))
+                .InvokeAsync(() => RunPipelineAsync(
+                    _vrChatPipeline,
+                    "vrchat-osc",
+                    OscActionMenuSettleDelay))
                 .Task
                 .Unwrap();
         }
@@ -324,30 +343,6 @@ public partial class MainWindow : Window
             StatusText.Text = "グローバルホットキーを登録できませんでした。SCANボタンは使用できます。";
             _logger.Error(
                 "startup.hotkey_registration_failed",
-                Guid.Empty,
-                ScanStage.Trigger,
-                ScanFailureCode.Unexpected,
-                exception);
-        }
-
-        try
-        {
-            HotKeyDefinition definition = HotKeyDefinition.FromEnvironment(
-                "VRCVA_PANEL_INTERACTION_HOTKEY",
-                "Ctrl+Shift+I");
-            _panelInteractionHotKey = new GlobalHotKey(
-                new WindowInteropHelper(this).Handle,
-                PanelInteractionHotKeyIdentifier,
-                definition);
-            _panelInteractionHotKey.Pressed += PanelInteractionHotKey_Pressed;
-        }
-        catch (Exception exception) when (
-            exception is InvalidOperationException
-                or System.ComponentModel.Win32Exception)
-        {
-            StatusText.Text = "結果パネル操作の切替ホットキーを登録できませんでした。";
-            _logger.Error(
-                "startup.panel_interaction_hotkey_registration_failed",
                 Guid.Empty,
                 ScanStage.Trigger,
                 ScanFailureCode.Unexpected,
@@ -415,40 +410,6 @@ public partial class MainWindow : Window
                 "翻訳モデル切替",
                 $"次回のSCAN: {choice.DisplayName}",
                 XsOverlayNotificationKind.Result);
-        }
-    }
-
-    private async void PanelInteractionHotKey_Pressed(object? sender, EventArgs eventArgs)
-    {
-        try
-        {
-            SteamVrPanelInteractionChange change = _steamVrResultPanel.ToggleInteraction();
-            (string title, string content) = change switch
-            {
-                SteamVrPanelInteractionChange.Enabled => (
-                    "結果パネル操作 ON",
-                    "レーザーでスクロール・閉じる操作ができます。もう一度押すとVRChat操作へ戻ります。"),
-                SteamVrPanelInteractionChange.Disabled => (
-                    "結果パネル操作 OFF",
-                    "VRChat操作へ戻りました。結果パネルは表示を続けます。"),
-                _ => (
-                    "結果パネルなし",
-                    "先にSCANして結果パネルを表示してください。"),
-            };
-            await SendXsOverlayStatusAsync(title, content, XsOverlayNotificationKind.Result);
-        }
-        catch (Exception exception)
-        {
-            _logger.Error(
-                "rendering.steamvr_overlay_interaction_toggle_failed",
-                Guid.Empty,
-                ScanStage.Rendering,
-                ScanFailureCode.Unexpected,
-                exception);
-            await SendXsOverlayStatusAsync(
-                "結果パネル操作エラー",
-                "パネルを閉じました。SteamVRを確認して再度SCANしてください。",
-                XsOverlayNotificationKind.Error);
         }
     }
 
@@ -536,7 +497,8 @@ public partial class MainWindow : Window
 
     private async Task RunPipelineAsync(
         ScanPipeline pipeline,
-        string triggerName)
+        string triggerName,
+        TimeSpan preCaptureDelay = default)
     {
         if (Interlocked.CompareExchange(ref _uiScanRunning, 1, 0) != 0)
         {
@@ -549,12 +511,30 @@ public partial class MainWindow : Window
 
         try
         {
+            _steamVrResultPanel.Hide();
+
+            if (preCaptureDelay > TimeSpan.Zero)
+            {
+                _ = _steamVrResultPanel.TryShowStatus(ResultPanelTexture.WaitingCell);
+
+                StatusText.Text = "SCANを受け付けました。Action Menuを閉じてください。";
+                DetailText.Text = "段階: Trigger / OSCメニュー消去待ち";
+                await Task.Delay(preCaptureDelay, _activeScanCancellation.Token);
+
+                _steamVrResultPanel.ShowStatus(ResultPanelTexture.CapturingCell);
+                StatusText.Text = "撮影を開始します。";
+                DetailText.Text = "段階: Capture / 撮影開始";
+                await Task.Delay(CaptureNoticeDuration, _activeScanCancellation.Token);
+                _steamVrResultPanel.Hide();
+            }
+
             await pipeline.RunAsync(
                 ScanRequest.Create(triggerName),
                 _activeScanCancellation.Token);
         }
         catch (OperationCanceledException)
         {
+            _steamVrResultPanel.Hide();
             StatusText.Text = "SCANをキャンセルしました。";
         }
         finally
@@ -613,7 +593,6 @@ public partial class MainWindow : Window
         _activeScanCancellation?.Cancel();
         _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
-        _panelInteractionHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
         if (_oscTriggerService is not null)
         {
@@ -625,6 +604,25 @@ public partial class MainWindow : Window
         _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
         _windowLifetimeCancellation.Dispose();
+    }
+
+    private void FitWindowToWorkingArea()
+    {
+        Rect workArea = SystemParameters.WorkArea;
+        Rect fitted = WindowPlacement.Fit(
+            workArea,
+            Width,
+            Height,
+            WindowWorkAreaMargin);
+
+        MinWidth = Math.Min(MinWidth, fitted.Width);
+        MinHeight = Math.Min(MinHeight, fitted.Height);
+        Width = fitted.Width;
+        Height = fitted.Height;
+        MaxWidth = fitted.Width;
+        MaxHeight = fitted.Height;
+        Left = fitted.Left;
+        Top = fitted.Top;
     }
 
     private async Task SendXsOverlayStatusAsync(
