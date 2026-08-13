@@ -4,6 +4,7 @@ public sealed record OpenAiTranslatorOptions
 {
     public const int DefaultMaxInputUtf8Bytes = 4_000;
     public const int DefaultMaxRequestsPerSession = 10;
+    public const int MaxTimeoutSeconds = 25;
     public const string BudgetModel = "gpt-5.4-nano";
     public const string QualityModel = "gpt-5.6-luna";
     public const string DefaultModel = QualityModel;
@@ -13,7 +14,7 @@ public sealed record OpenAiTranslatorOptions
 
     public Uri Endpoint { get; init; } = new(DefaultEndpoint);
 
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(25);
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(MaxTimeoutSeconds);
 
     public int MaxOutputTokens { get; init; } = 1_200;
 
@@ -39,13 +40,14 @@ public sealed record OpenAiTranslatorOptions
             throw new InvalidOperationException("VRCVA_OPENAI_ENDPOINT must be an absolute URI.");
         }
 
-        int timeoutSeconds = 25;
+        int timeoutSeconds = MaxTimeoutSeconds;
         string? timeoutValue = Environment.GetEnvironmentVariable("VRCVA_OPENAI_TIMEOUT_SECONDS");
         if (!string.IsNullOrWhiteSpace(timeoutValue)
-            && (!int.TryParse(timeoutValue, out timeoutSeconds) || timeoutSeconds is < 1 or > 120))
+            && (!int.TryParse(timeoutValue, out timeoutSeconds)
+                || timeoutSeconds is < 1 or > MaxTimeoutSeconds))
         {
             throw new InvalidOperationException(
-                "VRCVA_OPENAI_TIMEOUT_SECONDS must be an integer from 1 to 120.");
+                $"VRCVA_OPENAI_TIMEOUT_SECONDS must be an integer from 1 to {MaxTimeoutSeconds}.");
         }
 
         return new OpenAiTranslatorOptions

@@ -105,9 +105,9 @@ Failure split:
 
 - [x] Compare recurring and time-limited free tiers from Azure, DeepL, Google Cloud, and AWS against an offline Argos/OPUS-MT option.
 - [x] Benchmark a GPU-based local translator and remove that path after observing about 3.7 GB additional VRAM use on the 8 GB PCVR GPU.
-- [x] Return the default state to `none` so provider evaluation never causes external sending or charges; return the local OCR text as a successful result.
-- [ ] Select a translation backend only after the owner explicitly approves one candidate.
-- [ ] Implement and test the selected backend after that approval.
+- [x] Keep the no-key default at `none` so a fresh installation never sends externally or incurs charges; return the local OCR text as a successful result.
+- [x] Select the OpenAI Responses API as the current opt-in translation backend after owner approval; keep local OCR as the no-key default.
+- [x] Implement and test the selected OpenAI backend, including owner-supervised Quest 3S PCVR translation.
 - [x] Implement `OpenAiTextTranslator` using `HttpClient` and the Responses API.
 - [x] Enable OpenAI only through an explicitly saved VRCVA credential or `VRCVA_TRANSLATION_PROVIDER=openai`; read only the VRCVA credential or `VRCVA_OPENAI_API_KEY`, never print it, and never reuse generic `OPENAI_API_KEY`.
 - [x] Allow one-time UI registration in Windows Credential Manager so the VRCVA-specific key persists without plaintext files or repeated entry; retain the application-specific environment variable as a temporary override.
@@ -123,8 +123,8 @@ Failure split:
 Provider-selection acceptance:
 
 1. [x] Start without provider variables and confirm the app returns OCR text while clearly reporting that translation is not configured.
-2. [ ] Confirm the pending state performs no translation HTTP request in an end-to-end run.
-3. [ ] Record the owner's explicit provider decision before adding another adapter.
+2. [ ] Confirm the no-key state performs no translation HTTP request in an end-to-end run.
+3. [x] Record the owner's decision to use OpenAI as the current opt-in provider before adding another adapter.
 
 Optional OpenAI check:
 
@@ -160,7 +160,7 @@ End-to-end acceptance:
 - [x] Run a source secret scan and inspect all intended Git files.
 - [x] Verify the built application starts and responds on the development PC without Visual Studio.
 - [x] Record the target headset environment: Meta Quest 3S PCVR with SteamVR and XSOverlay installed.
-- [ ] Record actual capture, OCR, translation, and total latency for at least five scans.
+- [x] Record actual capture, OCR, translation, and total latency for ten scans: 10/10 completed, total 1.59–6.70 s, median 3.04 s, mean 3.40 s; attempt 11 was rejected before API I/O by the per-process usage guard.
 - [x] Confirm by unit test that logs omit exception messages; implementation never sends image/text/key content to the logger.
 - [x] Write `README.md` with prerequisites, exact commands, privacy behavior, normal use, local-image diagnostics, and stage-by-stage troubleshooting.
 - [x] Record known limitations: temporary mirror restoration, occluded window, OCR pack, cloud text, and notification-only VR rendering.
@@ -195,7 +195,7 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Confirm the XSOverlay test notification and latest VRCVA result notification are visible in the headset.
 - [x] Apply the OVRAS shortcut helper and validate `KeyboardTwo` from a left-grip + right-grip chord on Quest controllers.
 - [x] Keep the progress notification to one second and move it after capture so neither it nor the Action Menu enters the captured eye image.
-- [ ] Run five representative scans and record total latency, OCR accuracy, readability, and self-capture failures.
+- [ ] Complete qualitative scoring for OCR accuracy, readability, and self-capture failures. Ten translated scans have already completed (1.59–6.70 s total); content-free timing and success metrics are recorded above.
 
 ## Post-MVP Milestone B — OCR/capture hardening
 
