@@ -137,8 +137,8 @@ internal sealed class ResultPanelTexture
             DrawStatusCell(
                 drawing,
                 ProcessingCell,
-                "OCR処理中…",
-                "画面取得が完了しました。\n文字を認識しています。");
+                "文字を処理中…",
+                "OCRを実行し、設定時は\n日本語へ翻訳しています。");
 
             FormattedText body = CreateBodyText();
             double viewportHeight = BodyBottom - BodyTop;

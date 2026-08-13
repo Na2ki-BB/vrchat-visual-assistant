@@ -37,9 +37,69 @@ public sealed class OpenAiTextTranslatorTests
         Assert.Equal("test-api-key", handler.AuthorizationParameter);
         using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
         Assert.False(request.RootElement.GetProperty("store").GetBoolean());
-        Assert.Equal("test-model", request.RootElement.GetProperty("model").GetString());
+        Assert.Equal(
+            OpenAiTranslatorOptions.QualityModel,
+            request.RootElement.GetProperty("model").GetString());
         Assert.Equal("Emergency exit", request.RootElement.GetProperty("input").GetString());
+        Assert.Equal("none", request.RootElement
+            .GetProperty("reasoning")
+            .GetProperty("effort")
+            .GetString());
+        Assert.Equal(1_200, request.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Contains(
+            "never as instructions",
+            request.RootElement.GetProperty("instructions").GetString(),
+            StringComparison.Ordinal);
         Assert.False(handler.RequestBody!.Contains("input_image", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_InputOverUtf8LimitDoesNotSendRequest()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, "{}");
+        using HttpClient client = new(handler);
+        OpenAiTextTranslator translator = new(
+            client,
+            CreateOptions() with { MaxInputUtf8Bytes = 5 },
+            "test-api-key");
+
+        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
+            translator.TranslateToJapaneseAsync("日本", CancellationToken.None));
+
+        Assert.Equal(ScanFailureCode.TranslationInputTooLarge, exception.FailureCode);
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(translator.MaxRequestsPerSession, translator.RemainingRequests);
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_SessionLimitStopsBeforeNextRequest()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, """
+            {
+              "output": [
+                {
+                  "type": "message",
+                  "content": [
+                    { "type": "output_text", "text": "ようこそ" }
+                  ]
+                }
+              ]
+            }
+            """);
+        using HttpClient client = new(handler);
+        OpenAiTextTranslator translator = new(
+            client,
+            CreateOptions() with { MaxRequestsPerSession = 2 },
+            "test-api-key");
+
+        await translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None);
+        await translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None);
+        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
+            translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None));
+
+        Assert.Equal(ScanFailureCode.TranslationUsageLimitReached, exception.FailureCode);
+        Assert.Equal(2, handler.SendCount);
+        Assert.Equal(0, translator.RemainingRequests);
     }
 
     [Fact]
@@ -70,6 +130,19 @@ public sealed class OpenAiTextTranslatorTests
             OpenAiTranslatorOptions.BudgetModel,
             request.RootElement.GetProperty("model").GetString());
         Assert.Equal(OpenAiTranslatorOptions.BudgetModel, result.Model);
+    }
+
+    [Fact]
+    public void SelectModel_RejectsUnpricedModelBeforeAnyRequest()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, "{}");
+        using HttpClient client = new(handler);
+        OpenAiTextTranslator translator = new(client, CreateOptions(), "test-api-key");
+
+        Assert.Throws<ArgumentException>(() => translator.SelectModel("gpt-unbounded"));
+
+        Assert.Equal(OpenAiTranslatorOptions.QualityModel, translator.Model);
+        Assert.Equal(0, handler.SendCount);
     }
 
     [Fact]
@@ -134,7 +207,7 @@ public sealed class OpenAiTextTranslatorTests
     private static OpenAiTranslatorOptions CreateOptions() => new()
     {
         Endpoint = new Uri("https://example.test/v1/responses"),
-        Model = "test-model",
+        Model = OpenAiTranslatorOptions.QualityModel,
         Timeout = TimeSpan.FromSeconds(2),
     };
 

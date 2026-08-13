@@ -7,8 +7,8 @@ using VrcVa.Core;
 using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
 using VrcVa.Windows.Ocr;
-using VrcVa.Windows.Osc;
 using VrcVa.Windows.OpenVr;
+using VrcVa.Windows.Osc;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Win32;
 
@@ -103,7 +103,7 @@ public partial class MainWindow : Window
                         ? "画像はWindows内でOCRし、保存しません。翻訳時はOCRテキストだけをOpenAIへ送信します（API従量課金）。"
                         : "画像はWindows内でOCRし、保存しません。OpenAIが選択されていますが、専用APIキー未設定のため外部送信しません。";
                     _translationStatus = _hasOpenAiApiKey
-                        ? $"翻訳API: OpenAI / {openAiOptions.Model}（従量課金）"
+                        ? CreateOpenAiTranslationStatus(openAiOptions.Model)
                         : "翻訳API: OpenAI / 専用キー未設定";
                     break;
                 default:
@@ -489,7 +489,7 @@ public partial class MainWindow : Window
 
         _openAiTranslator.SelectModel(choice.ModelId);
         _translationStatus = _hasOpenAiApiKey
-            ? $"翻訳API: OpenAI / {choice.ModelId}（従量課金）"
+            ? CreateOpenAiTranslationStatus(choice.ModelId)
             : $"翻訳API: OpenAI / {choice.ModelId} / 専用キー未設定";
         StatusText.Text = $"翻訳モデルを {choice.DisplayName} に変更しました。次回のSCANから使います。";
         UpdateEnvironmentDetails();
@@ -562,10 +562,17 @@ public partial class MainWindow : Window
 
     private void RenderOutcome(ScanOutcome outcome)
     {
+        if (_openAiTranslator is not null && _hasOpenAiApiKey)
+        {
+            _translationStatus = CreateOpenAiTranslationStatus(_openAiTranslator.Model);
+        }
+
         if (!outcome.IsSuccess || outcome.Result is null)
         {
             StatusText.Text = outcome.Failure?.Message ?? "SCANに失敗しました。";
-            DetailText.Text = $"失敗: {outcome.Failure?.Code} / 段階: {outcome.Failure?.Stage} / 相関ID: {outcome.CorrelationId:D}";
+            DetailText.Text = $"失敗: {outcome.Failure?.Code} / 段階: {outcome.Failure?.Stage}"
+                + CreateOpenAiUsageSuffix()
+                + $" / 相関ID: {outcome.CorrelationId:D}";
             return;
         }
 
@@ -583,8 +590,9 @@ public partial class MainWindow : Window
             $"合計 {outcome.TotalDuration.TotalSeconds:0.0}秒 "
             + $"(OCR {outcome.Result.OcrDuration.TotalSeconds:0.0}秒 / 翻訳 {outcome.Result.TranslationDuration.TotalSeconds:0.0}秒) "
             + $"/ 取得 {CaptureSourceDisplayName.Get(outcome.Result.CaptureSourceKind)} "
-            + $"/ OCR {outcome.Result.OcrLanguage} / {outcome.Result.TranslationProvider} {outcome.Result.TranslationModel} "
-            + $"/ 相関ID: {outcome.CorrelationId:D}";
+            + $"/ OCR {outcome.Result.OcrLanguage} / {outcome.Result.TranslationProvider} {outcome.Result.TranslationModel}"
+            + CreateOpenAiUsageSuffix()
+            + $" / 相関ID: {outcome.CorrelationId:D}";
     }
 
     private void MainWindow_Closed(object? sender, EventArgs eventArgs)
@@ -655,8 +663,8 @@ public partial class MainWindow : Window
     {
         List<TranslationModelChoice> choices =
         [
-            new("低料金 — GPT-5.4 nano", OpenAiTranslatorOptions.BudgetModel),
-            new("標準 — GPT-5.6 Luna", OpenAiTranslatorOptions.QualityModel),
+            new("推奨・低料金 — GPT-5.6 Luna", OpenAiTranslatorOptions.QualityModel),
+            new("比較用 — GPT-5.4 nano", OpenAiTranslatorOptions.BudgetModel),
         ];
 
         string selectedModel = _openAiTranslator?.Model ?? OpenAiTranslatorOptions.DefaultModel;
@@ -673,13 +681,21 @@ public partial class MainWindow : Window
         TranslationModelComboBox.IsEnabled = _openAiTranslator is not null;
         TranslationModelHintText.Text = _openAiTranslator is null
             ? "OpenAIを有効にした場合に選択できます"
-            : "次回のSCANから反映（従量課金）";
+            : $"次回のSCANから反映（従量課金・1起動最大{_openAiTranslator.MaxRequestsPerSession}回）";
         _modelSelectorInitializing = false;
     }
 
     private void UpdateEnvironmentDetails() =>
         DetailText.Text =
             $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / {_oscStatus} / ログ: {_logger.LogDirectory}";
+
+    private string CreateOpenAiTranslationStatus(string model) =>
+        $"翻訳API: OpenAI / {model}（従量課金・残り{_openAiTranslator?.RemainingRequests ?? 0}"
+        + $"/{_openAiTranslator?.MaxRequestsPerSession ?? 0}回）";
+
+    private string CreateOpenAiUsageSuffix() => _openAiTranslator is null || !_hasOpenAiApiKey
+        ? string.Empty
+        : $" / 翻訳API残り {_openAiTranslator.RemainingRequests}/{_openAiTranslator.MaxRequestsPerSession}回";
 
     private sealed record TranslationModelChoice(string DisplayName, string ModelId);
 

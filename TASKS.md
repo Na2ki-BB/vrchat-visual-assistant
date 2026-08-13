@@ -113,6 +113,7 @@ Failure split:
 - [x] Make model, endpoint, and timeout configurable through documented environment variables.
 - [x] Add an XSOverlay-accessible runtime selector for `gpt-5.4-nano` and `gpt-5.6-luna`; apply changes to the next scan and lock it during active scans.
 - [x] Send only normalized OCR text, set `store: false`, bound output size, and request Japanese-only translation.
+- [x] Bound OpenAI input to 4,000 UTF-8 bytes and API attempts to 10 per process, rejecting excess before network I/O without automatic retries.
 - [x] Parse output items defensively and surface HTTP status/request ID without response bodies that may echo user text.
 - [x] Distinguish missing key, authentication, rate limit, timeout, cancellation, invalid response, and provider failure.
 - [x] Unit-test request shape and response parsing with a fake HTTP handler.
