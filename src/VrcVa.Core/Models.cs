@@ -21,6 +21,8 @@ public enum ScanFailureCode
     NoTextDetected,
     TranslationNotConfigured,
     TranslationAuthenticationFailed,
+    TranslationInputTooLarge,
+    TranslationUsageLimitReached,
     TranslationRateLimited,
     TranslationTimedOut,
     TranslationFailed,

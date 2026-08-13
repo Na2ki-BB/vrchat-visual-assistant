@@ -18,6 +18,7 @@ public sealed class OpenAiTextTranslator : ITextTranslator
     private readonly HttpClient _httpClient;
     private readonly OpenAiTranslatorOptions _options;
     private readonly string? _apiKey;
+    private int _requestAttempts;
     private string _model;
 
     public OpenAiTextTranslator(
@@ -28,19 +29,20 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         _httpClient = httpClient;
         _options = options;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
-        _model = options.Model;
+        _model = ValidateModel(options.Model);
     }
 
     public string Model => Volatile.Read(ref _model);
 
+    public int MaxRequestsPerSession => _options.MaxRequestsPerSession;
+
+    public int RemainingRequests => Math.Max(
+        0,
+        _options.MaxRequestsPerSession - Volatile.Read(ref _requestAttempts));
+
     public void SelectModel(string model)
     {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            throw new ArgumentException("An OpenAI model ID is required.", nameof(model));
-        }
-
-        Volatile.Write(ref _model, model.Trim());
+        Volatile.Write(ref _model, ValidateModel(model));
     }
 
     public async Task<TranslationOutput> TranslateToJapaneseAsync(
@@ -61,6 +63,23 @@ public sealed class OpenAiTextTranslator : ITextTranslator
                 ScanFailureCode.TranslationNotConfigured,
                 ScanStage.Translation,
                 "翻訳APIキーが未設定です。VRCVA_OPENAI_API_KEY を現在のPowerShellプロセスに設定してください。");
+        }
+
+        int inputUtf8Bytes = Encoding.UTF8.GetByteCount(sourceText);
+        if (inputUtf8Bytes > _options.MaxInputUtf8Bytes)
+        {
+            throw new ScanException(
+                ScanFailureCode.TranslationInputTooLarge,
+                ScanStage.Translation,
+                $"OCRテキストが翻訳上限（UTF-8で{_options.MaxInputUtf8Bytes:N0}バイト）を超えたため、外部送信を停止しました。");
+        }
+
+        if (!TryReserveRequest())
+        {
+            throw new ScanException(
+                ScanFailureCode.TranslationUsageLimitReached,
+                ScanStage.Translation,
+                $"この起動中の翻訳上限（{_options.MaxRequestsPerSession}回）に達したため、外部送信を停止しました。必要ならアプリを再起動してください。");
         }
 
         string model = Model;
@@ -107,10 +126,10 @@ public sealed class OpenAiTextTranslator : ITextTranslator
             try
             {
                 await using Stream responseStream = await response.Content
-                    .ReadAsStreamAsync(cancellationToken)
+                    .ReadAsStreamAsync(timeout.Token)
                     .ConfigureAwait(false);
                 using JsonDocument document = await JsonDocument
-                    .ParseAsync(responseStream, cancellationToken: cancellationToken)
+                    .ParseAsync(responseStream, cancellationToken: timeout.Token)
                     .ConfigureAwait(false);
 
                 string translatedText = ExtractOutputText(document.RootElement);
@@ -126,6 +145,14 @@ public sealed class OpenAiTextTranslator : ITextTranslator
                     translatedText.Trim(),
                     ProviderName,
                     model);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new ScanException(
+                    ScanFailureCode.TranslationTimedOut,
+                    ScanStage.Translation,
+                    $"翻訳が{_options.Timeout.TotalSeconds:0}秒以内に完了しませんでした。",
+                    exception);
             }
             catch (JsonException exception)
             {
@@ -161,6 +188,36 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         request.Headers.UserAgent.ParseAdd("vrchat-visual-assistant/0.1");
         return request;
+    }
+
+    private bool TryReserveRequest()
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref _requestAttempts);
+            if (current >= _options.MaxRequestsPerSession)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _requestAttempts, current + 1, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
+    private static string ValidateModel(string model)
+    {
+        string value = string.IsNullOrWhiteSpace(model) ? string.Empty : model.Trim();
+        if (!OpenAiTranslatorOptions.IsSupportedModel(value))
+        {
+            throw new ArgumentException(
+                $"OpenAI model must be {OpenAiTranslatorOptions.QualityModel} or {OpenAiTranslatorOptions.BudgetModel}.",
+                nameof(model));
+        }
+
+        return value;
     }
 
     private static string ExtractOutputText(JsonElement root)
