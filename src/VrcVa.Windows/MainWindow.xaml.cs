@@ -10,6 +10,7 @@ using VrcVa.Windows.Ocr;
 using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Osc;
 using VrcVa.Windows.Rendering;
+using VrcVa.Windows.Security;
 using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows;
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan CaptureNoticeDuration = TimeSpan.FromMilliseconds(250);
     private readonly HttpClient _httpClient = new();
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
+    private readonly WindowsCredentialStore _openAiCredentialStore = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
@@ -32,6 +34,8 @@ public partial class MainWindow : Window
     private readonly string _privacyNotice;
     private readonly OpenAiTextTranslator? _openAiTranslator;
     private readonly bool _hasOpenAiApiKey;
+    private readonly bool _hasEnvironmentOpenAiApiKey;
+    private readonly bool _hasStoredOpenAiApiKey;
     private readonly string _captureConfiguration;
     private readonly OscTriggerOptions? _oscTriggerOptions;
     private string _translationStatus;
@@ -74,10 +78,39 @@ public partial class MainWindow : Window
                 exception);
         }
 
-        string providerId = Environment.GetEnvironmentVariable("VRCVA_TRANSLATION_PROVIDER")?
-            .Trim()
-            .ToLowerInvariant()
-            ?? "none";
+        string? storedApiKey = null;
+        Exception? storedCredentialReadFailure = null;
+        try
+        {
+            storedApiKey = _openAiCredentialStore.Read();
+            _hasStoredOpenAiApiKey = !string.IsNullOrWhiteSpace(storedApiKey);
+        }
+        catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
+        {
+            storedCredentialReadFailure = exception;
+            _logger.Error(
+                "startup.openai_credential_read_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+        }
+
+        string? environmentApiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
+        _hasEnvironmentOpenAiApiKey = !string.IsNullOrWhiteSpace(environmentApiKey);
+        string? apiKey = string.IsNullOrWhiteSpace(environmentApiKey)
+            ? storedApiKey
+            : environmentApiKey;
+        string? configuredProvider = Environment.GetEnvironmentVariable("VRCVA_TRANSLATION_PROVIDER");
+        string providerId = TranslationProviderSelection.Resolve(
+            configuredProvider,
+            _hasStoredOpenAiApiKey);
+        if (storedCredentialReadFailure is not null)
+        {
+            _startupWarning = providerId == "openai" && _hasEnvironmentOpenAiApiKey
+                ? "保存済みOpenAI APIキーは読み込めませんでしたが、この起動では明示設定された環境キーを使用します。"
+                : "Windows資格情報マネージャーからOpenAI APIキーを読み込めませんでした。外部送信は行いません。";
+        }
         IAnalyzer analyzer;
         WindowsOcrEngine windowsOcrEngine = new();
         IOcrEngine ocrEngine = new AdaptiveOcrEngine(
@@ -94,7 +127,6 @@ public partial class MainWindow : Window
                     _translationStatus = "OCRのみ / 翻訳バックエンド未選定";
                     break;
                 case "openai":
-                    string? apiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
                     OpenAiTranslatorOptions openAiOptions = OpenAiTranslatorOptions.FromEnvironment();
                     _openAiTranslator = new OpenAiTextTranslator(_httpClient, openAiOptions, apiKey);
                     analyzer = new TranslateAnalyzer(ocrEngine, _openAiTranslator);
@@ -163,6 +195,11 @@ public partial class MainWindow : Window
             _logger);
 
         InitializeModelSelector();
+        OpenAiApiKeyStatusText.Text = _hasStoredOpenAiApiKey
+            ? "Windows資格情報マネージャーへ保存済みです。通常起動で自動的に使います。"
+            : _hasOpenAiApiKey
+                ? "この起動中だけ有効なキーを使用しています。保存すると次回から入力不要です。"
+                : "未登録です。VRCVA専用キーを貼り付け、暗号化して保存してください。";
         PrivacyText.Text = _privacyNotice;
 
         Loaded += MainWindow_Loaded;
@@ -465,6 +502,102 @@ public partial class MainWindow : Window
                 ScanStage.Rendering,
                 ScanFailureCode.Unexpected,
                 exception);
+        }
+    }
+
+    private void SaveOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        string apiKey = OpenAiApiKeyPasswordBox.Password.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            StatusText.Text = "保存するOpenAI APIキーを貼り付けてください。";
+            return;
+        }
+
+        bool saved = false;
+        try
+        {
+            _openAiCredentialStore.Write(apiKey);
+            saved = true;
+            OpenAiApiKeyStatusText.Text =
+                "Windows資格情報マネージャーへ保存しました。VRCVAを一度再起動すると自動で有効になります。";
+            StatusText.Text = "APIキーを暗号化して保存しました。値は画面・ファイル・ログへ出力しません。";
+        }
+        catch (Exception exception) when (exception is ArgumentException or ExternalException)
+        {
+            OpenAiApiKeyPasswordBox.Clear();
+            StatusText.Text = "APIキーをWindows資格情報マネージャーへ保存できませんでした。";
+            _logger.Error(
+                "ui.api_key_save_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+        }
+        finally
+        {
+            OpenAiApiKeyPasswordBox.Clear();
+            if (!TryClearClipboard())
+            {
+                string warning = "クリップボードを消去できませんでした。別の文字列をコピーしてAPIキーを上書きしてください。";
+                OpenAiApiKeyStatusText.Text = saved
+                    ? $"{OpenAiApiKeyStatusText.Text} {warning}"
+                    : warning;
+                StatusText.Text = $"{StatusText.Text} {warning}";
+            }
+        }
+    }
+
+    private void DeleteOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        MessageBoxResult confirmation = System.Windows.MessageBox.Show(
+            this,
+            "Windows資格情報マネージャーからVRCVAのOpenAI APIキーを削除しますか？",
+            "OpenAI APIキーを削除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            _openAiCredentialStore.Delete();
+            OpenAiApiKeyPasswordBox.Clear();
+            OpenAiApiKeyStatusText.Text = _hasEnvironmentOpenAiApiKey
+                ? "保存済みAPIキーだけを削除しました。環境変数のキーは有効です。環境変数を解除してVRCVAを再起動すると完全に無効になります。"
+                : "保存済みAPIキーを削除しました。完全に無効化するにはVRCVAを再起動してください。";
+            StatusText.Text = "OpenAI APIキーを削除しました。";
+        }
+        catch (ExternalException exception)
+        {
+            StatusText.Text = "OpenAI APIキーを削除できませんでした。";
+            _logger.Error(
+                "ui.api_key_delete_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+        }
+    }
+
+    private bool TryClearClipboard()
+    {
+        try
+        {
+            System.Windows.Clipboard.Clear();
+            return true;
+        }
+        catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
+        {
+            _logger.Error(
+                "ui.api_key_clipboard_clear_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.Unexpected,
+                exception);
+            return false;
         }
     }
 

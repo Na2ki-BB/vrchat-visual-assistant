@@ -109,7 +109,8 @@ Failure split:
 - [ ] Select a translation backend only after the owner explicitly approves one candidate.
 - [ ] Implement and test the selected backend after that approval.
 - [x] Implement `OpenAiTextTranslator` using `HttpClient` and the Responses API.
-- [x] Enable OpenAI only through `VRCVA_TRANSLATION_PROVIDER=openai` and read only `VRCVA_OPENAI_API_KEY`; never print it or reuse generic `OPENAI_API_KEY`.
+- [x] Enable OpenAI only through an explicitly saved VRCVA credential or `VRCVA_TRANSLATION_PROVIDER=openai`; read only the VRCVA credential or `VRCVA_OPENAI_API_KEY`, never print it, and never reuse generic `OPENAI_API_KEY`.
+- [x] Allow one-time UI registration in Windows Credential Manager so the VRCVA-specific key persists without plaintext files or repeated entry; retain the application-specific environment variable as a temporary override.
 - [x] Make model, endpoint, and timeout configurable through documented environment variables.
 - [x] Add an XSOverlay-accessible runtime selector for `gpt-5.4-nano` and `gpt-5.6-luna`; apply changes to the next scan and lock it during active scans.
 - [x] Send only normalized OCR text, set `store: false`, bound output size, and request Japanese-only translation.
@@ -127,9 +128,9 @@ Provider-selection acceptance:
 
 Optional OpenAI check:
 
-1. Set `VRCVA_TRANSLATION_PROVIDER=openai` and the dedicated key in the current PowerShell process.
+1. Register the dedicated key through the WPF credential control, restart, and confirm the stored credential automatically selects OpenAI. Use the process-scoped environment override only for the non-persistent alternative.
 2. Translate a fixed sentence and confirm logs contain lengths/timings only.
-3. Clear both process-scoped variables after the test.
+3. Confirm deleting the stored credential and restarting returns the app to OCR-only mode.
 
 ## Milestone 6 — WPF app and trigger
 

@@ -62,7 +62,7 @@ public sealed class OpenAiTextTranslator : ITextTranslator
             throw new ScanException(
                 ScanFailureCode.TranslationNotConfigured,
                 ScanStage.Translation,
-                "翻訳APIキーが未設定です。VRCVA_OPENAI_API_KEY を現在のPowerShellプロセスに設定してください。");
+                "翻訳APIキーが未設定です。VRCVA画面のOpenAI APIキー欄から登録してください。");
         }
 
         int inputUtf8Bytes = Encoding.UTF8.GetByteCount(sourceText);
