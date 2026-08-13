@@ -9,26 +9,101 @@ internal sealed class SteamVrResultPanel : IDisposable
     private OpenVrInterop? _interop;
     private bool _visible;
     private bool _interactive;
-    private bool _atlasLoaded;
-    private bool _imageUploadInFlight;
+    private readonly ResultPanelImageUploadTracker _imageUpload = new();
     private bool _showAfterImageLoad;
     private bool _enableInteractionAfterImageLoad;
     private int _pendingCell;
     private string? _queuedResultTitle;
     private string? _queuedResultBody;
+    private ResultPanelPlacement _placement;
+    private ResultPanelPlacement? _calibrationOriginalPlacement;
+    private bool _calibrationActive;
     private bool _disposed;
 
     public event EventHandler? Hidden;
     public event EventHandler? DisplayFailed;
+    public event EventHandler? PlacementFallback;
+    public event EventHandler<ResultPanelPlacementCalibrationEventArgs>? PlacementCalibrationFinished;
 
-    public SteamVrResultPanel(Dispatcher dispatcher)
+    public bool LastPlacementUsedFallback =>
+        _interop?.LastPlacementUsedFallback == true;
+
+    public SteamVrResultPanel(
+        Dispatcher dispatcher,
+        ResultPanelPlacement? placement = null)
     {
+        _placement = placement ?? ResultPanelPlacement.HeadsetFallback;
+        _placement.Validate();
         _eventTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(33),
             DispatcherPriority.Background,
             PollEvents,
             dispatcher);
         _eventTimer.Stop();
+    }
+
+    public bool UpdatePlacement(ResultPanelPlacement placement)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        placement.Validate();
+        _placement = placement;
+        if (_interop is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            bool usedFallback = _interop.SetPlacement(placement);
+            if (usedFallback)
+            {
+                PlacementFallback?.Invoke(this, EventArgs.Empty);
+            }
+
+            return usedFallback;
+        }
+        catch
+        {
+            Disconnect();
+            throw;
+        }
+    }
+
+    public bool TryShowPlacementCalibration(ResultPanelPlacement placement)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        placement.Validate();
+        if (_calibrationActive || !EnsureConnected() || _imageUpload.InFlight)
+        {
+            return false;
+        }
+
+        try
+        {
+            SetInteractive(false);
+            _interop!.Hide();
+            _visible = false;
+            _placement = placement;
+            if (_interop.SetPlacement(placement))
+            {
+                PlacementFallback?.Invoke(this, EventArgs.Empty);
+                return false;
+            }
+
+            _calibrationOriginalPlacement = placement;
+            _calibrationActive = true;
+            BeginCalibrationUpload();
+            _showAfterImageLoad = true;
+            _enableInteractionAfterImageLoad = true;
+            _eventTimer.Start();
+            return true;
+        }
+        catch
+        {
+            AbandonPlacementCalibration();
+            Disconnect();
+            throw;
+        }
     }
 
     public bool TryShow(string title, string body)
@@ -44,7 +119,7 @@ internal sealed class SteamVrResultPanel : IDisposable
             SetInteractive(false);
             _interop!.Hide();
             _visible = false;
-            if (_imageUploadInFlight)
+            if (_imageUpload.InFlight)
             {
                 _queuedResultTitle = title;
                 _queuedResultBody = body;
@@ -107,9 +182,9 @@ internal sealed class SteamVrResultPanel : IDisposable
         try
         {
             SetInteractive(false);
-            if (!_atlasLoaded)
+            if (!_imageUpload.AtlasLoaded)
             {
-                if (!_imageUploadInFlight)
+                if (!_imageUpload.InFlight)
                 {
                     _texture.SetContent(string.Empty, string.Empty);
                     BeginAtlasUpload();
@@ -123,10 +198,10 @@ internal sealed class SteamVrResultPanel : IDisposable
             }
 
             SelectAtlasCell(atlasCell);
-            _interop!.Show();
+            ShowOverlay();
             _visible = true;
             _eventTimer.Start();
-            return _interop.IsVisible();
+            return _interop!.IsVisible();
         }
         catch
         {
@@ -143,7 +218,7 @@ internal sealed class SteamVrResultPanel : IDisposable
         }
 
         SetInteractive(false);
-        if (_imageUploadInFlight)
+        if (_imageUpload.InFlight)
         {
             _pendingCell = atlasCell;
             _showAfterImageLoad = true;
@@ -161,8 +236,14 @@ internal sealed class SteamVrResultPanel : IDisposable
 
     public void Hide()
     {
+        if (_calibrationActive)
+        {
+            FinishPlacementCalibration(save: false);
+            return;
+        }
+
         if (_disposed
-            || (!_visible && !_showAfterImageLoad && !_imageUploadInFlight))
+            || (!_visible && !_showAfterImageLoad && !_imageUpload.InFlight))
         {
             return;
         }
@@ -197,7 +278,7 @@ internal sealed class SteamVrResultPanel : IDisposable
             _enableInteractionAfterImageLoad = false;
             _queuedResultTitle = null;
             _queuedResultBody = null;
-            if (!_imageUploadInFlight)
+            if (!_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
             }
@@ -243,12 +324,12 @@ internal sealed class SteamVrResultPanel : IDisposable
             return true;
         }
 
-        return OpenVrInterop.TryCreate(out _interop);
+        return OpenVrInterop.TryCreate(_placement, out _interop);
     }
 
     private void PollEvents(object? sender, EventArgs eventArgs)
     {
-        if ((!_visible && !_imageUploadInFlight) || _interop is null)
+        if ((!_visible && !_imageUpload.InFlight) || _interop is null)
         {
             return;
         }
@@ -258,18 +339,21 @@ internal sealed class SteamVrResultPanel : IDisposable
             bool textureChanged = false;
             while (_interop.TryPollEvent(out OpenVrEvent overlayEvent))
             {
-                (float localX, float localY) = ResultPanelTexture.MapOpenVrPointer(
-                    overlayEvent.MouseX,
-                    overlayEvent.MouseY,
-                    _texture.CurrentResultCell);
+                (float localX, float localY) = _calibrationActive
+                    ? ResultPanelTexture.MapFullTexturePointer(
+                        overlayEvent.MouseX,
+                        overlayEvent.MouseY)
+                    : ResultPanelTexture.MapOpenVrPointer(
+                        overlayEvent.MouseX,
+                        overlayEvent.MouseY,
+                        _texture.CurrentResultCell);
                 switch (overlayEvent.EventType)
                 {
                     case OpenVrEvent.OverlayClosed:
                         Hide();
                         return;
-                    case OpenVrEvent.ImageLoaded when _imageUploadInFlight:
-                        _imageUploadInFlight = false;
-                        _atlasLoaded = true;
+                    case OpenVrEvent.ImageLoaded when _imageUpload.InFlight:
+                        ResultPanelImageUploadKind completedUpload = _imageUpload.Complete();
                         if (_queuedResultTitle is not null && _queuedResultBody is not null)
                         {
                             string title = _queuedResultTitle;
@@ -282,10 +366,27 @@ internal sealed class SteamVrResultPanel : IDisposable
                             _showAfterImageLoad = true;
                             _enableInteractionAfterImageLoad = true;
                         }
+                        else if (RequiresAtlasReloadAfterImageLoaded(
+                            completedUpload,
+                            _calibrationActive,
+                            _showAfterImageLoad))
+                        {
+                            // A SCAN can replace calibration while its image upload is still
+                            // completing. Upload the real atlas before applying atlas bounds.
+                            _texture.SetContent(string.Empty, string.Empty);
+                            BeginAtlasUpload(drainEvents: false);
+                        }
                         else if (_showAfterImageLoad)
                         {
-                            SelectAtlasCell(_pendingCell);
-                            _interop.Show();
+                            if (_calibrationActive)
+                            {
+                                _interop.SelectFullTexture();
+                            }
+                            else
+                            {
+                                SelectAtlasCell(_pendingCell);
+                            }
+                            ShowOverlay();
                             _visible = _interop.IsVisible();
                             _showAfterImageLoad = false;
                             if (_visible && _enableInteractionAfterImageLoad)
@@ -309,6 +410,15 @@ internal sealed class SteamVrResultPanel : IDisposable
                             DisplayFailed?.Invoke(this, EventArgs.Empty);
                         }
                         return;
+                    case OpenVrEvent.MouseButtonDown
+                        when _calibrationActive
+                            && overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton:
+                        HandlePlacementCalibrationClick(localX, localY);
+                        if (!_calibrationActive)
+                        {
+                            return;
+                        }
+                        break;
                     case OpenVrEvent.MouseButtonDown
                         when overlayEvent.MouseButton == OpenVrEvent.LeftMouseButton
                             && _texture.IsCloseButton(
@@ -334,7 +444,7 @@ internal sealed class SteamVrResultPanel : IDisposable
                 SelectAtlasCell(_texture.CurrentResultCell);
             }
 
-            if (!_visible && !_imageUploadInFlight)
+            if (!_visible && !_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
             }
@@ -354,13 +464,37 @@ internal sealed class SteamVrResultPanel : IDisposable
             // Associate the next image completion event with this upload.
         }
 
-        _atlasLoaded = false;
-        _imageUploadInFlight = true;
+        _imageUpload.Begin(ResultPanelImageUploadKind.Atlas);
         byte[] pixels = _texture.RenderRgba();
         interop.SetImage(
             pixels,
             ResultPanelTexture.AtlasPixelWidth,
             ResultPanelTexture.AtlasPixelHeight);
+    }
+
+    internal static bool RequiresAtlasReloadAfterImageLoaded(
+        ResultPanelImageUploadKind completedUpload,
+        bool calibrationActive,
+        bool showAfterImageLoad) =>
+        completedUpload == ResultPanelImageUploadKind.Calibration
+        && !calibrationActive
+        && showAfterImageLoad;
+
+    private void BeginCalibrationUpload()
+    {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        while (interop.TryPollEvent(out _))
+        {
+            // Associate the next image completion event with this upload.
+        }
+
+        _imageUpload.Begin(ResultPanelImageUploadKind.Calibration);
+        byte[] pixels = _texture.RenderCalibrationRgba();
+        interop.SetImage(
+            pixels,
+            ResultPanelTexture.PixelWidth,
+            ResultPanelTexture.PixelHeight);
     }
 
     private void SelectAtlasCell(int cell) => _interop!.SelectAtlasCell(
@@ -374,18 +508,138 @@ internal sealed class SteamVrResultPanel : IDisposable
         _interactive = enabled;
     }
 
+    private void ShowOverlay()
+    {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        interop.Show();
+        if (interop.LastPlacementUsedFallback)
+        {
+            PlacementFallback?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void HandlePlacementCalibrationClick(float x, float y)
+    {
+        ResultPanelCalibrationAction action = ResultPanelTexture.HitTestCalibration(x, y);
+        switch (action)
+        {
+            case ResultPanelCalibrationAction.None:
+                return;
+            case ResultPanelCalibrationAction.Save:
+                FinishPlacementCalibration(save: true);
+                return;
+            case ResultPanelCalibrationAction.Cancel:
+                FinishPlacementCalibration(save: false);
+                return;
+            default:
+                ResultPanelPlacement updated = ResultPanelCalibration.Apply(_placement, action);
+                if (updated == _placement)
+                {
+                    return;
+                }
+
+                _placement = updated;
+                bool usedFallback = _interop!.SetPlacement(updated);
+                if (usedFallback)
+                {
+                    PlacementFallback?.Invoke(this, EventArgs.Empty);
+                }
+                return;
+        }
+    }
+
+    private void FinishPlacementCalibration(bool save)
+    {
+        ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
+        ResultPanelPlacement completed = save ? _placement : original;
+        _calibrationActive = false;
+        _calibrationOriginalPlacement = null;
+        if (!save)
+        {
+            _placement = original;
+            _ = _interop?.SetPlacement(original);
+        }
+
+        PlacementCalibrationFinished?.Invoke(
+            this,
+            new ResultPanelPlacementCalibrationEventArgs(completed, save));
+        Hide();
+    }
+
+    private void AbandonPlacementCalibration()
+    {
+        if (!_calibrationActive)
+        {
+            return;
+        }
+
+        ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
+        _placement = original;
+        _calibrationActive = false;
+        _calibrationOriginalPlacement = null;
+        PlacementCalibrationFinished?.Invoke(
+            this,
+            new ResultPanelPlacementCalibrationEventArgs(original, SaveRequested: false));
+    }
+
     private void Disconnect()
     {
+        AbandonPlacementCalibration();
         _eventTimer.Stop();
         _visible = false;
         _interactive = false;
-        _atlasLoaded = false;
-        _imageUploadInFlight = false;
+        _imageUpload.Reset();
         _showAfterImageLoad = false;
         _enableInteractionAfterImageLoad = false;
         _queuedResultTitle = null;
         _queuedResultBody = null;
         _interop?.Dispose();
         _interop = null;
+    }
+}
+
+internal sealed record ResultPanelPlacementCalibrationEventArgs(
+    ResultPanelPlacement Placement,
+    bool SaveRequested);
+
+internal enum ResultPanelImageUploadKind
+{
+    None,
+    Atlas,
+    Calibration,
+}
+
+internal sealed class ResultPanelImageUploadTracker
+{
+    private ResultPanelImageUploadKind _kind;
+
+    public bool InFlight => _kind != ResultPanelImageUploadKind.None;
+
+    public bool AtlasLoaded { get; private set; }
+
+    public void Begin(ResultPanelImageUploadKind kind)
+    {
+        if (kind == ResultPanelImageUploadKind.None)
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        _kind = kind;
+        AtlasLoaded = false;
+    }
+
+    public ResultPanelImageUploadKind Complete()
+    {
+        ResultPanelImageUploadKind completedKind = _kind;
+        AtlasLoaded = completedKind == ResultPanelImageUploadKind.Atlas;
+        _kind = ResultPanelImageUploadKind.None;
+        return completedKind;
+    }
+
+    public void Reset()
+    {
+        _kind = ResultPanelImageUploadKind.None;
+        AtlasLoaded = false;
     }
 }

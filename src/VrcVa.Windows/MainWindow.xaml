@@ -15,6 +15,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
@@ -142,7 +143,55 @@
       </StackPanel>
     </Border>
 
-    <Grid Grid.Row="4" Margin="0,12,0,12">
+    <Border Grid.Row="4"
+            Margin="0,12,0,0"
+            Padding="12"
+            Background="#1C252B"
+            BorderBrush="#3B4850"
+            BorderThickness="1"
+            CornerRadius="6">
+      <Expander x:Name="PlacementSettingsExpander"
+                Header="VR結果パネルの配置"
+                IsExpanded="False">
+        <StackPanel Margin="0,10,0,0">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="220" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0"
+                       Margin="0,0,12,0"
+                       VerticalAlignment="Center"
+                       FontWeight="SemiBold"
+                       Text="追従先" />
+            <ComboBox x:Name="ResultPanelAnchorComboBox"
+                      Grid.Column="1"
+                      MinHeight="34"
+                      DisplayMemberPath="DisplayName"
+                      SelectionChanged="ResultPanelAnchorComboBox_SelectionChanged" />
+            <TextBlock Grid.Column="2"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource TextSecondary}"
+                       Text="追従先を選び、VR内で位置を調整します" />
+            <Button x:Name="StartResultPanelCalibrationButton"
+                    Grid.Column="3"
+                    Margin="12,0,0,0"
+                    Click="StartResultPanelCalibrationButton_Click"
+                    Content="VRで位置調整" />
+          </Grid>
+          <TextBlock x:Name="ResultPanelPlacementStatusText"
+                     Margin="0,7,0,0"
+                     Foreground="{StaticResource TextSecondary}"
+                     TextWrapping="Wrap"
+                     Text="VR内の大きなボタンで調整し、そのまま保存できます。" />
+        </StackPanel>
+      </Expander>
+    </Border>
+
+    <Grid Grid.Row="5" Margin="0,12,0,12">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
@@ -175,7 +224,7 @@
                 Content="常に手前" />
     </Grid>
 
-    <GroupBox Grid.Row="5"
+    <GroupBox Grid.Row="6"
               Margin="0,0,0,12"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
@@ -187,7 +236,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <GroupBox Grid.Row="6"
+    <GroupBox Grid.Row="7"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
               Header="日本語訳">
@@ -199,7 +248,7 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <Grid Grid.Row="7" Margin="0,14,0,0">
+    <Grid Grid.Row="8" Margin="0,14,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />

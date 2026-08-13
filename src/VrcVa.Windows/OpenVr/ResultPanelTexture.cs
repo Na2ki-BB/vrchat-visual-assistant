@@ -93,6 +93,11 @@ internal sealed class ResultPanelTexture
         return (localX, localY);
     }
 
+    internal static (float X, float Y) MapFullTexturePointer(
+        float openVrX,
+        float openVrY) =>
+        (openVrX, PixelHeight - openVrY);
+
     public bool BeginScrollbarInteraction(float x, float y)
     {
         if (_resultPageCount <= 1
@@ -117,6 +122,19 @@ internal sealed class ResultPanelTexture
         int previous = _resultPage;
         _resultPage = nextPage;
         return previous != _resultPage;
+    }
+
+    public static ResultPanelCalibrationAction HitTestCalibration(float x, float y)
+    {
+        foreach ((ResultPanelCalibrationAction action, Rect bounds, _) in CalibrationButtons)
+        {
+            if (bounds.Contains(x, y))
+            {
+                return action;
+            }
+        }
+
+        return ResultPanelCalibrationAction.None;
     }
 
     public byte[] RenderRgba()
@@ -152,16 +170,35 @@ internal sealed class ResultPanelTexture
             }
         }
 
+        return RenderVisualRgba(visual, AtlasPixelWidth, AtlasPixelHeight);
+    }
+
+    public byte[] RenderCalibrationRgba()
+    {
+        DrawingVisual visual = new();
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            DrawCalibrationSurface(drawing);
+        }
+
+        return RenderVisualRgba(visual, PixelWidth, PixelHeight);
+    }
+
+    private static byte[] RenderVisualRgba(
+        DrawingVisual visual,
+        int pixelWidth,
+        int pixelHeight)
+    {
         RenderTargetBitmap bitmap = new(
-            AtlasPixelWidth,
-            AtlasPixelHeight,
+            pixelWidth,
+            pixelHeight,
             96,
             96,
             PixelFormats.Pbgra32);
         bitmap.Render(visual);
 
-        byte[] bgra = new byte[AtlasPixelWidth * AtlasPixelHeight * 4];
-        bitmap.CopyPixels(bgra, AtlasPixelWidth * 4, 0);
+        byte[] bgra = new byte[pixelWidth * pixelHeight * 4];
+        bitmap.CopyPixels(bgra, pixelWidth * 4, 0);
         byte[] rgba = new byte[bgra.Length];
         for (int index = 0; index < bgra.Length; index += 4)
         {
@@ -235,6 +272,73 @@ internal sealed class ResultPanelTexture
 
         drawing.Pop();
     }
+
+    private void DrawCalibrationSurface(DrawingContext drawing)
+    {
+        DrawBackground(drawing);
+        FormattedText title = CreateText(
+            "VR結果パネルの位置調整",
+            34,
+            FontWeights.SemiBold,
+            Brushes.White,
+            1180);
+        drawing.DrawText(title, new Point(48, 25));
+        FormattedText hint = CreateText(
+            "レーザーで選択すると、この画面がその場で動きます",
+            22,
+            FontWeights.Normal,
+            new SolidColorBrush(Color.FromRgb(190, 205, 225)),
+            1180);
+        drawing.DrawText(hint, new Point(48, 68));
+
+        foreach ((ResultPanelCalibrationAction action, Rect bounds, string label) in CalibrationButtons)
+        {
+            Color color = action switch
+            {
+                ResultPanelCalibrationAction.Save => Color.FromRgb(22, 115, 154),
+                ResultPanelCalibrationAction.Cancel => Color.FromRgb(92, 74, 80),
+                ResultPanelCalibrationAction.Reset => Color.FromRgb(67, 79, 96),
+                _ => Color.FromRgb(53, 72, 96),
+            };
+            drawing.DrawRoundedRectangle(
+                new SolidColorBrush(color),
+                new System.Windows.Media.Pen(
+                    new SolidColorBrush(Color.FromRgb(113, 143, 181)),
+                    2),
+                bounds,
+                14,
+                14);
+            FormattedText text = CreateText(
+                label,
+                action is ResultPanelCalibrationAction.Save
+                    or ResultPanelCalibrationAction.Cancel
+                    or ResultPanelCalibrationAction.Reset
+                    ? 27
+                    : 31,
+                FontWeights.SemiBold,
+                Brushes.White,
+                bounds.Width - 20);
+            text.TextAlignment = TextAlignment.Center;
+            drawing.DrawText(
+                text,
+                new Point(bounds.Left + 10, bounds.Top + ((bounds.Height - text.Height) / 2)));
+        }
+    }
+
+    private static readonly (ResultPanelCalibrationAction Action, Rect Bounds, string Label)[] CalibrationButtons =
+    [
+        (ResultPanelCalibrationAction.MoveLeft, new Rect(48, 140, 250, 125), "←  左へ"),
+        (ResultPanelCalibrationAction.MoveRight, new Rect(359, 140, 250, 125), "右へ  →"),
+        (ResultPanelCalibrationAction.MoveUp, new Rect(670, 140, 250, 125), "↑  上へ"),
+        (ResultPanelCalibrationAction.MoveDown, new Rect(981, 140, 250, 125), "↓  下へ"),
+        (ResultPanelCalibrationAction.MoveNear, new Rect(48, 300, 250, 125), "近く"),
+        (ResultPanelCalibrationAction.MoveFar, new Rect(359, 300, 250, 125), "遠く"),
+        (ResultPanelCalibrationAction.MakeSmaller, new Rect(670, 300, 250, 125), "小さく"),
+        (ResultPanelCalibrationAction.MakeLarger, new Rect(981, 300, 250, 125), "大きく"),
+        (ResultPanelCalibrationAction.Reset, new Rect(48, 500, 280, 120), "初期値"),
+        (ResultPanelCalibrationAction.Cancel, new Rect(370, 500, 280, 120), "中止"),
+        (ResultPanelCalibrationAction.Save, new Rect(692, 500, 539, 120), "保存して閉じる"),
+    ];
 
     private static TranslateTransform GetCellTransform(int cell) => new(
         (cell % AtlasColumns) * PixelWidth,

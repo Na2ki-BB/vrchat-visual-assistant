@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly HttpClient _httpClient = new();
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly WindowsCredentialStore _openAiCredentialStore = new();
+    private readonly ResultPanelPlacementStore _resultPanelPlacementStore = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
@@ -38,10 +39,13 @@ public partial class MainWindow : Window
     private readonly bool _hasStoredOpenAiApiKey;
     private readonly string _captureConfiguration;
     private readonly OscTriggerOptions? _oscTriggerOptions;
+    private ResultPanelPlacement _resultPanelPlacement = ResultPanelPlacement.Default;
     private string _translationStatus;
     private string _oscStatus = "OSCトリガー: 無効";
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
+    private bool _placementControlsInitializing = true;
+    private bool _placementCalibrationActive;
     private GlobalHotKey? _globalHotKey;
     private GlobalHotKey? _modelToggleHotKey;
     private OscTriggerService? _oscTriggerService;
@@ -59,6 +63,25 @@ public partial class MainWindow : Window
             "VrcVa",
             "logs");
         _logger = new PrivacySafeFileLogger(logDirectory);
+
+        try
+        {
+            _resultPanelPlacement = _resultPanelPlacementStore.Load();
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidDataException
+                or System.Text.Json.JsonException)
+        {
+            _startupWarning = "保存済みのVR結果パネル配置を読み込めなかったため、初期配置を使います。設定欄から保存し直せます。";
+            _logger.Error(
+                "startup.result_panel_placement_load_failed",
+                Guid.Empty,
+                ScanStage.Rendering,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
 
         try
         {
@@ -162,7 +185,10 @@ public partial class MainWindow : Window
 
         _analyzer = analyzer;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
-        _steamVrResultPanel = new SteamVrResultPanel(Dispatcher);
+        _steamVrResultPanel = new SteamVrResultPanel(Dispatcher, _resultPanelPlacement);
+        _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
+        _steamVrResultPanel.PlacementCalibrationFinished +=
+            SteamVrResultPanel_PlacementCalibrationFinished;
         OpenVrEyeCaptureOptions eyeOptions = OpenVrEyeCaptureOptions.FromEnvironment(
             out string? eyeConfigurationWarning);
         if (eyeConfigurationWarning is not null)
@@ -195,6 +221,7 @@ public partial class MainWindow : Window
             _logger);
 
         InitializeModelSelector();
+        InitializeResultPanelPlacementControls();
         OpenAiApiKeyStatusText.Text = _hasStoredOpenAiApiKey
             ? "Windows資格情報マネージャーへ保存済みです。通常起動で自動的に使います。"
             : _hasOpenAiApiKey
@@ -609,6 +636,121 @@ public partial class MainWindow : Window
         }
     }
 
+    private void InitializeResultPanelPlacementControls()
+    {
+        List<ResultPanelAnchorChoice> choices =
+        [
+            new("左手", ResultPanelAnchor.LeftHand),
+            new("右手", ResultPanelAnchor.RightHand),
+            new("ヘッドセット正面", ResultPanelAnchor.Headset),
+        ];
+        ResultPanelAnchorComboBox.ItemsSource = choices;
+        ResultPanelAnchorComboBox.SelectedItem = choices.First(
+            choice => choice.Anchor == _resultPanelPlacement.Anchor);
+        _placementControlsInitializing = false;
+    }
+
+    private void ResultPanelAnchorComboBox_SelectionChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs eventArgs)
+    {
+        if (_placementControlsInitializing
+            || ResultPanelAnchorComboBox.SelectedItem is not ResultPanelAnchorChoice choice)
+        {
+            return;
+        }
+
+        _resultPanelPlacement = ResultPanelPlacement.CreateDefault(choice.Anchor);
+        ApplyResultPanelPlacement("追従先を変更しました。必要ならVR内で位置を調整してください。");
+        TrySaveResultPanelPlacement(
+            "追従先を保存しました。必要ならVR内で位置を調整してください。");
+    }
+
+    private void StartResultPanelCalibrationButton_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        try
+        {
+            bool shown = _steamVrResultPanel.TryShowPlacementCalibration(_resultPanelPlacement);
+            _placementCalibrationActive = shown;
+            PlacementSettingsExpander.IsEnabled = !shown;
+            ResultPanelPlacementStatusText.Text = shown
+                ? "VR内に調整画面を表示しました。保存または中止までVR内で操作してください。"
+                : _steamVrResultPanel.LastPlacementUsedFallback
+                    ? "選択したコントローラーが見つかりません。追従先を変更するか、コントローラーを確認してください。"
+                    : "SteamVRへ接続できないか、表示準備中です。数秒後にもう一度押してください。";
+        }
+        catch (Exception exception)
+        {
+            ResultPanelPlacementStatusText.Text = "VR内の位置調整画面を表示できませんでした。";
+            LogResultPanelPlacementFailure("ui.result_panel_calibration_start_failed", exception);
+        }
+    }
+
+    private void SteamVrResultPanel_PlacementCalibrationFinished(
+        object? sender,
+        ResultPanelPlacementCalibrationEventArgs eventArgs)
+    {
+        _placementCalibrationActive = false;
+        PlacementSettingsExpander.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+        _resultPanelPlacement = eventArgs.Placement;
+        if (eventArgs.SaveRequested)
+        {
+            TrySaveResultPanelPlacement("VR内で調整した配置を保存しました。");
+        }
+        else
+        {
+            ResultPanelPlacementStatusText.Text = "位置調整を中止しました。保存済みの配置へ戻しました。";
+        }
+    }
+
+    private void TrySaveResultPanelPlacement(string successMessage)
+    {
+        try
+        {
+            _resultPanelPlacementStore.Save(_resultPanelPlacement);
+            ResultPanelPlacementStatusText.Text = successMessage;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or InvalidDataException)
+        {
+            ResultPanelPlacementStatusText.Text = "配置を保存できませんでした。";
+            LogResultPanelPlacementFailure("ui.result_panel_placement_save_failed", exception);
+        }
+    }
+
+    private void ApplyResultPanelPlacement(string successMessage)
+    {
+        try
+        {
+            bool usedFallback = _steamVrResultPanel.UpdatePlacement(_resultPanelPlacement);
+            ResultPanelPlacementStatusText.Text = usedFallback
+                ? "選択したコントローラーが見つからないため、現在は正面へ表示します。"
+                : successMessage;
+        }
+        catch (Exception exception)
+        {
+            ResultPanelPlacementStatusText.Text = "SteamVRへ配置を反映できませんでした。";
+            LogResultPanelPlacementFailure("ui.result_panel_placement_apply_failed", exception);
+        }
+    }
+
+    private void SteamVrResultPanel_PlacementFallback(object? sender, EventArgs eventArgs)
+    {
+        ResultPanelPlacementStatusText.Text =
+            "選択したコントローラーが見つからないため、今回はヘッドセット正面へ表示しました。";
+    }
+
+    private void LogResultPanelPlacementFailure(string eventName, Exception exception) =>
+        _logger.Error(
+            eventName,
+            Guid.Empty,
+            ScanStage.Rendering,
+            ScanFailureCode.Unexpected,
+            exception);
+
     private void TranslationModelComboBox_SelectionChanged(
         object sender,
         System.Windows.Controls.SelectionChangedEventArgs eventArgs)
@@ -685,6 +827,7 @@ public partial class MainWindow : Window
         ImageButton.IsEnabled = !isRunning;
         CancelButton.IsEnabled = isRunning;
         TranslationModelComboBox.IsEnabled = !isRunning && _openAiTranslator is not null;
+        PlacementSettingsExpander.IsEnabled = !isRunning && !_placementCalibrationActive;
     }
 
     private void RenderProgress(ScanProgress progress)
@@ -742,6 +885,9 @@ public partial class MainWindow : Window
             _oscTriggerService.Dispose();
         }
 
+        _steamVrResultPanel.PlacementFallback -= SteamVrResultPanel_PlacementFallback;
+        _steamVrResultPanel.PlacementCalibrationFinished -=
+            SteamVrResultPanel_PlacementCalibrationFinished;
         _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
         _windowLifetimeCancellation.Dispose();
@@ -831,6 +977,8 @@ public partial class MainWindow : Window
         : $" / 翻訳API残り {_openAiTranslator.RemainingRequests}/{_openAiTranslator.MaxRequestsPerSession}回";
 
     private sealed record TranslationModelChoice(string DisplayName, string ModelId);
+
+    private sealed record ResultPanelAnchorChoice(string DisplayName, ResultPanelAnchor Anchor);
 
     private sealed class ConfigurationFailureTranslator(string message) : ITextTranslator
     {
