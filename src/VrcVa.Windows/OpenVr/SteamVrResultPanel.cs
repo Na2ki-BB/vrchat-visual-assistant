@@ -16,19 +16,55 @@ internal sealed class SteamVrResultPanel : IDisposable
     private int _pendingCell;
     private string? _queuedResultTitle;
     private string? _queuedResultBody;
+    private ResultPanelPlacement _placement;
     private bool _disposed;
 
     public event EventHandler? Hidden;
     public event EventHandler? DisplayFailed;
+    public event EventHandler? PlacementFallback;
 
-    public SteamVrResultPanel(Dispatcher dispatcher)
+    public bool LastPlacementUsedFallback =>
+        _interop?.LastPlacementUsedFallback == true;
+
+    public SteamVrResultPanel(
+        Dispatcher dispatcher,
+        ResultPanelPlacement? placement = null)
     {
+        _placement = placement ?? ResultPanelPlacement.HeadsetFallback;
+        _placement.Validate();
         _eventTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(33),
             DispatcherPriority.Background,
             PollEvents,
             dispatcher);
         _eventTimer.Stop();
+    }
+
+    public bool UpdatePlacement(ResultPanelPlacement placement)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        placement.Validate();
+        _placement = placement;
+        if (_interop is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            bool usedFallback = _interop.SetPlacement(placement);
+            if (usedFallback)
+            {
+                PlacementFallback?.Invoke(this, EventArgs.Empty);
+            }
+
+            return usedFallback;
+        }
+        catch
+        {
+            Disconnect();
+            throw;
+        }
     }
 
     public bool TryShow(string title, string body)
@@ -123,10 +159,10 @@ internal sealed class SteamVrResultPanel : IDisposable
             }
 
             SelectAtlasCell(atlasCell);
-            _interop!.Show();
+            ShowOverlay();
             _visible = true;
             _eventTimer.Start();
-            return _interop.IsVisible();
+            return _interop!.IsVisible();
         }
         catch
         {
@@ -243,7 +279,7 @@ internal sealed class SteamVrResultPanel : IDisposable
             return true;
         }
 
-        return OpenVrInterop.TryCreate(out _interop);
+        return OpenVrInterop.TryCreate(_placement, out _interop);
     }
 
     private void PollEvents(object? sender, EventArgs eventArgs)
@@ -285,7 +321,7 @@ internal sealed class SteamVrResultPanel : IDisposable
                         else if (_showAfterImageLoad)
                         {
                             SelectAtlasCell(_pendingCell);
-                            _interop.Show();
+                            ShowOverlay();
                             _visible = _interop.IsVisible();
                             _showAfterImageLoad = false;
                             if (_visible && _enableInteractionAfterImageLoad)
@@ -372,6 +408,17 @@ internal sealed class SteamVrResultPanel : IDisposable
     {
         _interop?.SetInteractive(enabled);
         _interactive = enabled;
+    }
+
+    private void ShowOverlay()
+    {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        interop.Show();
+        if (interop.LastPlacementUsedFallback)
+        {
+            PlacementFallback?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void Disconnect()
