@@ -2,7 +2,7 @@
 
 VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 1.7の実機改善中** です。キャプチャ、OCR、操作可能なSteamVR結果パネルは実装済みですが、翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首追従とVRChat OSCトリガーは後続です。
+現在は **Phase 2のOSCトリガー実装・実機接続待ち** です。キャプチャ、OCR、操作可能なSteamVR結果パネルは実装・実機確認済みです。VRChat OSCトリガーも受信側を実装しましたが既定では無効で、OSCQuery自動接続は次の実機ゲートです。翻訳バックエンドは比較・判断中のため既定では無効です。既定状態でもOCRした英語は結果として表示します。手首追従は後続です。
 
 確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
@@ -11,6 +11,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 ## 現在できること
 
 - `Ctrl+Shift+T`（既定）または SCAN ボタンで1回だけスキャン
+- 明示的に有効化した場合、VRChatのExpression MenuボタンからOSCQuery経由で1回だけスキャン
 - 結果パネルは既定で非インタラクティブ。`Ctrl+Shift+I`またはOVRAS操作でレーザー操作をON/OFF
 - SteamVR起動中はコンポジタの片眼アイミラーを1回取得。既定の左眼はデスクトップミラーより広い縦視野を使う
 - SteamVRやアイミラー取得が利用できない場合は、Windows Graphics Captureによる`VRChat.exe`取得へ自動フォールバック
@@ -35,6 +36,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - OpenAI要求は `store: false` です。ただしOCRテキストが外部サービスへ送信される点は変わりません。
 - ログは画像、OCR本文、翻訳本文、APIキー、HTTP本文を記録しません。寸法、文字数、時間、エラー種別だけです。
 - VRChatへのDLL注入、ファイル改変、メモリ読み取り、非公開API利用は行いません。
+- OSCトリガーを有効にすると、Windows DNS-SDの制約により動的ポートはネットワークインターフェース上へ登録されますが、VRCVAはこのPC自身のアドレスから来たOSC/OSCQueryだけを処理し、他端末からの接続は応答前に拒否します。OSCの送信先としてVRChatへ返す値も`127.0.0.1`です。自動検出用DNS-SD広告はサービス名とポートをLAN内へ通知しますが、画像、OCR本文、アバターIDは含めません。
 
 詳細は [DESIGN.md](DESIGN.md) の「Security, privacy, and public-repository policy」を参照してください。
 
@@ -258,6 +260,39 @@ http://127.0.0.1:27062/dashboard/controllerbinding.html?desktop=1&app=steam.over
 
 OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使われるため、既存操作を上書きせず、Long HoldやChordなどの空いている操作を選んでください。補助スクリプトはINI内の3値だけを変更し、同じフォルダーに日時付きバックアップを作ります。この実機では変更前の`KeyboardOne`が`Ctrl+Shift+M`なので、`-Apply`によりVRCVA用の`Ctrl+Shift+I`へ置き換わります。SteamVR側のコントローラーバインドは自動変更しません。現在の左右同時グリップを別操作へ変える場合も、上の編集画面で`KeyboardTwo`の入力だけを変更します。
 
+### 任意: VRChat Expression MenuからSCANする
+
+OSCトリガーは初期状態では無効です。これはPC版VRChatとVRCVAが同じWindows PCで動くPCVR向けで、Quest単体版からPCの`localhost`へ接続する機能ではありません。OSCQuery自動接続と最初のメニュー押下はPCVR実機で確認済みです。復旧手段として既存ホットキーも残してください。
+
+アバター側には次の設定を追加します。
+
+1. Expression ParametersへBool型の`VRCVA_Scan`を追加し、DefaultをOFF、SavedとSyncedをOFFにします。
+2. Expression MenuへButtonを追加し、Parameterを`VRCVA_Scan`にします。現在のSDKではBool型を選ぶとValue欄が表示されませんが、そのままで正常です。Value欄が表示されるSDKでは`1`にします。
+3. アバターをBuild & TestまたはPublishします。既存のVRChat OSC設定ファイルに古い定義が残る場合は、VRChatのOSCメニューからConfigをリセットして再生成します。VRCVAはこのファイルを変更しません。
+4. VRChatのAction Menuで`OSC > Enabled`をONにします。
+5. VRCVAを起動するPowerShellでOSCを明示的に有効化してから起動します。
+
+```powershell
+$env:VRCVA_OSC_TRIGGER_ENABLED = "true"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
+```
+
+VRCVA上部の詳細表示が`OSCトリガー: 有効 / 動的ポート ...`になれば待受開始です。起動直後の最初の押下からSCANとして扱います。アバター切替直後は短い安定待ち時間を置き、その間にParameterのONを受信した場合だけ一度OFFになるまで発火を抑えます。短時間の重複送信も無視し、SCAN中の追加操作はキューへ残しません。
+
+VRCVAは固定ポート`9001`を使いません。Windowsが割り当てた動的ポートを`_osc._udp`と`_oscjson._tcp`のDNS-SDで広告し、VRChatに自動検出させます。WindowsのDNS-SDはloopbackだけにbindしたサービスを登録できないため、ソケット登録後に送信元をこのPCのIPアドレスへ限定しています。広告や接続に失敗した場合はOSCを無効のままにし、SCANボタンと`Ctrl+Shift+T`は引き続き使えます。
+
+受信と自動広告だけを確認し、キャプチャ・OCR・翻訳を実行しない診断もあります。VRChat側のメニューボタンを試す場合は待機時間を30〜300秒にします。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --osc-trigger-check --self-test
+
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --osc-trigger-check --seconds 60
+```
+
+自己診断はloopbackからOSCQuery取得とOFF→ON送信を1回行います。`OSCQuery self-test: OK`と`OSC self-test trigger count: 1`なら、動的ポート、DNS-SD登録、loopback受信、OSC解析、立ち上がり判定まで成功です。別LAN端末を拒否できることは実機受け入れで別途確認します。
+
 ### 設定用環境変数
 
 | Variable | Default | Meaning |
@@ -271,6 +306,11 @@ OVR Advanced SettingsのTouch既定バインドではB/YがSpace Turn/Dragに使
 | `VRCVA_PANEL_INTERACTION_HOTKEY` | `Ctrl+Shift+I` | 結果パネルのレーザー操作をON/OFFするグローバルホットキー |
 | `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 | `VRCVA_OPENVR_EYE` | `left` | 通常SCANで使う片眼。`left`または`right`。不正値は警告して左眼へ戻る |
+| `VRCVA_OSC_TRIGGER_ENABLED` | `false` | `true`のときだけローカル送信元限定のOSC/OSCQuery待受とDNS-SD広告を開始 |
+| `VRCVA_OSC_TRIGGER_ADDRESS` | `/avatar/parameters/VRCVA_Scan` | 完全一致で受けるBool/Int型のAvatar Parameterアドレス |
+| `VRCVA_OSC_TRIGGER_DEBOUNCE_MS` | `750` | OFF→ONの重複を無視する時間。100〜10000ミリ秒 |
+| `VRCVA_OSC_TRIGGER_TYPE` | `bool` | 受理する型。`bool`または`int`だけ |
+| `VRCVA_OSC_TRIGGER_INT_VALUE` | `1` | `int`型を選んだ場合にSCANとして扱う完全一致値 |
 
 例:
 
@@ -336,6 +376,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | 認証/レート制限 | Translation | APIキー権限、課金状態、利用上限。キー値自体はログに出ない |
 | タイムアウト | Translation | ネットワークと `VRCVA_OPENAI_TIMEOUT_SECONDS` |
 | ホットキー登録失敗 | Trigger | 他アプリとの競合。`VRCVA_HOTKEY` を変更して再起動 |
+| `OSCトリガー: 起動失敗` | Trigger | `--osc-trigger-check`を実行。WindowsのDNS Clientサービス、ネットワーク接続、VPN/セキュリティソフトを確認し、直るまではホットキーを使用 |
+| OSC診断は起動するがButtonが届かない | Trigger | VRChat側でOSCを有効化し、Parameter名・型・Saved/Syncedを確認。既存OSC ConfigをVRChatのメニューからリセットして再生成 |
 | XSOverlay通知が出ない | Rendering | XSOverlayが起動中か確認。Window Captureは不要。デスクトップ窓に結果が出るならSCAN自体は成功 |
 | SteamVR結果パネルが出ない | Rendering | SteamVRを先に起動し、上の`--steamvr-overlay-check`を実行。失敗しても結果はデスクトップ窓に残る |
 | 結果見出しが`VRChatウィンドウ（フォールバック）`になる | Capture | SteamVR未起動、OpenVRインターフェース、GPU選択、またはコピー失敗時の正常な代替動作。SteamVRを使う場合は先に起動して再度SCAN |
@@ -356,7 +398,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - SteamVR起動中の通常SCANは設定した片眼のコンポジタ画像を取得します。両眼合成は行いません。
 - SteamVR未起動またはアイミラー取得失敗時はWindows Graphics Captureへ自動フォールバックします。他ウィンドウの遮蔽には依存しませんが、VRChatが最小化中なら描画再開のため短時間だけ自動復元します。
 - 現在のVR結果表示はHMD相対のSteamVRパネルです。利用者が閉じるか次のSCANで置き換えるまで保持します。既定ではVRChat操作を妨げない非インタラクティブ表示で、`Ctrl+Shift+I`またはOVRASの`KeyboardOne`を押した間だけスクロール・閉じる操作が可能です。手首追従位置の調整はまだ実装していません。
-- VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする暫定方式です。一度バインドすればVR中の物理キーボード操作は不要です。内部のキー橋渡しもなくすVRCVAネイティブSteamVR入力/OSCQueryは後続です。
+- VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする方式を回復経路として維持します。任意のVRChat OSCトリガーは実装済みですが実機接続待ちで、アバター設定を必要としないVRCVAネイティブSteamVR入力は後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
 - 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。
 - OpenAI APIの実通信は、リポジトリやCIに秘密を置かないため利用者が明示選択した場合だけ行います。自動テストは偽HTTP応答を使います。
@@ -366,7 +408,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 
-次の実機ゲートは、アイミラー経路を複数のワールドと文字サイズで使い、認識内容と体感時間のばらつきを記録することです。内部のキー橋渡しをなくすSteamVR入力/OSCQueryと手首相対配置はその後です。翻訳バックエンドは引き続き所有者の明示判断待ちです。
+次の実機ゲートは、VRChatがVRCVAのOSCQuery広告を検出し、XSOverlayが9001を使ったまま動的ポートへButton操作を送れることの確認です。その後は手首相対配置と、アバター設定を必要としないSteamVR入力を進めます。翻訳バックエンドは引き続き所有者の明示判断待ちです。
 
 ## ライセンス
 

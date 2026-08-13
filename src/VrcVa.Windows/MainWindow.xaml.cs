@@ -7,6 +7,7 @@ using VrcVa.Core;
 using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
 using VrcVa.Windows.Ocr;
+using VrcVa.Windows.Osc;
 using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Win32;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window
     private const int PanelInteractionHotKeyIdentifier = ScanHotKeyIdentifier + 1;
     private const int ModelToggleHotKeyIdentifier = ScanHotKeyIdentifier + 2;
     private readonly HttpClient _httpClient = new();
+    private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
@@ -29,12 +31,15 @@ public partial class MainWindow : Window
     private readonly OpenAiTextTranslator? _openAiTranslator;
     private readonly bool _hasOpenAiApiKey;
     private readonly string _captureConfiguration;
+    private readonly OscTriggerOptions? _oscTriggerOptions;
     private string _translationStatus;
+    private string _oscStatus = "OSCトリガー: 無効";
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
     private GlobalHotKey? _globalHotKey;
     private GlobalHotKey? _panelInteractionHotKey;
     private GlobalHotKey? _modelToggleHotKey;
+    private OscTriggerService? _oscTriggerService;
     private CancellationTokenSource? _activeScanCancellation;
     private int _uiScanRunning;
     private string? _startupWarning;
@@ -48,6 +53,24 @@ public partial class MainWindow : Window
             "VrcVa",
             "logs");
         _logger = new PrivacySafeFileLogger(logDirectory);
+
+        try
+        {
+            _oscTriggerOptions = OscTriggerOptions.FromEnvironment();
+            _oscStatus = _oscTriggerOptions.Enabled
+                ? "OSCトリガー: 起動待ち"
+                : "OSCトリガー: 無効";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _startupWarning = "OSCトリガー設定が不正なため、OSCを無効にしました。READMEの設定例を確認してください。";
+            _logger.Error(
+                "startup.osc_configuration_invalid",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
 
         string providerId = Environment.GetEnvironmentVariable("VRCVA_TRANSLATION_PROVIDER")?
             .Trim()
@@ -145,7 +168,7 @@ public partial class MainWindow : Window
         Closed += MainWindow_Closed;
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs eventArgs)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs eventArgs)
     {
         IReadOnlyList<string> languageTags;
         string? selectedRecognizerTag;
@@ -199,7 +222,88 @@ public partial class MainWindow : Window
                 ? "準備完了。VRChatを表示してSCANしてください。"
                 : "英語OCRが未導入です。上の警告を確認してください。SCANは引き続き使用できます。");
         UpdateEnvironmentDetails();
+
+        if (_oscTriggerOptions?.Enabled == true)
+        {
+            await StartOscTriggerAsync(_oscTriggerOptions);
+        }
     }
+
+    private async Task StartOscTriggerAsync(OscTriggerOptions options)
+    {
+        try
+        {
+            _oscTriggerService = await OscTriggerService.StartAsync(
+                options,
+                _windowLifetimeCancellation.Token);
+            _oscTriggerService.Triggered += OscTriggerService_Triggered;
+            _oscTriggerService.Faulted += OscTriggerService_Faulted;
+            _oscStatus = $"OSCトリガー: 有効 / 動的ポート {_oscTriggerService.OscPort}";
+            _logger.Info(
+                "startup.osc_trigger_ready",
+                Guid.Empty,
+                ScanStage.Trigger,
+                numericMetrics: new Dictionary<string, long>
+                {
+                    ["oscPort"] = _oscTriggerService.OscPort,
+                    ["queryPort"] = _oscTriggerService.QueryPort,
+                });
+            UpdateEnvironmentDetails();
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or COMException
+                or System.Net.Sockets.SocketException)
+        {
+            _oscStatus = "OSCトリガー: 起動失敗 / ホットキーは使用可能";
+            StatusText.Text = "OSCトリガーを開始できませんでした。ホットキーまたはSCANボタンは使用できます。";
+            _logger.Error(
+                "startup.osc_trigger_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+            UpdateEnvironmentDetails();
+        }
+        catch (OperationCanceledException) when (_windowLifetimeCancellation.IsCancellationRequested)
+        {
+            // Window shutdown cancelled startup. The service factory disposes partial sockets.
+        }
+    }
+
+    private async void OscTriggerService_Triggered(object? sender, EventArgs eventArgs)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        try
+        {
+            await Dispatcher
+                .InvokeAsync(() => RunPipelineAsync(_vrChatPipeline, "vrchat-osc"))
+                .Task
+                .Unwrap();
+        }
+        catch (Exception exception) when (
+            exception is TaskCanceledException or InvalidOperationException)
+        {
+            _logger.Error(
+                "osc.trigger_dispatch_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+    }
+
+    private void OscTriggerService_Faulted(object? sender, Exception exception) =>
+        _logger.Error(
+            "osc.trigger_listener_failed",
+            Guid.Empty,
+            ScanStage.Trigger,
+            ScanFailureCode.Unexpected,
+            exception);
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs eventArgs)
     {
@@ -505,13 +609,22 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs eventArgs)
     {
+        _windowLifetimeCancellation.Cancel();
         _activeScanCancellation?.Cancel();
         _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
         _panelInteractionHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
+        if (_oscTriggerService is not null)
+        {
+            _oscTriggerService.Triggered -= OscTriggerService_Triggered;
+            _oscTriggerService.Faulted -= OscTriggerService_Faulted;
+            _oscTriggerService.Dispose();
+        }
+
         _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
+        _windowLifetimeCancellation.Dispose();
     }
 
     private async Task SendXsOverlayStatusAsync(
@@ -568,7 +681,7 @@ public partial class MainWindow : Window
 
     private void UpdateEnvironmentDetails() =>
         DetailText.Text =
-            $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / ログ: {_logger.LogDirectory}";
+            $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / {_oscStatus} / ログ: {_logger.LogDirectory}";
 
     private sealed record TranslationModelChoice(string DisplayName, string ModelId);
 
