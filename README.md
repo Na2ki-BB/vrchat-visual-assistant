@@ -2,7 +2,7 @@
 
 VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 2のOSCトリガー実機接続まで完了** しています。キャプチャ、OCR、操作可能なSteamVR結果パネル、VRChat OSCQuery自動接続を実機確認済みです。OSCは既定では無効です。翻訳バックエンドは比較・判断中のため既定では無効で、既定状態でもOCRした英語は結果として表示します。手首追従は後続です。
+現在は **Phase 2のOSCトリガーと任意のOpenAI翻訳まで実機接続済み** です。キャプチャ、OCR、操作可能なSteamVR結果パネル、VRChat OSCQuery自動接続、Windows資格情報からのキー自動読込を確認済みです。OSCは既定では無効です。翻訳も専用キーを保存した場合だけ有効になり、未登録ならOCRした英語だけをローカル表示します。手首追従は後続です。
 
 確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
@@ -16,8 +16,8 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - SteamVR起動中はコンポジタの片眼アイミラーを1回取得。既定の左眼はデスクトップミラーより広い縦視野を使う
 - SteamVRやアイミラー取得が利用できない場合は、Windows Graphics Captureによる`VRChat.exe`取得へ自動フォールバック
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
-- 翻訳バックエンド未選定時は外部送信せず、英語OCR結果を表示
-- 明示的に選んだ場合だけ、OCRテキストをOpenAI Responses APIで翻訳
+- OpenAI未設定時は外部送信せず、英語OCR結果を表示
+- 専用キーを明示登録した場合だけ、OCRテキストをOpenAI Responses APIで翻訳
 - 画面取得後のOCR中通知と失敗段階をXSOverlay通知としてVR内表示
 - OCR/翻訳結果をSteamVR内の操作可能なパネルへ表示し、閉じるまで保持
 - 長い結果をVRコントローラーのジョイスティック、または右端のバーのクリックでページ移動
@@ -31,7 +31,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - 常時録画・定期キャプチャ・テレメトリはありません。
 - ユーザーがクリック、ホットキー、診断コマンドを実行した瞬間だけ取得します。
 - キャプチャはメモリ内で処理し、通常動作では保存しません。処理後は画像バッファをゼロ化します。
-- 既定では翻訳バックエンド未選定のため、OCR済みテキストも外部へ送りません。
+- 既定のキー未登録状態では、OCR済みテキストも外部へ送りません。
 - 任意のOpenAIアダプターを明示選択した場合も、送るのはOCR済みテキストだけです。画像は送りません。
 - OpenAI要求は `store: false` です。ただしOCRテキストが外部サービスへ送信される点は変わりません。
 - ログは画像、OCR本文、翻訳本文、APIキー、HTTP本文を記録しません。寸法、文字数、時間、エラー種別だけです。
@@ -44,8 +44,8 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 
 - アプリ本体、Windows画面取得、Windows OCR、ローカルログには利用回数に応じた料金はありません。
 - 既に導入済みのXSOverlayへローカル通知を出すことについて、本アプリから追加料金は発生しません。
-- **既定状態では翻訳サービスを呼ばないため、API料金は発生しません。** 採用サービスはまだ決定していません。
-- OpenAI翻訳は任意の従量課金フォールバックです。VRCVA画面から専用APIキーを登録するか、`VRCVA_TRANSLATION_PROVIDER=openai`と専用の`VRCVA_OPENAI_API_KEY`を両方設定しない限り呼ばれません。
+- **既定状態では翻訳サービスを呼ばないため、API料金は発生しません。** 現在選定済みの翻訳バックエンドは任意のOpenAI Responses APIです。
+- OpenAI翻訳は任意の従量課金機能です。VRCVA画面から専用APIキーを登録するか、`VRCVA_TRANSLATION_PROVIDER=openai`と専用の`VRCVA_OPENAI_API_KEY`を両方設定しない限り呼ばれません。
 - アプリは一般的な`OPENAI_API_KEY`を自動利用しません。別ツール用のキーで意図せず課金されることを防ぎます。
 - 画面から登録したキーはWindows資格情報マネージャーに保存され、同じWindowsユーザーだけが復号できます。平文ファイル、リポジトリ、ログには保存しません。同じWindowsユーザー権限で動く別プロセスからの保護を意味するものではありません。
 - OpenAI利用時は[`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)（既定）と[`gpt-5.4-nano`](https://developers.openai.com/api/docs/models/gpt-5.4-nano)を画面から選べます。2026-08-13時点ではLunaの方が出力単価もわずかに低いため推奨表示です。価格は変わり得るため、利用前に各公式ページを確認してください。
@@ -59,7 +59,7 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 - Windows 10 version 2004 / build 19041 以降（Windows 11推奨）
 - .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
 - PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
-- 翻訳バックエンドは未選定。現段階ではキャプチャとOCRだけを無料で検証可能
+- 翻訳は任意のOpenAI Responses API。専用キーを登録しなければ、キャプチャとOCRだけを無料で利用可能
 - Windowsの英語OCR言語機能。未導入でもアプリは動作しますが、日本語認識器が英語を漢字や全角記号へ誤認識し、結果がほぼ読めなくなる場合があります
 - VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
 - VRコントローラーからSCANする暫定経路にはOVR Advanced Settings（キーボードなら不要）
@@ -316,7 +316,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | `VRCVA_OPENAI_API_KEY` | none | OpenAIを明示選択した場合だけ読む専用APIキー |
 | `VRCVA_OPENAI_MODEL` | `gpt-5.6-luna` | 起動時の翻訳モデル。許可値は`gpt-5.6-luna`と`gpt-5.4-nano`だけ。画面から一時変更可能 |
 | `VRCVA_OPENAI_ENDPOINT` | `https://api.openai.com/v1/responses` | Responses API endpoint |
-| `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜120秒 |
+| `VRCVA_OPENAI_TIMEOUT_SECONDS` | `25` | 1〜25秒。課金ありの処理を長時間保持しないため上限固定 |
 | `VRCVA_HOTKEY` | `Ctrl+Shift+T` | 修飾キーを1つ以上含むグローバルホットキー |
 | `VRCVA_MODEL_TOGGLE_HOTKEY` | `Ctrl+Shift+G` | OpenAI利用中にnano/Lunaを交互に切り替えるホットキー |
 | `VRCVA_OPENVR_EYE` | `left` | 通常SCANで使う片眼。`left`または`right`。不正値は警告して左眼へ戻る |
@@ -414,7 +414,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - 現在のVR結果表示はHMD相対のSteamVRパネルです。表示中はレーザー操作を自動で有効化するため、その間はVRChat内を歩けません。ページ移動して読み、本文右側の`閉じる / CLOSE`を選ぶと入力を解放してVRChat操作へ自動復帰します。追加バインドやキーボード操作は不要です。次のSCAN、SteamVR切断、VRCVA終了時にも入力を解放します。手首追従位置の調整はまだ実装していません。
 - VRコントローラーはOVR Advanced SettingsからOSショートカットへ橋渡しする方式を回復経路として維持します。任意のVRChat OSCトリガーは実装・実機接続済みで、アバター設定を必要としないVRCVAネイティブSteamVR入力は後続です。
 - ローカルOCRは通常認識が弱い場合、視線中央だけでなく画面全体を重なり付きの横帯3枚に分けて自動再認識します。それでも小さい文字、遠近、装飾フォント、発光、低コントラストでは精度が下がります。
-- 翻訳バックエンドは未選定で、既定状態では日本語訳を生成しません。
+- OpenAI翻訳は任意で、専用キー未登録の既定状態では日本語訳を生成しません。
 - OpenAI APIの実通信は、リポジトリやCIに秘密を置かないため利用者が明示選択した場合だけ行います。自動テストは偽HTTP応答を使います。
 
 ## 設計とロードマップ
@@ -422,7 +422,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 
-次の実機ゲートは、VRChatがVRCVAのOSCQuery広告を検出し、XSOverlayが9001を使ったまま動的ポートへButton操作を送れることの確認です。その後は手首相対配置と、アバター設定を必要としないSteamVR入力を進めます。翻訳バックエンドは引き続き所有者の明示判断待ちです。
+OSCQuery経由のButton操作と任意のOpenAI翻訳は実機確認済みです。次の実機ゲートはSteamVR再起動・ヘッドセット切断時のoverlay解放とWPFフォールバックです。その後に手首相対配置を検討します。
 
 ## ライセンス
 

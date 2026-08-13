@@ -8,6 +8,28 @@ namespace VrcVa.Infrastructure.Tests;
 public sealed class OpenAiTextTranslatorTests
 {
     [Fact]
+    public void OptionsFromEnvironment_BoundsTimeoutAtTwentyFiveSeconds()
+    {
+        const string variable = "VRCVA_OPENAI_TIMEOUT_SECONDS";
+        string? original = Environment.GetEnvironmentVariable(variable);
+        try
+        {
+            Environment.SetEnvironmentVariable(variable, "25");
+            OpenAiTranslatorOptions options = OpenAiTranslatorOptions.FromEnvironment();
+            Assert.Equal(TimeSpan.FromSeconds(25), options.Timeout);
+
+            Environment.SetEnvironmentVariable(variable, "26");
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                OpenAiTranslatorOptions.FromEnvironment);
+            Assert.Contains("1 to 25", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, original);
+        }
+    }
+
+    [Fact]
     public async Task TranslateToJapaneseAsync_SendsTextOnlyPrivacyRequestAndParsesOutput()
     {
         RecordingHandler handler = new(HttpStatusCode.OK, """

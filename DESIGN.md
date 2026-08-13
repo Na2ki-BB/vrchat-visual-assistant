@@ -76,7 +76,7 @@ The source stays in the current WSL workspace. Windows commands access it throug
 - In-memory PNG frame; no image is written by default
 - Local OCR using `Windows.Media.Ocr`, with a conditional full-view multi-band retry
 - English-to-Japanese translation behind an `ITextTranslator` interface
-- No default translation backend while provider evaluation is in progress; external sending is disabled
+- No-key startup defaults to local OCR; the selected OpenAI provider requires an explicit VRCVA credential
 - Optional OpenAI Responses API text translator behind explicit provider selection
 - WPF result view showing state, source text, Japanese text, and actionable errors
 - Cancellation/single-flight behavior so repeated triggers cannot create request storms
@@ -169,17 +169,17 @@ With SteamVR stopped, the production composition reached `VrChatWindowCaptureSou
 
 ### Translation
 
-- **Current default: unselected.** `VRCVA_TRANSLATION_PROVIDER` defaults to `none`; OCR still completes successfully and its English text is shown locally, while no OCR text is sent externally.
-- Azure Translator F0, DeepL API Developer, Google Cloud Translation, Amazon Translate, and offline Argos/OPUS-MT have been researched but not selected or implemented as the default.
-- **Optional: OpenAI Responses API.** It is enabled by an explicitly stored VRCVA credential or `VRCVA_TRANSLATION_PROVIDER=openai`, and reads only the VRCVA Windows Credential Manager entry or application-specific `VRCVA_OPENAI_API_KEY`. The generic `OPENAI_API_KEY` fallback was removed to prevent accidental reuse and spend.
+- **Current opt-in provider: OpenAI Responses API.** Local OCR remains the no-key default so a fresh installation sends nothing externally. An explicitly stored VRCVA credential selects OpenAI automatically; the environment alternative requires `VRCVA_TRANSLATION_PROVIDER=openai` plus the application-specific `VRCVA_OPENAI_API_KEY`. The generic `OPENAI_API_KEY` fallback was removed to prevent accidental reuse and spend.
+- Azure Translator F0, DeepL API Developer, Google Cloud Translation, Amazon Translate, and offline Argos/OPUS-MT were researched but are not selected or implemented.
 - A key registered in the UI is stored as the Generic Credential `VrcVa/OpenAIApiKey` by Windows Credential Manager. It is not written to repository files or logs and is decryptable only in the same Windows user context; this is not isolation from another process already running as that user. Environment variables remain a non-persistent override.
 - The OpenAI request sends OCR text only and uses `store: false`. The UI states both the external data boundary and metered usage.
-- The request uses a fixed translation-only instruction, no tools, `reasoning.effort=none`, no automatic retries, a 1,200-token output ceiling, and a 25-second default timeout (configurable from 1 to 120 seconds without changing request or token limits).
+- The request uses a fixed translation-only instruction, no tools, `reasoning.effort=none`, no automatic retries, a 1,200-token output ceiling, and a timeout configurable from 1 to a hard maximum of 25 seconds.
 - Application-side spend guards reject inputs above 4,000 UTF-8 bytes and reject API attempt 11 and later in one process before network I/O. Failed network attempts consume the session allowance so repeated provider failures cannot create an unbounded loop. Restarting the process resets this allowance, so a dedicated OpenAI Project hard spend limit remains the account-level backstop.
 - Runtime model IDs are allowlisted to `gpt-5.6-luna` and `gpt-5.4-nano`; an arbitrary environment-supplied model cannot bypass the documented price envelope.
 - When OpenAI is enabled, the WPF UI exposes runtime selection between the recommended/default `gpt-5.6-luna` and `gpt-5.4-nano`. `Ctrl+Shift+G` or the OVRAS controller bridge toggles the same state and confirms it through an XSOverlay notification. A change applies to the next scan and is disabled during an active scan.
 - Model selection is session-only and contains no secret. Startup still follows `VRCVA_OPENAI_MODEL`, defaulting to Luna, while the API key remains process-scoped and is never displayed or persisted.
 - Provider responses and HTTP bodies are never logged. Tests use fake HTTP handlers and placeholder keys.
+- An owner-supervised Quest 3S PCVR session completed 10/10 OpenAI translations after credential-backed startup. Total SCAN latency was 1.59–6.70 seconds (median 3.04, mean 3.40); source lengths were 29–627 characters. Attempt 11 and later were classified as `TranslationUsageLimitReached` before API I/O, confirming the per-process guard without logging source or translated content.
 
 ### Renderer
 
@@ -344,6 +344,7 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-11 | Defer translation-provider selection and default to no external sending | The owner is still comparing cost, latency, privacy, and PCVR impact; implementation must wait for an explicit decision |
 | 2026-08-11 | Remove GPU-based local translation from the project | A local benchmark consumed about 3.7 GB additional VRAM on an 8 GB laptop GPU and risks PCVR contention |
 | 2026-08-11 | Require an app-specific key for optional OpenAI mode | Removing the generic `OPENAI_API_KEY` fallback prevents another tool's key from silently enabling paid calls |
+| 2026-08-14 | Select OpenAI Responses API as the current opt-in translation backend | Credential-backed Quest 3S PCVR use completed 10/10 translations, while no-key startup remains local OCR only and attempt 11 is blocked before API I/O |
 | 2026-08-11 | Initially expose nano/Luna in the XSOverlay-visible WPF UI (superseded below) | The owner needed a runtime cost/quality choice before the Window Capture UX was evaluated |
 | 2026-08-11 | Do not add a license yet | License choice belongs to the repository owner |
 | 2026-08-11 | Replace XSOverlay Window Capture with localhost notifications | Device feedback showed high setup friction, excessive panel size, and broken controller clicking; notifications preserve VR visibility without a persistent window |

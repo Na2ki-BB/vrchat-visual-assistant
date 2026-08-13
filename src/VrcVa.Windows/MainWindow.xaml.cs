@@ -124,7 +124,7 @@ public partial class MainWindow : Window
                     analyzer = new OcrAnalyzer(ocrEngine);
                     _privacyNotice =
                         "画像とOCRはWindows内で処理し、保存しません。OCR結果は表示しますが、翻訳未設定のため外部送信しません。";
-                    _translationStatus = "OCRのみ / 翻訳バックエンド未選定";
+                    _translationStatus = "OCRのみ / OpenAI未設定";
                     break;
                 case "openai":
                     OpenAiTranslatorOptions openAiOptions = OpenAiTranslatorOptions.FromEnvironment();
