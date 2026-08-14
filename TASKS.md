@@ -254,3 +254,45 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [ ] Add opt-in vision/VQA and summarization providers.
 - [ ] Add puzzle-hint/object-recognition analyzers with clear uncertainty display.
 - [ ] Add web search only as a distinct opt-in capability with query preview and source links.
+
+## Post-MVP Milestone F — SteamVR pass-through input and wrist launcher
+
+- [ ] Add an OpenVR Input 2.0 action manifest and Oculus Touch default binding without joystick actions.
+- [ ] Add ABI-checked `IVRInput_010`, right-hand pose, and overlay-intersection adapters without a new package.
+- [ ] Add `--steamvr-input-pass-through-check`; keep product interaction unchanged until its device gate passes.
+- [ ] Device gate: walk continuously in VRChat and receive exactly 20/20 VRCVA right-trigger edges without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
+- [ ] Define one logical surface contract used by texture drawing, pointer conversion, and hit testing; cover edges, corners, and +/-1 pixel in tests.
+- [ ] Replace result, page, scrollbar, close, and calibration mouse events with the priority-zero VRCVA pointer.
+- [ ] Remove ordinary calls to `MakeOverlaysInteractiveIfVisible`; input failure must disable VRCVA controls rather than taking scene input.
+- [ ] Replace joystick page navigation with laser-visible previous/next controls and the existing scrollbar.
+- [ ] Restore a compact top-right close button whose visible rectangle and hit rectangle are the same shared value.
+- [ ] Add the left-wrist `DimChip -> ArmedChip -> Menu -> Scanning -> Result` state machine with pose-loss and cancellation cleanup.
+- [ ] Hide launcher/result/cursor surfaces before the established eye-mirror discard sequence and verify zero self-capture markers in ten scans.
+- [ ] Keep desktop SCAN as recovery; demote OSC/OVRAS to advanced fallback documentation only after full device acceptance.
+
+## Post-MVP Milestone G — small-group onboarding and stable startup
+
+- [ ] Add a versioned application settings store and migrate version-1 result-panel placement without losing it.
+- [ ] Store onboarding and auto-launch preferences only; prove serialized settings never contain an API key or OCR/result text.
+- [ ] Add a single-instance guard for manual plus SteamVR launches.
+- [ ] Generate/register a fixed-key SteamVR application manifest and enable auto-launch only after an explicit wizard choice.
+- [ ] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.
+- [ ] Add a three-step first-run wizard for SteamVR startup, English OCR readiness, and optional OpenAI BYOK.
+- [ ] Keep the normal desktop window minimized for `--steamvr-autostart`, with an obvious way to reopen settings.
+- [ ] Make API-key save/delete affect the next SCAN without restart while preserving one process-wide ten-attempt limit.
+- [ ] Keep Credential Manager as the only persistent API-key store and the official OpenAI endpoint as the only saved-key destination.
+- [ ] Add a dependency-free self-contained beta publish path and document one stable extraction folder; do not build a commercial installer.
+
+## Post-MVP Milestone H — feature foundation and AI-development harness
+
+- [ ] Add compile-time feature descriptors/catalog and keep unknown feature IDs as typed failures.
+- [ ] Separate backend profile, credential availability, process-lifetime usage policy, and feature-specific prompt/response parsing.
+- [ ] Preserve local-only/no-key behavior and prove it performs zero HTTP requests.
+- [ ] Keep dynamic plug-ins, autonomous loops, arbitrary tools, vision uploads, and managed accounts out of this slice.
+- [ ] Prove the boundary with a fake-backend second text feature before enabling another paid provider.
+- [ ] Prepare a repository-local `vrcva-development` Skill using the official skill scaffold.
+- [ ] Include project workflow, privacy boundaries, OpenVR ABI/coordinate rules, verification commands, review gates, and evidence format.
+- [ ] Add setup instructions only; do not copy the Skill into a personal skill directory or change Codex/Claude settings.
+- [ ] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes.
+
+Phase 3 completion requires Windows Release build/tests/format, `git diff --check`, a tracked-file secret scan, independent correctness review, and the Quest 3S acceptance gates above. Missing hardware evidence must remain explicitly unchecked rather than being inferred from unit tests.
