@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text.Json;
 
 namespace VrcVa.Windows.OpenVr;
 
@@ -234,73 +233,4 @@ internal static class ResultPanelCalibration
         value,
         ResultPanelPlacement.MinimumPosition,
         ResultPanelPlacement.MaximumPosition);
-}
-
-internal sealed class ResultPanelPlacementStore
-{
-    private const int CurrentVersion = 1;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-    };
-
-    private readonly string _path;
-
-    public ResultPanelPlacementStore(string? path = null)
-    {
-        _path = path ?? System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VrcVa",
-            "settings.json");
-    }
-
-    public string Path => _path;
-
-    public ResultPanelPlacement Load()
-    {
-        if (!File.Exists(_path))
-        {
-            return ResultPanelPlacement.Default;
-        }
-
-        string json = File.ReadAllText(_path);
-        StoredSettings? stored = JsonSerializer.Deserialize<StoredSettings>(json, JsonOptions);
-        if (stored is null || stored.Version != CurrentVersion || stored.ResultPanel is null)
-        {
-            throw new InvalidDataException("The VRCVA settings file is invalid or unsupported.");
-        }
-
-        stored.ResultPanel.Validate();
-        return stored.ResultPanel;
-    }
-
-    public void Save(ResultPanelPlacement placement)
-    {
-        placement.Validate();
-        string? directory = System.IO.Path.GetDirectoryName(_path);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new InvalidOperationException("The VRCVA settings path has no directory.");
-        }
-
-        Directory.CreateDirectory(directory);
-        string temporaryPath = $"{_path}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            string json = JsonSerializer.Serialize(
-                new StoredSettings(CurrentVersion, placement),
-                JsonOptions);
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
-    }
-
-    private sealed record StoredSettings(int Version, ResultPanelPlacement? ResultPanel);
 }

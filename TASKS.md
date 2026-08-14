@@ -272,8 +272,8 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 ## Post-MVP Milestone G — small-group onboarding and stable startup
 
-- [ ] Add a versioned application settings store and migrate version-1 result-panel placement without losing it.
-- [ ] Store onboarding and auto-launch preferences only; prove serialized settings never contain an API key or OCR/result text.
+- [x] Add a versioned application settings store and migrate version-1 result-panel placement without losing it.
+- [x] Store onboarding and auto-launch preferences only; prove serialized settings never contain an API key or OCR/result text.
 - [ ] Add a single-instance guard for manual plus SteamVR launches.
 - [ ] Generate/register a fixed-key SteamVR application manifest and enable auto-launch only after an explicit wizard choice.
 - [ ] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.

@@ -11,6 +11,7 @@ using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Osc;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Security;
+using VrcVa.Windows.Settings;
 using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows;
@@ -25,7 +26,7 @@ public partial class MainWindow : Window
     private readonly HttpClient _httpClient = new();
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly WindowsCredentialStore _openAiCredentialStore = new();
-    private readonly ResultPanelPlacementStore _resultPanelPlacementStore = new();
+    private readonly VrcVaSettingsStore _settingsStore = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly IAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private readonly bool _hasStoredOpenAiApiKey;
     private readonly string _captureConfiguration;
     private readonly OscTriggerOptions? _oscTriggerOptions;
+    private VrcVaSettings _settings = VrcVaSettings.Default;
     private ResultPanelPlacement _resultPanelPlacement = ResultPanelPlacement.Default;
     private string _translationStatus;
     private string _oscStatus = "OSCトリガー: 無効";
@@ -66,7 +68,8 @@ public partial class MainWindow : Window
 
         try
         {
-            _resultPanelPlacement = _resultPanelPlacementStore.Load();
+            _settings = _settingsStore.Load();
+            _resultPanelPlacement = _settings.ResultPanel;
         }
         catch (Exception exception) when (
             exception is IOException
@@ -74,7 +77,7 @@ public partial class MainWindow : Window
                 or InvalidDataException
                 or System.Text.Json.JsonException)
         {
-            _startupWarning = "保存済みのVR結果パネル配置を読み込めなかったため、初期配置を使います。設定欄から保存し直せます。";
+            _startupWarning = "保存済み設定を読み込めなかったため、初期設定を使います。設定欄から保存し直せます。";
             _logger.Error(
                 "startup.result_panel_placement_load_failed",
                 Guid.Empty,
@@ -707,7 +710,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            _resultPanelPlacementStore.Save(_resultPanelPlacement);
+            VrcVaSettings updatedSettings = _settings with
+            {
+                ResultPanel = _resultPanelPlacement,
+            };
+            _settingsStore.Save(updatedSettings);
+            _settings = updatedSettings;
             ResultPanelPlacementStatusText.Text = successMessage;
         }
         catch (Exception exception) when (
