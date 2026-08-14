@@ -20,4 +20,13 @@
     <InternalsVisibleTo Include="VrcVa.Windows.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="OpenVr\Assets\actions.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="OpenVr\Assets\bindings_oculus_touch.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

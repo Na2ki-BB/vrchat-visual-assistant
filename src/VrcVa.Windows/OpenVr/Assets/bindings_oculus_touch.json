@@ -1,0 +1,34 @@
+{
+  "action_manifest_version": 0,
+  "alias_info": {},
+  "bindings": {
+    "/actions/vrcva": {
+      "chords": [],
+      "haptics": [],
+      "poses": [
+        {
+          "output": "/actions/vrcva/in/pointer_pose",
+          "path": "/user/hand/right/pose/raw"
+        }
+      ],
+      "skeleton": [],
+      "sources": [
+        {
+          "inputs": {
+            "click": {
+              "output": "/actions/vrcva/in/select"
+            }
+          },
+          "mode": "trigger",
+          "path": "/user/hand/right/input/trigger"
+        }
+      ]
+    }
+  },
+  "category": "steamvr_input",
+  "controller_type": "oculus_touch",
+  "description": "VRCVA right trigger select; no movement controls",
+  "name": "VRCVA Oculus Touch default",
+  "options": {},
+  "simulated_actions": []
+}

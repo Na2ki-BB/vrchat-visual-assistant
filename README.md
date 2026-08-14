@@ -347,6 +347,19 @@ $env:VRCVA_HOTKEY = "Ctrl+Alt+T"
 
 診断は翻訳APIを呼びません。WinExeを `dotnet` ホストで起動すると、結果を同じコンソールで確認できます。
 
+### SteamVR入力の歩行維持ゲート（開発中）
+
+次の診断は、将来の左手首ランチャー用に右トリガーと右手姿勢だけをSteamVR Input 2.0で観測します。通常のVRCVA操作はまだ変更しません。左ジョイスティックはVRCVAへ割り当てず、action set priorityも`0`のため、VRChatへ入力を通す設計です。表示内容、姿勢座標、画面、OCR本文、APIキーは出力しません。
+
+SteamVRとVRChatを起動し、VRChat内で左ジョイスティックを使って歩き続けながら、右トリガーを20回押します。
+
+```powershell
+dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
+  --steamvr-input-pass-through-check --seconds 90
+```
+
+`trigger=20/20, selectActive=True, poseValid=True`となり、HMD内でも一度も歩行が止まらなければゲート合格です。トリガーはVRChat側にも届くため、VRChat内のトリガー操作が同時に発生し得ます。失敗しても現在のSCAN、OSC、OVRAS、結果パネルには影響しません。
+
 ### 任意の画像
 
 ```powershell

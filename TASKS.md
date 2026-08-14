@@ -257,9 +257,9 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 ## Post-MVP Milestone F — SteamVR pass-through input and wrist launcher
 
-- [ ] Add an OpenVR Input 2.0 action manifest and Oculus Touch default binding without joystick actions.
-- [ ] Add ABI-checked `IVRInput_010`, right-hand pose, and overlay-intersection adapters without a new package.
-- [ ] Add `--steamvr-input-pass-through-check`; keep product interaction unchanged until its device gate passes.
+- [x] Add an OpenVR Input 2.0 action manifest and Oculus Touch default binding without joystick actions.
+- [>] Add ABI-checked `IVRInput_010`, right-hand pose, and overlay-intersection adapters without a new package. Input/pose is complete; overlay intersection remains gated behind the device check.
+- [x] Add `--steamvr-input-pass-through-check`; keep product interaction unchanged until its device gate passes.
 - [ ] Device gate: walk continuously in VRChat and receive exactly 20/20 VRCVA right-trigger edges without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
 - [ ] Define one logical surface contract used by texture drawing, pointer conversion, and hit testing; cover edges, corners, and +/-1 pixel in tests.
 - [ ] Replace result, page, scrollbar, close, and calibration mouse events with the priority-zero VRCVA pointer.

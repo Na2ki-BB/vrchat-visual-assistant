@@ -15,6 +15,29 @@ public partial class App : System.Windows.Application
 
         if (eventArgs.Args.Length > 0
             && eventArgs.Args[0].Equals(
+                "--steamvr-input-pass-through-check",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            AttachDiagnosticConsole();
+            int exitCode;
+            try
+            {
+                exitCode = await SteamVrInputDiagnosticRunner.RunAsync(eventArgs.Args);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"SteamVR input diagnostic failed: {exception.GetType().Name}: "
+                    + $"HResult=0x{exception.HResult:X8}");
+                exitCode = 10;
+            }
+
+            Shutdown(exitCode);
+            return;
+        }
+
+        if (eventArgs.Args.Length > 0
+            && eventArgs.Args[0].Equals(
                 "--osc-trigger-check",
                 StringComparison.OrdinalIgnoreCase))
         {
