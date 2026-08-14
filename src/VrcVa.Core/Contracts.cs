@@ -24,6 +24,24 @@ public interface ITextTranslator
         CancellationToken cancellationToken);
 }
 
+public sealed record TextModelRequest(
+    string Model,
+    string Instructions,
+    string Input,
+    int MaxOutputTokens);
+
+public sealed record TextModelResponse(
+    string Text,
+    string Provider,
+    string Model);
+
+public interface ITextModelClient
+{
+    Task<TextModelResponse> GenerateAsync(
+        TextModelRequest request,
+        CancellationToken cancellationToken);
+}
+
 public interface IAnalyzer
 {
     Task<AnalysisResult> AnalyzeAsync(

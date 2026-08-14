@@ -19,6 +19,16 @@ public sealed class TranslateAnalyzerTests
 
         Assert.Equal($"KEEP OUT{Environment.NewLine}Emergency exit", translator.SourceText);
         Assert.Equal("立入禁止。非常口。", result.JapaneseText);
+        Assert.Equal(FeatureIds.Translation, result.FeatureResult.FeatureId);
+        Assert.Equal(
+            new[]
+            {
+                TranslationResultSectionIds.SourceText,
+                TranslationResultSectionIds.JapaneseText,
+            },
+            result.FeatureResult.Sections.Select(section => section.Id));
+        Assert.Equal("立入禁止。非常口。", result.FeatureResult.PrimarySection.Text);
+        Assert.NotNull(result.FeatureResult.TextModelMetadata);
     }
 
     [Fact]
@@ -62,4 +72,3 @@ public sealed class TranslateAnalyzerTests
         }
     }
 }
-

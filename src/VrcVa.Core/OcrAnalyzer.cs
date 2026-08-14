@@ -40,14 +40,25 @@ public sealed class OcrAnalyzer(IOcrEngine ocrEngine) : IAnalyzer
             ? translationPending
             : $"{ocr.Warning} {translationPending}";
 
-        return new AnalysisResult(
-            sourceText,
-            string.Empty,
-            ocr.RecognizerLanguage,
-            "なし",
-            "OCRのみ",
-            ocrTimer.Elapsed,
-            TimeSpan.Zero,
-            warning);
+        FeatureResult featureResult = new(
+            FeatureIds.Translation,
+            [
+                new ResultSection(
+                    TranslationResultSectionIds.SourceText,
+                    "OCR結果（翻訳未設定）",
+                    sourceText,
+                    ResultSectionRole.Primary),
+            ],
+            new TextModelMetadata(
+                ocr.RecognizerLanguage,
+                "なし",
+                "OCRのみ"))
+        {
+            OcrDuration = ocrTimer.Elapsed,
+            TranslationDuration = TimeSpan.Zero,
+            Warning = warning,
+        };
+
+        return new AnalysisResult(featureResult);
     }
 }

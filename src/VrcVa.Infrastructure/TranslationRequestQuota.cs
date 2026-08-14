@@ -1,7 +1,7 @@
 namespace VrcVa.Infrastructure;
 
 /// <summary>
-/// Tracks OpenAI translation request attempts across translator instances in one process.
+/// Tracks OpenAI text-model request attempts across client instances in one process.
 /// </summary>
 public sealed class TranslationRequestQuota
 {

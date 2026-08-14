@@ -5,7 +5,7 @@ namespace VrcVa.Core;
 public sealed class ScanPipeline
 {
     private readonly ICaptureSource _captureSource;
-    private readonly IAnalyzer _analyzer;
+    private readonly FeatureCatalog _featureCatalog;
     private readonly IResultRenderer _renderer;
     private readonly IPrivacySafeLogger _logger;
     private int _isRunning;
@@ -15,9 +15,26 @@ public sealed class ScanPipeline
         IAnalyzer analyzer,
         IResultRenderer renderer,
         IPrivacySafeLogger? logger = null)
+        : this(
+            captureSource,
+            new FeatureCatalog(new FeatureEntry(BuiltInFeatures.Translation, analyzer)),
+            renderer,
+            logger)
     {
+    }
+
+    public ScanPipeline(
+        ICaptureSource captureSource,
+        FeatureCatalog featureCatalog,
+        IResultRenderer renderer,
+        IPrivacySafeLogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(captureSource);
+        ArgumentNullException.ThrowIfNull(featureCatalog);
+        ArgumentNullException.ThrowIfNull(renderer);
+
         _captureSource = captureSource;
-        _analyzer = analyzer;
+        _featureCatalog = featureCatalog;
         _renderer = renderer;
         _logger = logger ?? NullPrivacySafeLogger.Instance;
     }
@@ -46,6 +63,8 @@ public sealed class ScanPipeline
 
         try
         {
+            FeatureEntry feature = _featureCatalog.Resolve(request.FeatureId);
+
             await RenderProgressAsync(
                 request,
                 ScanStage.Trigger,
@@ -85,10 +104,19 @@ public sealed class ScanPipeline
                     .GetResult());
 
             stage = ScanStage.Ocr;
-            AnalysisResult result = await _analyzer
+            AnalysisResult analysisResult = await feature.Analyzer
                 .AnalyzeAsync(frame, request, progress, cancellationToken)
                 .ConfigureAwait(false);
-            result = result with { CaptureSourceKind = frame.SourceKind };
+            if (analysisResult.FeatureId != feature.Descriptor.Id)
+            {
+                throw new InvalidOperationException(
+                    "The analyzer returned a result for a different feature ID.");
+            }
+
+            AnalysisResult result = analysisResult with
+            {
+                CaptureSourceKind = frame.SourceKind,
+            };
 
             total.Stop();
             ScanOutcome success = ScanOutcome.Succeeded(
@@ -103,8 +131,8 @@ public sealed class ScanPipeline
                 total.Elapsed,
                 new Dictionary<string, long>
                 {
-                    ["sourceCharacters"] = result.SourceText.Length,
-                    ["translatedCharacters"] = result.JapaneseText.Length,
+                    ["resultSections"] = result.Sections.Count,
+                    ["primaryCharacters"] = result.PrimarySection.Text.Length,
                 });
 
             stage = ScanStage.Rendering;

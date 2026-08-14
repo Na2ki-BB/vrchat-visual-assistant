@@ -238,7 +238,8 @@
                 Content="常に手前" />
     </Grid>
 
-    <GroupBox Grid.Row="6"
+    <GroupBox x:Name="SourceResultGroupBox"
+              Grid.Row="6"
               Margin="0,0,0,12"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
@@ -250,7 +251,8 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <GroupBox Grid.Row="7"
+    <GroupBox x:Name="PrimaryResultGroupBox"
+              Grid.Row="7"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
               Header="日本語訳">
@@ -277,7 +279,8 @@
                    Foreground="{StaticResource TextSecondary}"
                    TextWrapping="Wrap" />
       </StackPanel>
-      <Button Grid.Column="1"
+      <Button x:Name="CopyPrimaryResultButton"
+              Grid.Column="1"
               Margin="12,0,0,0"
               Click="CopyButton_Click"
               Content="日本語訳をコピー" />

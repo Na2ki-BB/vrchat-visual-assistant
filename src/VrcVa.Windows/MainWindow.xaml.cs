@@ -439,16 +439,17 @@ public partial class MainWindow : Window
 
     private void CopyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
+        string resultTitle = PrimaryResultGroupBox.Header as string ?? "結果";
         if (string.IsNullOrWhiteSpace(TranslationTextBox.Text))
         {
-            StatusText.Text = "コピーできる日本語訳がまだありません。";
+            StatusText.Text = $"コピーできる{resultTitle}がまだありません。";
             return;
         }
 
         try
         {
             System.Windows.Clipboard.SetText(TranslationTextBox.Text);
-            StatusText.Text = "日本語訳をクリップボードへコピーしました。";
+            StatusText.Text = $"{resultTitle}をクリップボードへコピーしました。";
         }
         catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
         {
@@ -969,19 +970,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        SourceTextBox.Text = outcome.Result.SourceText;
-        bool ocrOnly = string.IsNullOrWhiteSpace(outcome.Result.JapaneseText);
-        TranslationTextBox.Text = ocrOnly
-            ? "翻訳サービスは未設定です。上のOCR結果を確認してください。"
-            : outcome.Result.JapaneseText;
-        StatusText.Text = ocrOnly
-            ? outcome.Result.Warning ?? "OCRが完了しました。"
-            : outcome.Result.Warning is null
-                ? "翻訳が完了しました。"
-                : $"翻訳が完了しました。注意: {outcome.Result.Warning}";
+        FeatureResultPresentation presentation =
+            FeatureResultPresentation.Create(outcome.Result);
+        SourceResultGroupBox.Header = presentation.SourceTitle;
+        SourceTextBox.Text = presentation.SourceText;
+        PrimaryResultGroupBox.Header = presentation.PrimaryTitle;
+        TranslationTextBox.Text = presentation.PrimaryText;
+        CopyPrimaryResultButton.Content = presentation.CopyButtonText;
+        StatusText.Text = presentation.CompletionMessage;
+        string modelStageLabel = outcome.Result.FeatureId == FeatureIds.Translation
+            ? "翻訳"
+            : outcome.Result.PrimarySection.Title;
         DetailText.Text =
             $"合計 {outcome.TotalDuration.TotalSeconds:0.0}秒 "
-            + $"(OCR {outcome.Result.OcrDuration.TotalSeconds:0.0}秒 / 翻訳 {outcome.Result.TranslationDuration.TotalSeconds:0.0}秒) "
+            + $"(OCR {outcome.Result.OcrDuration.TotalSeconds:0.0}秒 / {modelStageLabel} {outcome.Result.TranslationDuration.TotalSeconds:0.0}秒) "
             + $"/ 取得 {CaptureSourceDisplayName.Get(outcome.Result.CaptureSourceKind)} "
             + $"/ OCR {outcome.Result.OcrLanguage} / {outcome.Result.TranslationProvider} {outcome.Result.TranslationModel}"
             + CreateOpenAiUsageSuffix()

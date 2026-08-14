@@ -285,14 +285,14 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 ## Post-MVP Milestone H — feature foundation and AI-development harness
 
-- [ ] Add compile-time feature descriptors/catalog and keep unknown feature IDs as typed failures.
-- [ ] Separate backend profile, credential availability, process-lifetime usage policy, and feature-specific prompt/response parsing.
-- [ ] Preserve local-only/no-key behavior and prove it performs zero HTTP requests.
-- [ ] Keep dynamic plug-ins, autonomous loops, arbitrary tools, vision uploads, and managed accounts out of this slice.
-- [ ] Prove the boundary with a fake-backend second text feature before enabling another paid provider.
+- [x] Add compile-time feature descriptors/catalog and keep unknown feature IDs as typed failures.
+- [x] Separate backend selection/credential availability, process-lifetime usage policy, provider transport, and feature-specific prompt/result mapping.
+- [x] Preserve local-only/no-key behavior and prove it performs zero HTTP requests.
+- [x] Keep dynamic plug-ins, autonomous loops, arbitrary tools, vision uploads, and managed accounts out of this slice.
+- [x] Prove the boundary with an unregistered summarization feature and fake text-model client before enabling another paid provider. It is not exposed in the UI and cannot create a new paid request path.
 - [x] Prepare a repository-local `vrcva-development` Skill using the official skill scaffold.
 - [x] Include project workflow, privacy boundaries, OpenVR ABI/coordinate rules, verification commands, review gates, and evidence format.
 - [x] Add setup instructions only; do not copy the Skill into a personal skill directory or change Codex/Claude settings.
-- [>] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes. Structural validation passes; forward-testing waits for the implementation to stabilize.
+- [x] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes. The final runbook path covers restore, focused/full verification, untracked files, baseline format failures, secret inspection, and device-evidence boundaries without installing the Skill.
 
 Phase 3 completion requires Windows Release build/tests/format, `git diff --check`, a tracked-file secret scan, independent correctness review, and the Quest 3S acceptance gates above. Missing hardware evidence must remain explicitly unchecked rather than being inferred from unit tests.

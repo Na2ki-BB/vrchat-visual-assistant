@@ -55,15 +55,30 @@ public sealed partial class TranslateAnalyzer : IAnalyzer
             .ConfigureAwait(false);
         translationTimer.Stop();
 
-        return new AnalysisResult(
-            sourceText,
-            translation.Text.Trim(),
-            ocr.RecognizerLanguage,
-            translation.Provider,
-            translation.Model,
-            ocrTimer.Elapsed,
-            translationTimer.Elapsed,
-            ocr.Warning);
+        FeatureResult featureResult = new(
+            FeatureIds.Translation,
+            [
+                new ResultSection(
+                    TranslationResultSectionIds.SourceText,
+                    "OCR結果（英語）",
+                    sourceText),
+                new ResultSection(
+                    TranslationResultSectionIds.JapaneseText,
+                    "日本語訳",
+                    translation.Text.Trim(),
+                    ResultSectionRole.Primary),
+            ],
+            new TextModelMetadata(
+                ocr.RecognizerLanguage,
+                translation.Provider,
+                translation.Model))
+        {
+            OcrDuration = ocrTimer.Elapsed,
+            TranslationDuration = translationTimer.Elapsed,
+            Warning = ocr.Warning,
+        };
+
+        return new AnalysisResult(featureResult);
     }
 
     internal static string NormalizeOcrText(string text)
@@ -86,4 +101,3 @@ public sealed partial class TranslateAnalyzer : IAnalyzer
     [GeneratedRegex("[\\t ]+")]
     private static partial Regex HorizontalWhitespaceRegex();
 }
-

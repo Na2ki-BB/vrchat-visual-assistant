@@ -49,7 +49,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - OpenAI翻訳は任意の従量課金機能です。VRCVA画面から専用APIキーを登録するか、`VRCVA_TRANSLATION_PROVIDER=openai`と専用の`VRCVA_OPENAI_API_KEY`を両方設定しない限り呼ばれません。
 - アプリは一般的な`OPENAI_API_KEY`を自動利用しません。別ツール用のキーで意図せず課金されることを防ぎます。
 - 画面から登録したキーはWindows資格情報マネージャーに保存され、同じWindowsユーザーだけが復号できます。平文ファイル、リポジトリ、ログには保存しません。同じWindowsユーザー権限で動く別プロセスからの保護を意味するものではありません。
-- OpenAI利用時は[`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)（既定）と[`gpt-5.4-nano`](https://developers.openai.com/api/docs/models/gpt-5.4-nano)を画面から選べます。2026-08-13時点ではLunaの方が出力単価もわずかに低いため推奨表示です。価格は変わり得るため、利用前に各公式ページを確認してください。
+- OpenAI利用時は[`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)（既定）と[`gpt-5.4-nano`](https://developers.openai.com/api/docs/models/gpt-5.4-nano)を画面から選べます。2026-08-14時点ではLunaの方が出力単価もわずかに低いため推奨表示です。価格は変わり得るため、利用前に各公式ページを確認してください。
 - コード側はOCRテキストをUTF-8で4,000バイト、出力を1,200トークン、1回のアプリ起動につきAPI送信10回までに制限します。再試行は行いません。上限到達や入力超過は通信前に停止します。
 - 現行価格で上限まで利用した場合、アプリが作る翻訳リクエスト部分は1起動あたり概算0.03米ドル未満です。実際は出力上限まで使わなければさらに少額ですが、価格改定・税・他アプリの利用は含みません。また、再起動すると10回へ戻ります。
 
@@ -469,6 +469,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 - [AI開発ハーネス設定](docs/AI-HARNESS-SETUP.md): リポジトリ内に準備したSkillを、必要な場合だけ手動で設定する方法。自動導入は行いません
+
+AI機能はコンパイル時登録のFeature Catalog、共通のテキストモデル通信、機能ごとのプロンプトと結果整形に分離しています。現在ユーザーが選べる機能は翻訳だけです。要約は拡張境界を自動テストするための未登録実装で、画面や通常SCANからは起動できず、API利用回数や料金を増やしません。動的プラグイン、画像送信、自律実行、外部ツールはまだ含めていません。
 
 OSCQuery経由のButton操作、任意のOpenAI翻訳、VR内での位置調整とボタン判定は実機確認済みです。追従先ごとの配置と保存後の通常再起動反映は、必要時に確認する残タスクとして記録しています。
 
