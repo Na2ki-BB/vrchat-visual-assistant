@@ -8,7 +8,7 @@
       "poses": [
         {
           "output": "/actions/vrcva/in/pointer_pose",
-          "path": "/user/hand/right/pose/raw"
+          "path": "/user/hand/right/pose/tip"
         }
       ],
       "skeleton": [],

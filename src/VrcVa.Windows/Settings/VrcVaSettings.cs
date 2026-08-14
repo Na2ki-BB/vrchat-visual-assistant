@@ -8,17 +8,28 @@ namespace VrcVa.Windows.Settings;
 /// </summary>
 internal sealed record VrcVaSettings(
     ResultPanelPlacement ResultPanel,
-    VrcVaOnboardingSettings Onboarding)
+    VrcVaOnboardingSettings Onboarding,
+    WristLauncherPlacement WristLauncher)
 {
+    public VrcVaSettings(
+        ResultPanelPlacement resultPanel,
+        VrcVaOnboardingSettings onboarding)
+        : this(resultPanel, onboarding, WristLauncherPlacement.Default)
+    {
+    }
+
     public static VrcVaSettings Default => new(
         ResultPanelPlacement.Default,
-        VrcVaOnboardingSettings.Default);
+        VrcVaOnboardingSettings.Default,
+        WristLauncherPlacement.Default);
 
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ResultPanel);
         ArgumentNullException.ThrowIfNull(Onboarding);
+        ArgumentNullException.ThrowIfNull(WristLauncher);
         ResultPanel.Validate();
+        WristLauncher.Validate();
     }
 }
 

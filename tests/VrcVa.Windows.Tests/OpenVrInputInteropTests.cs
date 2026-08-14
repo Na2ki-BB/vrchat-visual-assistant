@@ -76,7 +76,8 @@ public sealed class OpenVrInputInteropTests
         Assert.Contains(OpenVrInputInterop.SelectActionPath, manifestJson, StringComparison.Ordinal);
         Assert.Contains(OpenVrInputInterop.PointerPoseActionPath, manifestJson, StringComparison.Ordinal);
         Assert.Contains("/user/hand/right/input/trigger", bindingJson, StringComparison.Ordinal);
-        Assert.Contains("/user/hand/right/pose/raw", bindingJson, StringComparison.Ordinal);
+        Assert.Contains("/user/hand/right/pose/tip", bindingJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("/user/hand/right/pose/raw", bindingJson, StringComparison.Ordinal);
         Assert.DoesNotContain("joystick", bindingJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("thumbstick", bindingJson, StringComparison.OrdinalIgnoreCase);
     }

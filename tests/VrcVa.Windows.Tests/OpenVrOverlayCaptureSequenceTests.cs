@@ -22,7 +22,7 @@ public sealed class OpenVrOverlayCaptureSequenceTests
             CancellationToken.None);
 
         Assert.Equal(
-            ["hide-confirm", "wait", "wait", "wait", "capture", "wait", "capture"],
+            ["hide-confirm", "wait", "wait", "wait", "capture", "wait", "capture", "suppress-end"],
             overlay.Events);
         Assert.Equal(2, frames.Count);
         Assert.True(frames[0].ContainsMarker);
@@ -30,6 +30,19 @@ public sealed class OpenVrOverlayCaptureSequenceTests
         Assert.False(adopted.ContainsMarker);
         Assert.False(adopted.IsDisposed);
         adopted.Dispose();
+    }
+
+    [Fact]
+    public void CaptureAfterOverlayHidden_ReleasesSuppressionWhenHideFails()
+    {
+        FailingHideOverlay overlay = new();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            OpenVrOverlayCaptureSequence.CaptureAfterOverlayHidden(
+                overlay,
+                () => new SyntheticFrame(containsMarker: false),
+                CancellationToken.None));
+        Assert.True(overlay.SuppressionEnded);
     }
 
     private sealed class SyntheticOverlay : IOpenVrOverlayCaptureGate
@@ -44,6 +57,8 @@ public sealed class OpenVrOverlayCaptureSequenceTests
             _events.Add("hide-confirm");
         }
 
+        public void EndCaptureSuppression() => _events.Add("suppress-end");
+
         public void WaitFrameSync(uint timeoutMilliseconds = 1000) => _events.Add("wait");
 
         public void RecordCapture() => _events.Add("capture");
@@ -56,6 +71,19 @@ public sealed class OpenVrOverlayCaptureSequenceTests
         public bool IsDisposed { get; private set; }
 
         public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class FailingHideOverlay : IOpenVrOverlayCaptureGate
+    {
+        public bool SuppressionEnded { get; private set; }
+
+        public void HideAndConfirmInvisible(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("synthetic hide failure");
+
+        public void EndCaptureSuppression() => SuppressionEnded = true;
+
+        public void WaitFrameSync(uint timeoutMilliseconds = 1000) =>
+            throw new InvalidOperationException("wait must not run");
     }
 }
 
@@ -124,10 +152,10 @@ public sealed class ResultPanelTextureTests
     }
 
     [Theory]
-    [InlineData(1020, 0)]
-    [InlineData(1188, 719)]
-    [InlineData(1100, 300)]
-    public void IsCloseButton_AcceptsLargeButton(float x, float y)
+    [InlineData(1141, 20)]
+    [InlineData(1231, 88)]
+    [InlineData(1186, 54)]
+    public void IsCloseButton_AcceptsVisibleTopRightButton(float x, float y)
     {
         ResultPanelTexture texture = new();
 
@@ -135,14 +163,51 @@ public sealed class ResultPanelTextureTests
     }
 
     [Theory]
-    [InlineData(1019, 180)]
-    [InlineData(1189, 60)]
-    [InlineData(1235, 640)]
+    [InlineData(1140, 54)]
+    [InlineData(1232, 54)]
+    [InlineData(1186, 89)]
+    [InlineData(1100, 300)]
     public void IsCloseButton_RejectsPointsOutsideButton(float x, float y)
     {
         ResultPanelTexture texture = new();
 
         Assert.False(texture.IsCloseButton(x, y));
+    }
+
+    [Fact]
+    public void VisiblePageButtons_UseTheSameBoundsForHitTesting()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        Assert.Equal(ResultPanelAction.None, texture.HitTestResult(1010, 54));
+        Assert.Equal(ResultPanelAction.NextPage, texture.HitTestResult(1094, 54));
+        Assert.Equal(ResultPanelAction.Close, texture.HitTestResult(1186, 54));
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        Assert.Equal(1, texture.CurrentResultPage);
+        Assert.Equal(ResultPanelAction.PreviousPage, texture.HitTestResult(1010, 54));
+        Assert.True(texture.Apply(ResultPanelAction.PreviousPage));
+        Assert.Equal(0, texture.CurrentResultPage);
+    }
+
+    [Fact]
+    public void ResultHeaderControls_UseSharedBoundsAtCornersAndOnePixelOutside()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.NextPageButtonBounds,
+            ResultPanelAction.NextPage);
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.CloseButtonBounds,
+            ResultPanelAction.Close);
+
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.PreviousPageButtonBounds,
+            ResultPanelAction.PreviousPage);
     }
 
     [Fact]
@@ -230,6 +295,38 @@ public sealed class ResultPanelTextureTests
         texture.SetContent("title", string.Join('\n', Enumerable.Repeat("long result line", 80)));
         _ = texture.RenderRgba();
         return texture;
+    }
+
+    private static void AssertHitBounds(
+        ResultPanelTexture texture,
+        System.Windows.Rect bounds,
+        ResultPanelAction expected)
+    {
+        (float X, float Y)[] inside =
+        [
+            ((float)bounds.Left, (float)bounds.Top),
+            ((float)bounds.Right, (float)bounds.Top),
+            ((float)bounds.Left, (float)bounds.Bottom),
+            ((float)bounds.Right, (float)bounds.Bottom),
+            ((float)bounds.Left + 1, (float)bounds.Top + 1),
+            ((float)bounds.Right - 1, (float)bounds.Bottom - 1),
+        ];
+        foreach ((float x, float y) in inside)
+        {
+            Assert.Equal(expected, texture.HitTestResult(x, y));
+        }
+
+        (float X, float Y)[] outside =
+        [
+            ((float)bounds.Left - 1, (float)bounds.Top),
+            ((float)bounds.Right + 1, (float)bounds.Top),
+            ((float)bounds.Left, (float)bounds.Top - 1),
+            ((float)bounds.Left, (float)bounds.Bottom + 1),
+        ];
+        foreach ((float x, float y) in outside)
+        {
+            Assert.NotEqual(expected, texture.HitTestResult(x, y));
+        }
     }
 }
 

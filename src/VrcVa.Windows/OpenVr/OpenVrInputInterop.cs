@@ -11,19 +11,29 @@ internal sealed class OpenVrInputInterop : IDisposable
     internal const string RightHandPath = "/user/hand/right";
 
     private const string InputInterface = "FnTable:IVRInput_010";
+    private const string SystemInterface = "FnTable:IVRSystem_026";
     private const ulong InvalidInputValueHandle = 0;
+    private const uint InvalidTrackedDeviceIndex = uint.MaxValue;
+    private const int MaximumTrackedDeviceCount = 64;
 
     private readonly OpenVrRuntime _runtime;
     private readonly UpdateActionStateDelegate _updateActionState;
     private readonly GetDigitalActionDataDelegate _getDigitalActionData;
     private readonly GetPoseActionDataRelativeToNowDelegate _getPoseActionData;
+    private readonly GetDeviceToAbsoluteTrackingPoseDelegate _getTrackedPoses;
+    private readonly GetTrackedDeviceIndexForControllerRoleDelegate _getControllerRole;
+    private readonly TrackedDevicePose[] _trackedPoses = new TrackedDevicePose[MaximumTrackedDeviceCount];
     private readonly ulong _actionSet;
     private readonly ulong _selectAction;
     private readonly ulong _pointerPoseAction;
     private readonly ulong _rightHand;
     private bool _disposed;
 
-    private OpenVrInputInterop(OpenVrRuntime runtime, IntPtr inputFunctionTable, string manifestPath)
+    private OpenVrInputInterop(
+        OpenVrRuntime runtime,
+        IntPtr inputFunctionTable,
+        IntPtr systemFunctionTable,
+        string manifestPath)
     {
         ValidateAbi();
         _runtime = runtime;
@@ -49,6 +59,12 @@ internal sealed class OpenVrInputInterop : IDisposable
         _getPoseActionData = OpenVrRuntime.GetFunction<GetPoseActionDataRelativeToNowDelegate>(
             inputFunctionTable,
             InputSlot.GetPoseActionDataRelativeToNow);
+        _getTrackedPoses = OpenVrRuntime.GetFunction<GetDeviceToAbsoluteTrackingPoseDelegate>(
+            systemFunctionTable,
+            SystemSlot.GetDeviceToAbsoluteTrackingPose);
+        _getControllerRole = OpenVrRuntime.GetFunction<GetTrackedDeviceIndexForControllerRoleDelegate>(
+            systemFunctionTable,
+            SystemSlot.GetTrackedDeviceIndexForControllerRole);
 
         EnsureSuccess(setActionManifestPath(manifestPath), "SetActionManifestPath");
         _actionSet = GetHandle(ActionSetPath, getActionSetHandle);
@@ -69,7 +85,8 @@ internal sealed class OpenVrInputInterop : IDisposable
         try
         {
             IntPtr inputTable = runtime!.GetInterface(InputInterface);
-            input = new OpenVrInputInterop(runtime, inputTable, manifestPath);
+            IntPtr systemTable = runtime.GetInterface(SystemInterface);
+            input = new OpenVrInputInterop(runtime, inputTable, systemTable, manifestPath);
             return true;
         }
         catch
@@ -115,6 +132,17 @@ internal sealed class OpenVrInputInterop : IDisposable
                 _rightHand),
             "GetPoseActionDataRelativeToNow");
 
+        _getTrackedPoses(
+            TrackingUniverseOrigin.Standing,
+            0,
+            _trackedPoses,
+            MaximumTrackedDeviceCount);
+        TrackedDevicePose hmdPose = _trackedPoses[0];
+        uint leftDevice = _getControllerRole(ETrackedControllerRole.LeftHand);
+        TrackedDevicePose leftPose = leftDevice < (uint)_trackedPoses.Length
+            ? _trackedPoses[(int)leftDevice]
+            : default;
+
         return new OpenVrPointerInputSample(
             digital.Active,
             digital.State,
@@ -122,7 +150,13 @@ internal sealed class OpenVrInputInterop : IDisposable
             pose.Active,
             pose.Pose.PoseIsValid,
             pose.Pose.DeviceIsConnected,
-            CreatePose(pose.Pose.DeviceToAbsoluteTracking));
+            CreatePose(pose.Pose.DeviceToAbsoluteTracking),
+            hmdPose.PoseIsValid && hmdPose.DeviceIsConnected,
+            CreatePose(hmdPose.DeviceToAbsoluteTracking),
+            leftDevice != InvalidTrackedDeviceIndex
+                && leftPose.PoseIsValid
+                && leftPose.DeviceIsConnected,
+            CreatePose(leftPose.DeviceToAbsoluteTracking));
     }
 
     public void Dispose()
@@ -226,6 +260,13 @@ internal sealed class OpenVrInputInterop : IDisposable
         public const int GetPoseActionDataRelativeToNow = 7;
     }
 
+    private static class SystemSlot
+    {
+        // IVRSystem_026 adds ComputeDistortionSet before the older methods.
+        public const int GetDeviceToAbsoluteTrackingPose = 12;
+        public const int GetTrackedDeviceIndexForControllerRole = 18;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Ansi)]
     private delegate EvrInputError SetActionManifestPathDelegate(
         [MarshalAs(UnmanagedType.LPStr)] string actionManifestPath);
@@ -267,6 +308,17 @@ internal sealed class OpenVrInputInterop : IDisposable
         uint actionDataSize,
         ulong restrictToDevice);
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void GetDeviceToAbsoluteTrackingPoseDelegate(
+        TrackingUniverseOrigin origin,
+        float predictedSecondsFromNow,
+        [Out] TrackedDevicePose[] trackedDevicePoses,
+        uint trackedDevicePoseCount);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate uint GetTrackedDeviceIndexForControllerRoleDelegate(
+        ETrackedControllerRole role);
+
     private enum EvrInputError
     {
         None = 0,
@@ -275,6 +327,11 @@ internal sealed class OpenVrInputInterop : IDisposable
     private enum TrackingUniverseOrigin
     {
         Standing = 1,
+    }
+
+    private enum ETrackedControllerRole
+    {
+        LeftHand = 1,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -376,7 +433,11 @@ internal readonly record struct OpenVrPointerInputSample(
     bool PoseActive,
     bool PoseValid,
     bool DeviceConnected,
-    OpenVrInputInterop.OpenVrPose Pose)
+    OpenVrInputInterop.OpenVrPose Pose,
+    bool HmdPoseValid,
+    OpenVrInputInterop.OpenVrPose HmdPose,
+    bool LeftPoseValid,
+    OpenVrInputInterop.OpenVrPose LeftPose)
 {
     public bool SelectPressedThisFrame => SelectActive && SelectChanged && SelectPressed;
 }

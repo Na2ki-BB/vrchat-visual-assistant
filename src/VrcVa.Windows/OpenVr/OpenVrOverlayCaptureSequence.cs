@@ -4,6 +4,8 @@ internal interface IOpenVrOverlayCaptureGate
 {
     void HideAndConfirmInvisible(CancellationToken cancellationToken);
 
+    void EndCaptureSuppression();
+
     void WaitFrameSync(uint timeoutMilliseconds = 1000);
 }
 
@@ -21,22 +23,29 @@ internal static class OpenVrOverlayCaptureSequence
         ArgumentNullException.ThrowIfNull(captureFrame);
         cancellationToken.ThrowIfCancellationRequested();
 
-        overlay.HideAndConfirmInvisible(cancellationToken);
-        for (int index = 0; index < PreDiscardFrameBoundaries; index++)
+        try
         {
+            overlay.HideAndConfirmInvisible(cancellationToken);
+            for (int index = 0; index < PreDiscardFrameBoundaries; index++)
+            {
+                overlay.WaitFrameSync();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            using (captureFrame())
+            {
+                // Quest 3S testing proved the first acquisition can still expose the
+                // old overlay composite even after multiple compositor boundaries.
+                // This throwaway acquisition is a privacy and self-OCR invariant.
+            }
+
             overlay.WaitFrameSync();
+            cancellationToken.ThrowIfCancellationRequested();
+            return captureFrame();
         }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        using (captureFrame())
+        finally
         {
-            // Quest 3S testing proved the first acquisition can still expose the
-            // old overlay composite even after multiple compositor boundaries.
-            // This throwaway acquisition is a privacy and self-OCR invariant.
+            overlay.EndCaptureSuppression();
         }
-
-        overlay.WaitFrameSync();
-        cancellationToken.ThrowIfCancellationRequested();
-        return captureFrame();
     }
 }

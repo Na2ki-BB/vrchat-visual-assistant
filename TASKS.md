@@ -258,16 +258,19 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 ## Post-MVP Milestone F — SteamVR pass-through input and wrist launcher
 
 - [x] Add an OpenVR Input 2.0 action manifest and Oculus Touch default binding without joystick actions.
-- [>] Add ABI-checked `IVRInput_010`, right-hand pose, and overlay-intersection adapters without a new package. Input/pose is complete; overlay intersection remains gated behind the device check.
+- [x] Add ABI-checked `IVRInput_010`, right-hand pose, and `IVROverlay_027` intersection adapters without a new package.
 - [x] Add `--steamvr-input-pass-through-check`; keep product interaction unchanged until its device gate passes.
-- [ ] Device gate: walk continuously in VRChat and receive exactly 20/20 VRCVA right-trigger edges without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
-- [ ] Define one logical surface contract used by texture drawing, pointer conversion, and hit testing; cover edges, corners, and +/-1 pixel in tests.
-- [ ] Replace result, page, scrollbar, close, and calibration mouse events with the priority-zero VRCVA pointer.
-- [ ] Remove ordinary calls to `MakeOverlaysInteractiveIfVisible`; input failure must disable VRCVA controls rather than taking scene input.
-- [ ] Replace joystick page navigation with laser-visible previous/next controls and the existing scrollbar.
-- [ ] Restore a compact top-right close button whose visible rectangle and hit rectangle are the same shared value.
-- [ ] Add the left-wrist `DimChip -> ArmedChip -> Menu -> Scanning -> Result` state machine with pose-loss and cancellation cleanup.
-- [ ] Hide launcher/result/cursor surfaces before the established eye-mirror discard sequence and verify zero self-capture markers in ten scans.
+- [x] Device gate: Quest 3S received exactly 20/20 VRCVA right-trigger edges with valid right-hand poses while walking continuously in VRChat, without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
+- [x] Define one logical surface contract used by texture drawing, pointer conversion, and hit testing; cover edges, corners, +/-1 pixel, and coordinate transforms in tests.
+- [x] Replace result, page, scrollbar, close, and calibration mouse events with the priority-zero VRCVA pointer.
+- [x] Keep `MakeOverlaysInteractiveIfVisible` false; input failure disables only VRCVA controls rather than taking scene input.
+- [x] Replace joystick page navigation with visible previous/next controls and the existing scrollbar.
+- [x] Restore a compact top-right close button whose visible rectangle and hit rectangle are the same shared value.
+- [x] Add the left-wrist `DimChip -> ArmedChip -> Menu -> Scanning -> Result` state machine with pose-loss and cancellation cleanup.
+- [x] Persist a launcher-specific left-controller transform and common chip/menu scale in versioned non-secret settings, with v1/v2 migration.
+- [>] Add a VR-only launcher calibration surface for XYZ, three-axis local rotation, scale, reset, cancel, and save; quaternion orientation and version-3 Euler migration prevent axis collapse near singularities, while device acceptance remains.
+- [>] Hide launcher/result/cursor surfaces under capture suppression before the established eye-mirror discard sequence; ten-scan zero-marker device acceptance remains.
+- [ ] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify placement, facing feedback, menu hit targets, and walking input remain correct.
 - [ ] Keep desktop SCAN as recovery; demote OSC/OVRAS to advanced fallback documentation only after full device acceptance.
 
 ## Post-MVP Milestone G — small-group onboarding and stable startup

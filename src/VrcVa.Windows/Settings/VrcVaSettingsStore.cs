@@ -6,7 +6,8 @@ namespace VrcVa.Windows.Settings;
 
 internal sealed class VrcVaSettingsStore
 {
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 4;
+    private const double QuaternionNormalizationTolerance = 1e-12;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -50,7 +51,9 @@ internal sealed class VrcVaSettingsStore
         return version switch
         {
             1 => LoadVersion1(json),
-            CurrentVersion => LoadVersion2(json),
+            2 => LoadVersion2(json),
+            3 => LoadVersion3(json),
+            CurrentVersion => LoadVersion4(json),
             > CurrentVersion => throw new InvalidDataException(
                 $"The VRCVA settings file version {version} is newer than this application supports."),
             _ => throw new InvalidDataException(
@@ -74,7 +77,11 @@ internal sealed class VrcVaSettingsStore
         try
         {
             string json = JsonSerializer.Serialize(
-                new StoredSettings(CurrentVersion, settings.ResultPanel, settings.Onboarding),
+                new Version4StoredSettings(
+                    CurrentVersion,
+                    settings.ResultPanel,
+                    settings.Onboarding,
+                    Version4WristLauncherPlacement.From(settings.WristLauncher)),
                 JsonOptions);
             File.WriteAllText(temporaryPath, json);
             File.Move(temporaryPath, _path, overwrite: true);
@@ -96,20 +103,62 @@ internal sealed class VrcVaSettingsStore
             throw new InvalidDataException("The VRCVA version 1 settings file is invalid.");
         }
 
-        VrcVaSettings migrated = new(stored.ResultPanel, VrcVaOnboardingSettings.Default);
+        VrcVaSettings migrated = new(
+            stored.ResultPanel,
+            VrcVaOnboardingSettings.Default,
+            WristLauncherPlacement.Default);
         migrated.Validate();
         return migrated;
     }
 
     private static VrcVaSettings LoadVersion2(string json)
     {
-        StoredSettings? stored = Deserialize<StoredSettings>(json);
+        Version2StoredSettings? stored = Deserialize<Version2StoredSettings>(json);
         if (stored?.ResultPanel is null || stored.Onboarding is null)
         {
             throw new InvalidDataException("The VRCVA version 2 settings file is invalid.");
         }
 
-        VrcVaSettings settings = new(stored.ResultPanel, stored.Onboarding);
+        VrcVaSettings settings = new(
+            stored.ResultPanel,
+            stored.Onboarding,
+            WristLauncherPlacement.Default);
+        settings.Validate();
+        return settings;
+    }
+
+    private static VrcVaSettings LoadVersion3(string json)
+    {
+        Version3StoredSettings? stored = Deserialize<Version3StoredSettings>(json);
+        if (stored?.ResultPanel is null
+            || stored.Onboarding is null
+            || stored.WristLauncher is null)
+        {
+            throw new InvalidDataException("The VRCVA version 3 settings file is invalid.");
+        }
+
+        VrcVaSettings settings = new(
+            stored.ResultPanel,
+            stored.Onboarding,
+            stored.WristLauncher.ToPlacement());
+        settings.Validate();
+        return settings;
+    }
+
+    private static VrcVaSettings LoadVersion4(string json)
+    {
+        Version4StoredSettings? stored = Deserialize<Version4StoredSettings>(json);
+        if (stored?.ResultPanel is null
+            || stored.Onboarding is null
+            || stored.WristLauncher is null)
+        {
+            throw new InvalidDataException("The VRCVA version 4 settings file is invalid.");
+        }
+
+        VrcVaSettings settings = new(
+            stored.ResultPanel,
+            stored.Onboarding,
+            stored.WristLauncher.ToPlacement());
         settings.Validate();
         return settings;
     }
@@ -129,8 +178,155 @@ internal sealed class VrcVaSettingsStore
 
     private sealed record LegacyStoredSettings(int Version, ResultPanelPlacement? ResultPanel);
 
-    private sealed record StoredSettings(
+    private sealed record Version2StoredSettings(
         int Version,
         ResultPanelPlacement? ResultPanel,
         VrcVaOnboardingSettings? Onboarding);
+
+    private sealed record Version3StoredSettings(
+        int Version,
+        ResultPanelPlacement? ResultPanel,
+        VrcVaOnboardingSettings? Onboarding,
+        Version3WristLauncherPlacement? WristLauncher);
+
+    private sealed record Version3WristLauncherPlacement(
+        double? X,
+        double? Y,
+        double? Z,
+        double? PitchDegrees,
+        double? YawDegrees,
+        double? RollDegrees,
+        double? MenuWidthMeters)
+    {
+        public WristLauncherPlacement ToPlacement()
+        {
+            double pitchDegrees = GetRequired(
+                PitchDegrees,
+                nameof(PitchDegrees),
+                version: 3);
+            double yawDegrees = GetRequired(
+                YawDegrees,
+                nameof(YawDegrees),
+                version: 3);
+            double rollDegrees = GetRequired(
+                RollDegrees,
+                nameof(RollDegrees),
+                version: 3);
+            ValidateVersion3Angle(pitchDegrees, nameof(PitchDegrees));
+            ValidateVersion3Angle(yawDegrees, nameof(YawDegrees));
+            ValidateVersion3Angle(rollDegrees, nameof(RollDegrees));
+
+            WristLauncherPlacement placement = new(
+                GetRequired(X, nameof(X), version: 3),
+                GetRequired(Y, nameof(Y), version: 3),
+                GetRequired(Z, nameof(Z), version: 3),
+                WristLauncherRotation.FromEulerDegrees(
+                    pitchDegrees,
+                    yawDegrees,
+                    rollDegrees),
+                GetRequired(MenuWidthMeters, nameof(MenuWidthMeters), version: 3));
+            placement.Validate();
+            return placement;
+        }
+    }
+
+    private sealed record Version4StoredSettings(
+        int Version,
+        ResultPanelPlacement? ResultPanel,
+        VrcVaOnboardingSettings? Onboarding,
+        Version4WristLauncherPlacement? WristLauncher);
+
+    private sealed record Version4WristLauncherPlacement(
+        double? X,
+        double? Y,
+        double? Z,
+        Version4WristLauncherRotation? Rotation,
+        double? MenuWidthMeters)
+    {
+        public static Version4WristLauncherPlacement From(WristLauncherPlacement placement)
+        {
+            placement.Validate();
+            return new Version4WristLauncherPlacement(
+                placement.X,
+                placement.Y,
+                placement.Z,
+                Version4WristLauncherRotation.From(placement.Rotation),
+                placement.MenuWidthMeters);
+        }
+
+        public WristLauncherPlacement ToPlacement()
+        {
+            if (Rotation is null)
+            {
+                throw new InvalidDataException(
+                    "The VRCVA version 4 wrist launcher rotation is missing.");
+            }
+
+            WristLauncherPlacement placement = new(
+                GetRequired(X, nameof(X), version: 4),
+                GetRequired(Y, nameof(Y), version: 4),
+                GetRequired(Z, nameof(Z), version: 4),
+                Rotation.ToRotation(),
+                GetRequired(MenuWidthMeters, nameof(MenuWidthMeters), version: 4));
+            placement.Validate();
+            return placement;
+        }
+    }
+
+    private sealed record Version4WristLauncherRotation(
+        double? X,
+        double? Y,
+        double? Z,
+        double? W)
+    {
+        public static Version4WristLauncherRotation From(WristLauncherRotation rotation)
+        {
+            rotation.Validate();
+            return new Version4WristLauncherRotation(
+                rotation.X,
+                rotation.Y,
+                rotation.Z,
+                rotation.W);
+        }
+
+        public WristLauncherRotation ToRotation()
+        {
+            double x = GetRequired(X, nameof(X), version: 4);
+            double y = GetRequired(Y, nameof(Y), version: 4);
+            double z = GetRequired(Z, nameof(Z), version: 4);
+            double w = GetRequired(W, nameof(W), version: 4);
+            double normSquared = (x * x) + (y * y) + (z * z) + (w * w);
+            if (!double.IsFinite(normSquared)
+                || Math.Abs(normSquared - 1) > QuaternionNormalizationTolerance)
+            {
+                throw new InvalidDataException(
+                    "The VRCVA version 4 wrist launcher rotation must be normalized.");
+            }
+
+            WristLauncherRotation rotation = new(x, y, z, w);
+            rotation.Validate();
+            return rotation;
+        }
+    }
+
+    private static double GetRequired(double? value, string name, int version)
+    {
+        if (value is not double required || !double.IsFinite(required))
+        {
+            throw new InvalidDataException(
+                $"The VRCVA version {version} wrist launcher {name} is invalid.");
+        }
+
+        return required;
+    }
+
+    private static void ValidateVersion3Angle(double value, string name)
+    {
+        if (value < ResultPanelPlacement.MinimumRotationDegrees
+            || value > ResultPanelPlacement.MaximumRotationDegrees)
+        {
+            throw new InvalidDataException(
+                $"The VRCVA version 3 wrist launcher {name} is invalid.");
+        }
+    }
 }

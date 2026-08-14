@@ -126,10 +126,19 @@ public partial class MainWindow : Window
         _analyzer = new ReloadableAnalyzer(initialTranslationRuntime);
         _translationStatus = initialTranslationRuntime.Status;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
-        _steamVrResultPanel = new SteamVrResultPanel(Dispatcher, _resultPanelPlacement);
+        _steamVrResultPanel = new SteamVrResultPanel(
+            Dispatcher,
+            _resultPanelPlacement,
+            _logger,
+            _settings.WristLauncher);
         _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
+        _steamVrResultPanel.ScanRequested += SteamVrResultPanel_ScanRequested;
         _steamVrResultPanel.PlacementCalibrationFinished +=
             SteamVrResultPanel_PlacementCalibrationFinished;
+        _steamVrResultPanel.WristLauncherPlacementCalibrationStarted +=
+            SteamVrResultPanel_WristLauncherPlacementCalibrationStarted;
+        _steamVrResultPanel.WristLauncherPlacementCalibrationFinished +=
+            SteamVrResultPanel_WristLauncherPlacementCalibrationFinished;
         OpenVrEyeCaptureOptions eyeOptions = OpenVrEyeCaptureOptions.FromEnvironment(
             out string? eyeConfigurationWarning);
         if (eyeConfigurationWarning is not null)
@@ -230,6 +239,7 @@ public partial class MainWindow : Window
         try
         {
             _ = _steamVrResultPanel.PreloadStatusAtlas();
+            _ = _steamVrResultPanel.TryStartWristLauncher();
         }
         catch (Exception exception)
         {
@@ -330,6 +340,24 @@ public partial class MainWindow : Window
         {
             _logger.Error(
                 "osc.trigger_dispatch_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+    }
+
+    private async void SteamVrResultPanel_ScanRequested(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            await RunPipelineAsync(_vrChatPipeline, "wrist-launcher");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _steamVrResultPanel.ReturnToLauncher();
+            _logger.Error(
+                "wrist_launcher.trigger_failed",
                 Guid.Empty,
                 ScanStage.Trigger,
                 ScanFailureCode.Unexpected,
@@ -808,6 +836,54 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SteamVrResultPanel_WristLauncherPlacementCalibrationFinished(
+        object? sender,
+        WristLauncherPlacementCalibrationEventArgs eventArgs)
+    {
+        _placementCalibrationActive = false;
+        PlacementSettingsExpander.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+        if (!eventArgs.SaveRequested)
+        {
+            ResultPanelPlacementStatusText.Text =
+                "左手ランチャーの位置調整を中止し、保存済みの配置へ戻しました。";
+            return;
+        }
+
+        try
+        {
+            VrcVaSettings updatedSettings = _settings with
+            {
+                WristLauncher = eventArgs.Placement,
+            };
+            _settingsStore.Save(updatedSettings);
+            _settings = updatedSettings;
+            ResultPanelPlacementStatusText.Text =
+                "左手ランチャーの位置・角度・大きさを保存しました。";
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or InvalidDataException)
+        {
+            ResultPanelPlacementStatusText.Text =
+                "左手ランチャーの配置を保存できませんでした。現在の起動中だけ反映します。";
+            LogResultPanelPlacementFailure(
+                "ui.wrist_launcher_placement_save_failed",
+                exception);
+        }
+    }
+
+    private void SteamVrResultPanel_WristLauncherPlacementCalibrationStarted(
+        object? sender,
+        EventArgs eventArgs)
+    {
+        _placementCalibrationActive = true;
+        PlacementSettingsExpander.IsEnabled = false;
+        ResultPanelPlacementStatusText.Text =
+            "VR内で左手ランチャーを調整中です。保存または中止までVR内で操作してください。";
+    }
+
     private void TrySaveResultPanelPlacement(string successMessage)
     {
         try
@@ -898,6 +974,7 @@ public partial class MainWindow : Window
 
         try
         {
+            _steamVrResultPanel.BeginScan();
             _steamVrResultPanel.Hide();
 
             if (preCaptureDelay > TimeSpan.Zero)
@@ -922,6 +999,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException)
         {
             _steamVrResultPanel.Hide();
+            _steamVrResultPanel.ReturnToLauncher();
             StatusText.Text = "SCANをキャンセルしました。";
         }
         finally
@@ -1007,6 +1085,10 @@ public partial class MainWindow : Window
         _steamVrResultPanel.PlacementFallback -= SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.PlacementCalibrationFinished -=
             SteamVrResultPanel_PlacementCalibrationFinished;
+        _steamVrResultPanel.WristLauncherPlacementCalibrationStarted -=
+            SteamVrResultPanel_WristLauncherPlacementCalibrationStarted;
+        _steamVrResultPanel.WristLauncherPlacementCalibrationFinished -=
+            SteamVrResultPanel_WristLauncherPlacementCalibrationFinished;
         _steamVrResultPanel.Dispose();
         _httpClient.Dispose();
         _windowLifetimeCancellation.Dispose();
