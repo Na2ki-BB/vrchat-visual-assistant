@@ -445,6 +445,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 - [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
+- [AI開発ハーネス設定](docs/AI-HARNESS-SETUP.md): リポジトリ内に準備したSkillを、必要な場合だけ手動で設定する方法。自動導入は行いません
 
 OSCQuery経由のButton操作、任意のOpenAI翻訳、VR内での位置調整とボタン判定は実機確認済みです。追従先ごとの配置と保存後の通常再起動反映は、必要時に確認する残タスクとして記録しています。
 

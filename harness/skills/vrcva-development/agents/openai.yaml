@@ -1,0 +1,4 @@
+interface:
+  display_name: "VRCVA Development"
+  short_description: "VRCVAを安全に設計・実装・検証する手順"
+  default_prompt: "Use $vrcva-development to plan, implement, and verify this VRCVA change safely."

@@ -290,9 +290,9 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [ ] Preserve local-only/no-key behavior and prove it performs zero HTTP requests.
 - [ ] Keep dynamic plug-ins, autonomous loops, arbitrary tools, vision uploads, and managed accounts out of this slice.
 - [ ] Prove the boundary with a fake-backend second text feature before enabling another paid provider.
-- [ ] Prepare a repository-local `vrcva-development` Skill using the official skill scaffold.
-- [ ] Include project workflow, privacy boundaries, OpenVR ABI/coordinate rules, verification commands, review gates, and evidence format.
-- [ ] Add setup instructions only; do not copy the Skill into a personal skill directory or change Codex/Claude settings.
-- [ ] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes.
+- [x] Prepare a repository-local `vrcva-development` Skill using the official skill scaffold.
+- [x] Include project workflow, privacy boundaries, OpenVR ABI/coordinate rules, verification commands, review gates, and evidence format.
+- [x] Add setup instructions only; do not copy the Skill into a personal skill directory or change Codex/Claude settings.
+- [>] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes. Structural validation passes; forward-testing waits for the implementation to stabilize.
 
 Phase 3 completion requires Windows Release build/tests/format, `git diff --check`, a tracked-file secret scan, independent correctness review, and the Quest 3S acceptance gates above. Missing hardware evidence must remain explicitly unchecked rather than being inferred from unit tests.
