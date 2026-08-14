@@ -2,7 +2,7 @@
 
 VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 1回でローカルOCRし、日本語へ翻訳する外部Windowsアプリです。
 
-現在は **Phase 2のOSCトリガーと任意のOpenAI翻訳まで実機接続済み** です。キャプチャ、OCR、操作可能なSteamVR結果パネル、VRChat OSCQuery自動接続、Windows資格情報からのキー自動読込を確認済みです。OSCは既定では無効です。翻訳も専用キーを保存した場合だけ有効になり、未登録ならOCRした英語だけをローカル表示します。結果パネルは左手追従を既定とし、右手・正面への切替と配置調整に対応します。
+現在は **Phase 2のOSCトリガーと任意のOpenAI翻訳まで実機接続済み** です。キャプチャ、OCR、操作可能なSteamVR結果パネル、VRChat OSCQuery自動接続、Windows資格情報からのキー自動読込を確認済みです。初回起動は3画面の案内に沿って設定でき、希望した場合はSteamVR起動時にVRCVAも1つだけ起動する登録を行います。OSCは既定では無効です。翻訳も専用キーを保存した場合だけ有効になり、未登録ならOCRした英語だけをローカル表示します。結果パネルは左手追従を既定とし、右手・正面への切替と配置調整に対応します。
 
 確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
 
@@ -58,7 +58,7 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 ## 必要環境
 
 - Windows 10 version 2004 / build 19041 以降（Windows 11推奨）
-- .NET 8 Desktop Runtime（開発時は .NET 8 SDK）
+- 少人数ベータZIPを使う場合、.NET Runtimeの追加導入は不要。ソースからビルドする場合は.NET 8 SDK、framework-dependent開発版を直接使う場合は.NET 8 Desktop Runtime
 - PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
 - 翻訳は任意のOpenAI Responses API。専用キーを登録しなければ、キャプチャとOCRだけを無料で利用可能
 - Windowsの英語OCR言語機能。未導入でもアプリは動作しますが、日本語認識器が英語を漢字や全角記号へ誤認識し、結果がほぼ読めなくなる場合があります
@@ -86,6 +86,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-ocr-language
 
 PowerShellからのインストール方法はWindowsの版や導入状態に依存し、管理者権限も必要になるため、本READMEでは未検証のCapability名を指定して自動導入しません。
 
+## 少人数ベータの初回起動
+
+1. 受け取ったZIPを任意の場所へ展開します。展開後の`VRCVA`フォルダーは、SteamVR登録先になるため移動しない場所へ置きます。
+2. 普段どおりQuest LinkとSteamVRを起動します。VRCVAがSteamVRを勝手に起動することはありません。
+3. `VRCVA\VrcVa.exe`を開き、初回だけ表示される3画面の案内に従います。SteamVR連動、英語OCRの状態、任意のOpenAI APIキーを順に設定できます。
+4. SteamVR連動が`有効`になった後は、普段どおりSteamVRを起動すればVRCVAも最小化状態で1つだけ起動します。設定を変えるときはタスクバーからVRCVAを開き、画面上部の`初期設定を開く`を押します。
+
+SteamVRが停止中だった場合や、SteamVRが追加した登録をまだ読み直していない場合は、希望だけ保存して`登録保留`と表示します。その場合だけVRCVAをいったん終了し、SteamVRを起動または再起動してから`VrcVa.exe`を一度開いてください。通常の初回手順どおりSteamVRを先に起動していれば、その場で登録を試みます。デスクトップのSCANボタンは登録状態に関係なく使えます。
+
+初回設定後にVRCVAフォルダーを移動した場合は、移動先の`VrcVa.exe`を起動して`初期設定を開く`からSteamVR連動をもう一度有効にしてください。APIキーはWindows資格情報マネージャーに残るため、再入力は不要です。
+
 ## ビルドとテスト
 
 Windows PowerShellでリポジトリルートから実行します。
@@ -106,7 +117,17 @@ WSLのシェルからは、Windows側のPowerShellと .NET SDKを使います。
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w scripts/build.ps1)"
 ```
 
-### 配布用フォルダを作る
+### 少人数ベータZIPを作る
+
+Windows PowerShellで、.NET Runtimeを同梱したx64自己完結版を作れます。インストーラー、署名、自動更新は含みません。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -Version dev
+```
+
+成果物は`artifacts\beta\VRCVA-beta-dev-win-x64.zip`です。ZIP内は`VRCVA`フォルダー1つにまとまり、`はじめに.txt`も含みます。受け取る側は.NET Runtimeを別途導入する必要がありません。
+
+### 開発用framework-dependentフォルダーを作る
 
 .NET 8 Desktop Runtimeを利用するframework-dependent版は、Windows PowerShellで次のように生成できます。
 
@@ -172,7 +193,7 @@ Remove-Item Env:VRCVA_TRANSLATION_PROVIDER
 ## 通常の使い方
 
 1. SteamVRとVRChatを起動します。PC側のVRChat窓は最小化して構いません。
-2. VRChat Visual Assistantを起動します。
+2. 初回設定でSteamVR連動を有効にしていれば、VRCVAは最小化状態で自動起動します。未設定または`登録保留`なら`VrcVa.exe`を手動で起動します。
 3. アプリのデスクトップ窓はそのままでも、最小化しても構いません。VRChat窓と重なってもキャプチャへ混ざりません。
 4. VR内で英語を見て、`Ctrl+Shift+T`を押します。
 5. OSCのSCANを受け付けると、VRCVAのSteamVRパネルへすぐ「SCANを受け付けました」と表示されます。Action Menuを閉じる1秒後に「撮影を開始します」へ変わり、撮影中だけパネルが消えます。

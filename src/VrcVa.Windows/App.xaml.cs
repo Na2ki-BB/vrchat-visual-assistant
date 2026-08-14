@@ -3,12 +3,15 @@ using System.Text;
 using System.Windows;
 using VrcVa.Core;
 using VrcVa.Windows.Diagnostics;
+using VrcVa.Windows.Startup;
 using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows;
 
 public partial class App : System.Windows.Application
 {
+    private SingleInstanceGuard? _singleInstanceGuard;
+
     protected override async void OnStartup(StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
@@ -181,9 +184,37 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        _singleInstanceGuard = SingleInstanceGuard.Acquire();
+        if (!_singleInstanceGuard.IsPrimaryInstance)
+        {
+            Shutdown(0);
+            return;
+        }
+
+        bool steamVrAutoStart = eventArgs.Args.Any(argument => argument.Equals(
+            "--steamvr-autostart",
+            StringComparison.OrdinalIgnoreCase));
         MainWindow window = new();
         MainWindow = window;
+        if (steamVrAutoStart)
+        {
+            window.WindowState = WindowState.Minimized;
+        }
+
         window.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs eventArgs)
+    {
+        try
+        {
+            _singleInstanceGuard?.Dispose();
+            _singleInstanceGuard = null;
+        }
+        finally
+        {
+            base.OnExit(eventArgs);
+        }
     }
 
     private static void AttachDiagnosticConsole()

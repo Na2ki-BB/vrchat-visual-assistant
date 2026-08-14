@@ -1,0 +1,150 @@
+<Window x:Class="VrcVa.Windows.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VRCVA 初期設定"
+        Width="680"
+        Height="590"
+        MinWidth="680"
+        MinHeight="590"
+        MaxWidth="680"
+        MaxHeight="590"
+        Background="{StaticResource WindowBackground}"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0">
+      <TextBlock FontSize="27"
+                 FontWeight="SemiBold"
+                 Text="VRCVAを使う準備" />
+      <TextBlock x:Name="StepIndicatorText"
+                 Margin="0,7,0,0"
+                 Foreground="{StaticResource Accent}"
+                 FontWeight="SemiBold"
+                 Text="1 / 3  起動方法" />
+    </StackPanel>
+
+    <Grid Grid.Row="1" Margin="0,24,0,18">
+      <StackPanel x:Name="SteamVrStepPanel">
+        <TextBlock FontSize="21"
+                   FontWeight="SemiBold"
+                   Text="SteamVRと一緒に起動" />
+        <TextBlock Margin="0,14,0,0"
+                   FontSize="16"
+                   TextWrapping="Wrap"
+                   Text="普段どおりQuest LinkとSteamVRを起動すると、VRCVAも自動で1つだけ起動する設定です。VRCVAがSteamVRを勝手に起動することはありません。" />
+        <Border Margin="0,22,0,0"
+                Padding="18"
+                Background="#1C252B"
+                BorderBrush="#3B4850"
+                BorderThickness="1"
+                CornerRadius="7">
+          <CheckBox x:Name="SteamVrAutoLaunchCheckBox"
+                    FontSize="17"
+                    Foreground="{StaticResource TextPrimary}"
+                    Content="SteamVR起動時にVRCVAも起動する" />
+        </Border>
+        <TextBlock Margin="0,14,0,0"
+                   Foreground="{StaticResource TextSecondary}"
+                   TextWrapping="Wrap"
+                   Text="SteamVRが今止まっていても完了できます。その場合は希望を保存します。完了後にVRCVAを終了し、SteamVRを起動してからVRCVAを一度開くと再登録します。" />
+      </StackPanel>
+
+      <StackPanel x:Name="OcrStepPanel" Visibility="Collapsed">
+        <TextBlock FontSize="21"
+                   FontWeight="SemiBold"
+                   Text="英語を読み取れるか確認" />
+        <Border Margin="0,18,0,0"
+                Padding="18"
+                Background="#1C252B"
+                BorderBrush="#3B4850"
+                BorderThickness="1"
+                CornerRadius="7">
+          <StackPanel>
+            <TextBlock x:Name="OcrReadinessTitleText"
+                       FontSize="18"
+                       FontWeight="Bold" />
+            <TextBlock x:Name="OcrReadinessDetailText"
+                       Margin="0,9,0,0"
+                       Foreground="{StaticResource TextSecondary}"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+        <Button Margin="0,20,0,0"
+                HorizontalAlignment="Left"
+                Click="OpenLanguageSettingsButton_Click"
+                Content="Windowsの言語設定を開く" />
+        <TextBlock Margin="0,12,0,0"
+                   Foreground="{StaticResource TextSecondary}"
+                   TextWrapping="Wrap"
+                   Text="未導入でも設定は完了でき、VRCVAのSCANボタンは使用できます。英語OCRを追加した後だけVRCVAを再起動してください。" />
+      </StackPanel>
+
+      <StackPanel x:Name="OpenAiStepPanel" Visibility="Collapsed">
+        <TextBlock FontSize="21"
+                   FontWeight="SemiBold"
+                   Text="日本語翻訳（任意）" />
+        <TextBlock Margin="0,14,0,0"
+                   FontSize="16"
+                   TextWrapping="Wrap"
+                   Text="翻訳を使う場合だけ、VRCVA専用のOpenAI APIキーを入力します。空欄のまま完了すれば、画像とOCRはPC内だけで処理されます。" />
+        <Border Margin="0,20,0,0"
+                Padding="18"
+                Background="#1C252B"
+                BorderBrush="#3B4850"
+                BorderThickness="1"
+                CornerRadius="7">
+          <StackPanel>
+            <TextBlock x:Name="ExistingApiKeyStatusText"
+                       Foreground="{StaticResource TextSecondary}"
+                       TextWrapping="Wrap" />
+            <TextBlock Margin="0,14,0,7"
+                       FontWeight="SemiBold"
+                       Text="OpenAI APIキー" />
+            <PasswordBox x:Name="OpenAiApiKeyPasswordBox"
+                         MinHeight="38"
+                         VerticalContentAlignment="Center" />
+            <TextBlock Margin="0,9,0,0"
+                       Foreground="{StaticResource TextSecondary}"
+                       TextWrapping="Wrap"
+                       Text="入力した場合はWindows資格情報マネージャーへ暗号化して保存します。キー自体を設定ファイルやログへ書きません。空欄なら現在の保存状態を変更しません。" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </Grid>
+
+    <TextBlock x:Name="SetupErrorText"
+               Grid.Row="2"
+               Margin="0,0,0,12"
+               Foreground="#FF9B9B"
+               TextWrapping="Wrap" />
+
+    <Grid Grid.Row="3">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <Button x:Name="BackButton"
+              Grid.Column="1"
+              IsEnabled="False"
+              Click="BackButton_Click"
+              Content="戻る" />
+      <Button x:Name="NextButton"
+              Grid.Column="2"
+              Margin="8,0,0,0"
+              Background="#16739A"
+              Foreground="White"
+              FontWeight="Bold"
+              Click="NextButton_Click"
+              Content="次へ" />
+    </Grid>
+  </Grid>
+</Window>

@@ -274,14 +274,14 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 - [x] Add a versioned application settings store and migrate version-1 result-panel placement without losing it.
 - [x] Store onboarding and auto-launch preferences only; prove serialized settings never contain an API key or OCR/result text.
-- [ ] Add a single-instance guard for manual plus SteamVR launches.
-- [ ] Generate/register a fixed-key SteamVR application manifest and enable auto-launch only after an explicit wizard choice.
-- [ ] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.
-- [ ] Add a three-step first-run wizard for SteamVR startup, English OCR readiness, and optional OpenAI BYOK.
-- [ ] Keep the normal desktop window minimized for `--steamvr-autostart`, with an obvious way to reopen settings.
+- [x] Add a single-instance guard for manual plus SteamVR launches.
+- [>] Generate/register a fixed-key SteamVR application manifest and enable auto-launch only after an explicit wizard choice. Generation, ABI checks, and typed registration flow are complete; real SteamVR registration remains a device check.
+- [x] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.
+- [x] Add a three-step first-run wizard for SteamVR startup, English OCR readiness, and optional OpenAI BYOK.
+- [x] Keep the normal desktop window minimized for `--steamvr-autostart`, with an obvious way to reopen settings.
 - [x] Make API-key save/delete affect the next SCAN without restart while preserving one process-wide ten-attempt limit.
 - [x] Keep Credential Manager as the only persistent API-key store and the official OpenAI endpoint as the only saved-key destination.
-- [ ] Add a dependency-free self-contained beta publish path and document one stable extraction folder; do not build a commercial installer.
+- [x] Add a dependency-free self-contained beta publish path and document one stable extraction folder; do not build a commercial installer.
 
 ## Post-MVP Milestone H — feature foundation and AI-development harness
 

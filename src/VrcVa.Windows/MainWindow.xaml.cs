@@ -12,6 +12,7 @@ using VrcVa.Windows.Osc;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Security;
 using VrcVa.Windows.Settings;
+using VrcVa.Windows.Startup;
 using VrcVa.Windows.Translation;
 using VrcVa.Windows.Win32;
 
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly WindowsCredentialStore _openAiCredentialStore = new();
     private readonly VrcVaSettingsStore _settingsStore = new();
+    private readonly SteamVrAutoLaunchRegistration _steamVrAutoLaunchRegistration = new();
     private readonly TranslationRequestQuota _translationRequestQuota = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
@@ -42,10 +44,14 @@ public partial class MainWindow : Window
     private ResultPanelPlacement _resultPanelPlacement = ResultPanelPlacement.Default;
     private string _translationStatus;
     private string _oscStatus = "OSCトリガー: 無効";
+    private string _steamVrAutoLaunchStatus = "SteamVR自動起動: 初期設定待ち";
     private string _ocrInfo = "OCR言語: 確認中";
     private bool _modelSelectorInitializing = true;
     private bool _placementControlsInitializing = true;
     private bool _placementCalibrationActive;
+    private bool _setupWindowOpen;
+    private bool _englishOcrReady;
+    private string _ocrReadinessDetail = "OCR認識器を確認中です。";
     private GlobalHotKey? _globalHotKey;
     private GlobalHotKey? _modelToggleHotKey;
     private string? _modelToggleHotKeyDisplayText;
@@ -69,6 +75,9 @@ public partial class MainWindow : Window
         {
             _settings = _settingsStore.Load();
             _resultPanelPlacement = _settings.ResultPanel;
+            _steamVrAutoLaunchStatus = _settings.Onboarding.IsCompleted
+                ? "SteamVR自動起動: 確認待ち"
+                : "SteamVR自動起動: 初期設定待ち";
         }
         catch (Exception exception) when (
             exception is IOException
@@ -201,8 +210,10 @@ public partial class MainWindow : Window
         OcrLanguageStatusText.Text =
             $"使用するOCR認識器: {selectedRecognizerDisplay} / 利用可能: {availableRecognizerDisplay}";
 
-        bool englishOcrReady = hasEnglishRecognizer && usesEnglishRecognizer;
-        OcrLanguageWarningBorder.Visibility = englishOcrReady
+        _englishOcrReady = hasEnglishRecognizer && usesEnglishRecognizer;
+        _ocrReadinessDetail =
+            $"使用する認識器: {selectedRecognizerDisplay} / 利用可能: {availableRecognizerDisplay}";
+        OcrLanguageWarningBorder.Visibility = _englishOcrReady
             ? Visibility.Collapsed
             : Visibility.Visible;
         OcrLanguageWarningText.Text = languageTags.Count == 0
@@ -211,7 +222,7 @@ public partial class MainWindow : Window
             : WindowsOcrEngine.EnglishRecognizerMissingWarning;
 
         StatusText.Text = _startupWarning
-            ?? (englishOcrReady
+            ?? (_englishOcrReady
                 ? "準備完了。VRChatを表示してSCANしてください。"
                 : "英語OCRが未導入です。上の警告を確認してください。SCANは引き続き使用できます。");
         UpdateEnvironmentDetails();
@@ -233,6 +244,25 @@ public partial class MainWindow : Window
         if (_oscTriggerOptions?.Enabled == true)
         {
             await StartOscTriggerAsync(_oscTriggerOptions);
+        }
+
+        if (!_settings.Onboarding.IsCompleted)
+        {
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+                Activate();
+            }
+
+            ShowSetupWizard();
+        }
+        else
+        {
+            SteamVrAutoLaunchResult autoLaunchResult = ApplySteamVrAutoLaunchPreference();
+            if (!autoLaunchResult.Succeeded)
+            {
+                StatusText.Text = autoLaunchResult.UserMessage;
+            }
         }
     }
 
@@ -432,6 +462,143 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OpenSetupButton_Click(object sender, RoutedEventArgs eventArgs) =>
+        ShowSetupWizard();
+
+    private void ShowSetupWizard()
+    {
+        if (_setupWindowOpen)
+        {
+            return;
+        }
+
+        if (Volatile.Read(ref _uiScanRunning) != 0 || _placementCalibrationActive)
+        {
+            StatusText.Text = "SCANまたはVR位置調整が終わってから初期設定を開いてください。";
+            return;
+        }
+
+        _setupWindowOpen = true;
+        OpenSetupButton.IsEnabled = false;
+        try
+        {
+            TranslationRuntime currentRuntime = _analyzer.Current;
+            SetupWindow setupWindow = new(
+                _settings.Onboarding.SteamVrAutoLaunchEnabled,
+                _englishOcrReady,
+                _ocrReadinessDetail,
+                currentRuntime.HasStoredApiKey)
+            {
+                Owner = this,
+            };
+            if (setupWindow.ShowDialog() != true || setupWindow.Result is null)
+            {
+                return;
+            }
+
+            SetupWizardResult result = setupWindow.Result;
+            bool settingsSaved = TrySaveOnboardingSettings(
+                new VrcVaOnboardingSettings(
+                    IsCompleted: true,
+                    SteamVrAutoLaunchEnabled: result.SteamVrAutoLaunchEnabled));
+            SteamVrAutoLaunchResult? autoLaunchResult = settingsSaved
+                ? ApplySteamVrAutoLaunchPreference()
+                : null;
+            bool apiKeySaved = true;
+            bool clipboardCleared = true;
+            if (!string.IsNullOrWhiteSpace(result.OpenAiApiKey))
+            {
+                apiKeySaved = TrySaveOpenAiApiKey(result.OpenAiApiKey, out _);
+                clipboardCleared = TryClearClipboard();
+            }
+
+            string status = settingsSaved && apiKeySaved && autoLaunchResult is not null
+                ? $"初期設定を保存しました。{autoLaunchResult.UserMessage}"
+                : "一部の初期設定を保存できませんでした。画面の状態を確認して、もう一度お試しください。";
+            StatusText.Text = clipboardCleared
+                ? status
+                : $"{status} クリップボードを消去できませんでした。別の文字列をコピーしてAPIキーを上書きしてください。";
+        }
+        finally
+        {
+            _setupWindowOpen = false;
+            OpenSetupButton.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+        }
+    }
+
+    private bool TrySaveOnboardingSettings(VrcVaOnboardingSettings onboarding)
+    {
+        try
+        {
+            VrcVaSettings updatedSettings = _settings with { Onboarding = onboarding };
+            _settingsStore.Save(updatedSettings);
+            _settings = updatedSettings;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or InvalidDataException)
+        {
+            _logger.Error(
+                "ui.onboarding_settings_save_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+            return false;
+        }
+    }
+
+    private SteamVrAutoLaunchResult ApplySteamVrAutoLaunchPreference()
+    {
+        bool enabled = _settings.Onboarding.SteamVrAutoLaunchEnabled;
+        SteamVrAutoLaunchResult result;
+        try
+        {
+            result = _steamVrAutoLaunchRegistration.Apply(enabled);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException
+                or ExternalException
+                or NotSupportedException)
+        {
+            result = SteamVrAutoLaunchResult.Failed();
+            _logger.Error(
+                "startup.steamvr_auto_launch_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+
+        _steamVrAutoLaunchStatus = result.Status switch
+        {
+            SteamVrAutoLaunchStatus.Enabled => "SteamVR自動起動: 有効",
+            SteamVrAutoLaunchStatus.Disabled => "SteamVR自動起動: 無効",
+            SteamVrAutoLaunchStatus.PendingSteamVr => enabled
+                ? "SteamVR自動起動: 登録保留"
+                : "SteamVR自動起動: 無効化確認を保留",
+            _ => "SteamVR自動起動: 更新失敗",
+        };
+        _logger.Info(
+            "startup.steamvr_auto_launch_checked",
+            Guid.Empty,
+            ScanStage.Trigger,
+            numericMetrics: new Dictionary<string, long>
+            {
+                ["requestedEnabled"] = enabled ? 1 : 0,
+                ["status"] = (long)result.Status,
+                ["registered"] = result.IsRegistered ? 1 : 0,
+            });
+        UpdateEnvironmentDetails();
+        return result;
+    }
+
     private void SaveOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
         if (Volatile.Read(ref _uiScanRunning) != 0)
@@ -450,25 +617,15 @@ public partial class MainWindow : Window
         bool saved = false;
         try
         {
-            _openAiCredentialStore.Write(apiKey);
-            saved = true;
-            TranslationRuntime runtime = ReloadTranslationRuntime();
-            StatusText.Text = runtime.Warning is null
-                ? runtime.HasEffectiveApiKey
-                    ? "APIキーを暗号化して保存しました。次回のSCANから使います。"
-                    : "APIキーを暗号化して保存しました。現在は翻訳が無効なため、外部送信は行いません。"
-                : runtime.Warning;
-        }
-        catch (Exception exception) when (exception is ArgumentException or ExternalException)
-        {
-            OpenAiApiKeyPasswordBox.Clear();
-            StatusText.Text = "APIキーをWindows資格情報マネージャーへ保存できませんでした。";
-            _logger.Error(
-                "ui.api_key_save_failed",
-                Guid.Empty,
-                ScanStage.Translation,
-                ScanFailureCode.TranslationNotConfigured,
-                exception);
+            saved = TrySaveOpenAiApiKey(apiKey, out TranslationRuntime? runtime);
+            if (runtime is not null)
+            {
+                StatusText.Text = runtime.Warning is null
+                    ? runtime.HasEffectiveApiKey
+                        ? "APIキーを暗号化して保存しました。次回のSCANから使います。"
+                        : "APIキーを暗号化して保存しました。現在は翻訳が無効なため、外部送信は行いません。"
+                    : runtime.Warning;
+            }
         }
         finally
         {
@@ -481,6 +638,30 @@ public partial class MainWindow : Window
                     : warning;
                 StatusText.Text = $"{StatusText.Text} {warning}";
             }
+        }
+    }
+
+    private bool TrySaveOpenAiApiKey(
+        string apiKey,
+        out TranslationRuntime? runtime)
+    {
+        runtime = null;
+        try
+        {
+            _openAiCredentialStore.Write(apiKey);
+            runtime = ReloadTranslationRuntime();
+            return true;
+        }
+        catch (Exception exception) when (exception is ArgumentException or ExternalException)
+        {
+            StatusText.Text = "APIキーをWindows資格情報マネージャーへ保存できませんでした。";
+            _logger.Error(
+                "ui.api_key_save_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+            return false;
         }
     }
 
@@ -759,6 +940,7 @@ public partial class MainWindow : Window
         OpenAiApiKeyPasswordBox.IsEnabled = !isRunning;
         SaveOpenAiApiKeyButton.IsEnabled = !isRunning;
         DeleteOpenAiApiKeyButton.IsEnabled = !isRunning;
+        OpenSetupButton.IsEnabled = !isRunning && !_setupWindowOpen;
         TranslationModelComboBox.IsEnabled =
             !isRunning && _analyzer.Current.OpenAiTranslator is not null;
         PlacementSettingsExpander.IsEnabled = !isRunning && !_placementCalibrationActive;
@@ -1075,7 +1257,7 @@ public partial class MainWindow : Window
 
     private void UpdateEnvironmentDetails() =>
         DetailText.Text =
-            $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / {_oscStatus} / ログ: {_logger.LogDirectory}";
+            $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / {_oscStatus} / {_steamVrAutoLaunchStatus} / ログ: {_logger.LogDirectory}";
 
     private string CreateOpenAiTranslationStatus(string model)
     {

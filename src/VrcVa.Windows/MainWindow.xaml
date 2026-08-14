@@ -21,13 +21,25 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0">
-      <TextBlock FontSize="28" FontWeight="SemiBold" Text="VRChat Visual Assistant" />
-      <TextBlock Margin="0,5,0,0"
-                 Foreground="{StaticResource TextSecondary}"
-                 FontSize="14"
-                 Text="見えている英語を、1回のSCANで日本語へ" />
-    </StackPanel>
+    <Grid Grid.Row="0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel Grid.Column="0">
+        <TextBlock FontSize="28" FontWeight="SemiBold" Text="VRChat Visual Assistant" />
+        <TextBlock Margin="0,5,0,0"
+                   Foreground="{StaticResource TextSecondary}"
+                   FontSize="14"
+                   Text="見えている英語を、1回のSCANで日本語へ" />
+      </StackPanel>
+      <Button x:Name="OpenSetupButton"
+              Grid.Column="1"
+              Margin="12,0,0,0"
+              VerticalAlignment="Center"
+              Click="OpenSetupButton_Click"
+              Content="初期設定を開く" />
+    </Grid>
 
     <Border Grid.Row="1"
             Margin="0,16,0,0"
