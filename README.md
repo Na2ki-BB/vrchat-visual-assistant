@@ -132,9 +132,11 @@ dotnet publish .\src\VrcVa.Windows\VrcVa.Windows.csproj `
 
 ## 任意: OpenAI翻訳を明示的に使う
 
-OpenAIは既定では無効です。利用する場合だけ、VRCVA専用Projectで作ったRestricted APIキーをVRCVA画面の「OpenAI APIキー」欄へ貼り付け、「暗号化して保存」を押します。保存後にVRCVAを一度再起動すると翻訳が有効になり、以後は入力不要です。貼り付け後のクリップボードはアプリが消去します。
+OpenAIは既定では無効です。利用する場合だけ、VRCVA専用Projectで作ったRestricted APIキーをVRCVA画面の「OpenAI APIキー」欄へ貼り付け、「暗号化して保存」を押します。保存は次回のSCANから反映され、再起動は不要です。以後は入力不要で、貼り付け後のクリップボードはアプリが消去します。
 
-保存先はWindows資格情報マネージャーの一般資格情報`VrcVa/OpenAIApiKey`です。Windowsが現在のユーザー資格情報として暗号化します。「削除」を押すと保存値を消せます。削除後もその時点で動いているプロセスのメモリには起動時に読んだ値が残るため、完全に無効化するにはVRCVAを再起動します。環境変数で一時キーを設定している場合は、その環境変数も解除してから再起動します。
+保存先はWindows資格情報マネージャーの一般資格情報`VrcVa/OpenAIApiKey`です。Windowsが現在のユーザー資格情報として暗号化します。「削除」を押すと保存値を消し、次回のSCANから外部送信を止めます。環境変数で一時キーを明示設定している場合だけは、その環境変数のキーが引き続き優先されます。
+
+資格情報マネージャーへ保存したキーは、公式の`https://api.openai.com/v1/responses`以外へは送信しません。`VRCVA_OPENAI_ENDPOINT`でカスタム接続先を使う高度な診断では、保存キーを流用せず、`VRCVA_OPENAI_API_KEY`と`VRCVA_TRANSLATION_PROVIDER=openai`を同じ起動環境で明示してください。
 
 ### 保存しない一時利用
 
@@ -410,7 +412,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | `OcrUnavailable` | OCR | Windowsの言語オプションにOCR機能があるか。診断コマンドが列挙する言語タグを確認 |
 | `NoTextDetected` | OCR | 通常OCRと全画面3帯の強化OCRの両方で文字を取れなかった状態。文字へ少し近づく、ミラー解像度を上げる、画像診断で同じ場面を試す |
 | `OCR結果（翻訳未設定）` | Completed | 正常です。無料・外部送信なしの既定状態では認識した英語を表示します |
-| OpenAI専用キー未設定 | Translation | VRCVA画面で専用キーを登録して再起動したか。一時利用時だけ同じPowerShellの環境変数を確認 |
+| OpenAI専用キー未設定 | Translation | VRCVA画面で専用キーを登録したか。保存は次回のSCANから反映される。一時利用時だけ同じPowerShellの環境変数を確認 |
 | 認証/レート制限 | Translation | APIキー権限、課金状態、利用上限。キー値自体はログに出ない |
 | タイムアウト | Translation | ネットワークと `VRCVA_OPENAI_TIMEOUT_SECONDS` |
 | ホットキー登録失敗 | Trigger | 他アプリとの競合。`VRCVA_HOTKEY` を変更して再起動 |

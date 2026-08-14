@@ -279,8 +279,8 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [ ] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.
 - [ ] Add a three-step first-run wizard for SteamVR startup, English OCR readiness, and optional OpenAI BYOK.
 - [ ] Keep the normal desktop window minimized for `--steamvr-autostart`, with an obvious way to reopen settings.
-- [ ] Make API-key save/delete affect the next SCAN without restart while preserving one process-wide ten-attempt limit.
-- [ ] Keep Credential Manager as the only persistent API-key store and the official OpenAI endpoint as the only saved-key destination.
+- [x] Make API-key save/delete affect the next SCAN without restart while preserving one process-wide ten-attempt limit.
+- [x] Keep Credential Manager as the only persistent API-key store and the official OpenAI endpoint as the only saved-key destination.
 - [ ] Add a dependency-free self-contained beta publish path and document one stable extraction folder; do not build a commercial installer.
 
 ## Post-MVP Milestone H — feature foundation and AI-development harness

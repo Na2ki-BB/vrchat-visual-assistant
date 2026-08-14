@@ -127,11 +127,13 @@
                        MinWidth="180"
                        MinHeight="36"
                        VerticalContentAlignment="Center" />
-          <Button Grid.Column="2"
+          <Button x:Name="SaveOpenAiApiKeyButton"
+                  Grid.Column="2"
                   Margin="8,0,0,0"
                   Click="SaveOpenAiApiKeyButton_Click"
                   Content="暗号化して保存" />
-          <Button Grid.Column="3"
+          <Button x:Name="DeleteOpenAiApiKeyButton"
+                  Grid.Column="3"
                   Margin="8,0,0,0"
                   Click="DeleteOpenAiApiKeyButton_Click"
                   Content="削除" />

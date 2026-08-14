@@ -125,6 +125,143 @@ public sealed class OpenAiTextTranslatorTests
     }
 
     [Fact]
+    public async Task TranslateToJapaneseAsync_SharedQuotaSurvivesTranslatorReplacement()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
+        using HttpClient client = new(handler);
+        TranslationRequestQuota quota = new(maximum: 2);
+        OpenAiTextTranslator firstTranslator = new(
+            client,
+            CreateOptions(),
+            "first-api-key",
+            quota);
+        OpenAiTextTranslator replacementTranslator = new(
+            client,
+            CreateOptions(),
+            "replacement-api-key",
+            quota);
+
+        await firstTranslator.TranslateToJapaneseAsync("First", CancellationToken.None);
+        await replacementTranslator.TranslateToJapaneseAsync("Second", CancellationToken.None);
+        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
+            replacementTranslator.TranslateToJapaneseAsync("Third", CancellationToken.None));
+
+        Assert.Equal(ScanFailureCode.TranslationUsageLimitReached, exception.FailureCode);
+        Assert.Equal(2, handler.SendCount);
+        Assert.Equal(2, firstTranslator.MaxRequestsPerSession);
+        Assert.Equal(0, firstTranslator.RemainingRequests);
+        Assert.Equal(0, replacementTranslator.RemainingRequests);
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_PreSendRejectionsDoNotConsumeSharedQuota()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
+        using HttpClient client = new(handler);
+        TranslationRequestQuota quota = new();
+        OpenAiTextTranslator translator = new(
+            client,
+            CreateOptions() with { MaxInputUtf8Bytes = 5 },
+            "test-api-key",
+            quota);
+
+        await Assert.ThrowsAsync<ScanException>(() =>
+            translator.TranslateToJapaneseAsync("日本", CancellationToken.None));
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            translator.TranslateToJapaneseAsync("Hello", cancellation.Token));
+
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(quota.Maximum, quota.Remaining);
+        Assert.Equal(quota.Maximum, translator.RemainingRequests);
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_HttpFailureAndTimeoutConsumeSharedQuota()
+    {
+        RecordingHandler failureHandler = new(HttpStatusCode.InternalServerError, "{}");
+        using HttpClient failureClient = new(failureHandler);
+        TranslationRequestQuota quota = new(maximum: 2);
+        OpenAiTextTranslator failureTranslator = new(
+            failureClient,
+            CreateOptions(),
+            "test-api-key",
+            quota);
+
+        ScanException failure = await Assert.ThrowsAsync<ScanException>(() =>
+            failureTranslator.TranslateToJapaneseAsync("Failure", CancellationToken.None));
+
+        TimeoutHandler timeoutHandler = new();
+        using HttpClient timeoutClient = new(timeoutHandler);
+        OpenAiTextTranslator timeoutTranslator = new(
+            timeoutClient,
+            CreateOptions() with { Timeout = TimeSpan.FromMilliseconds(25) },
+            "test-api-key",
+            quota);
+        ScanException timeout = await Assert.ThrowsAsync<ScanException>(() =>
+            timeoutTranslator.TranslateToJapaneseAsync("Timeout", CancellationToken.None));
+
+        Assert.Equal(ScanFailureCode.TranslationFailed, failure.FailureCode);
+        Assert.Equal(ScanFailureCode.TranslationTimedOut, timeout.FailureCode);
+        Assert.Equal(1, failureHandler.SendCount);
+        Assert.Equal(1, timeoutHandler.SendCount);
+        Assert.Equal(0, quota.Remaining);
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_ConcurrentRequestBeyondQuotaIsBlockedBeforeSend()
+    {
+        BlockingHandler handler = new();
+        using HttpClient client = new(handler);
+        TranslationRequestQuota quota = new(maximum: 2);
+        OpenAiTextTranslator translator = new(
+            client,
+            CreateOptions(),
+            "test-api-key",
+            quota);
+
+        Task<TranslationOutput> first = translator.TranslateToJapaneseAsync(
+            "First",
+            CancellationToken.None);
+        Task<TranslationOutput> second = translator.TranslateToJapaneseAsync(
+            "Second",
+            CancellationToken.None);
+        Task<TranslationOutput> excess = translator.TranslateToJapaneseAsync(
+            "Excess",
+            CancellationToken.None);
+
+        ScanException exception = await Assert.ThrowsAsync<ScanException>(() => excess);
+        Assert.Equal(ScanFailureCode.TranslationUsageLimitReached, exception.FailureCode);
+        Assert.Equal(2, handler.SendCount);
+
+        handler.Release();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(2, handler.SendCount);
+        Assert.Equal(0, quota.Remaining);
+    }
+
+    [Fact]
+    public void TranslationRequestQuota_RejectsMaximumAboveHardLimit()
+    {
+        Assert.Equal(10, TranslationRequestQuota.HardMaximum);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new TranslationRequestQuota(TranslationRequestQuota.HardMaximum + 1));
+
+        RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
+        using HttpClient client = new(handler);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new OpenAiTextTranslator(
+                client,
+                CreateOptions() with
+                {
+                    MaxRequestsPerSession = TranslationRequestQuota.HardMaximum + 1,
+                },
+                "test-api-key"));
+    }
+
+    [Fact]
     public async Task SelectModel_AppliesToNextTranslationAndResult()
     {
         RecordingHandler handler = new(HttpStatusCode.OK, """
@@ -232,6 +369,58 @@ public sealed class OpenAiTextTranslatorTests
         Model = OpenAiTranslatorOptions.QualityModel,
         Timeout = TimeSpan.FromSeconds(2),
     };
+
+    private const string SuccessfulResponse = """
+        {
+          "output": [
+            {
+              "type": "message",
+              "content": [
+                { "type": "output_text", "text": "成功" }
+              ]
+            }
+          ]
+        }
+        """;
+
+    private sealed class TimeoutHandler : HttpMessageHandler
+    {
+        private int _sendCount;
+
+        public int SendCount => Volatile.Read(ref _sendCount);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _sendCount);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _release = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _sendCount;
+
+        public int SendCount => Volatile.Read(ref _sendCount);
+
+        public void Release() => _release.TrySetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _sendCount);
+            await _release.Task.WaitAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(SuccessfulResponse, Encoding.UTF8, "application/json"),
+            };
+        }
+    }
 
     private sealed class RecordingHandler(
         HttpStatusCode statusCode,

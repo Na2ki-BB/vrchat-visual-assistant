@@ -18,27 +18,43 @@ public sealed class OpenAiTextTranslator : ITextTranslator
     private readonly HttpClient _httpClient;
     private readonly OpenAiTranslatorOptions _options;
     private readonly string? _apiKey;
-    private int _requestAttempts;
+    private readonly TranslationRequestQuota _requestQuota;
     private string _model;
 
     public OpenAiTextTranslator(
         HttpClient httpClient,
         OpenAiTranslatorOptions options,
         string? apiKey)
+        : this(
+            httpClient,
+            options,
+            apiKey,
+            new TranslationRequestQuota(options.MaxRequestsPerSession))
     {
+    }
+
+    public OpenAiTextTranslator(
+        HttpClient httpClient,
+        OpenAiTranslatorOptions options,
+        string? apiKey,
+        TranslationRequestQuota requestQuota)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(requestQuota);
+
         _httpClient = httpClient;
         _options = options;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        _requestQuota = requestQuota;
         _model = ValidateModel(options.Model);
     }
 
     public string Model => Volatile.Read(ref _model);
 
-    public int MaxRequestsPerSession => _options.MaxRequestsPerSession;
+    public int MaxRequestsPerSession => _requestQuota.Maximum;
 
-    public int RemainingRequests => Math.Max(
-        0,
-        _options.MaxRequestsPerSession - Volatile.Read(ref _requestAttempts));
+    public int RemainingRequests => _requestQuota.Remaining;
 
     public void SelectModel(string model)
     {
@@ -74,18 +90,20 @@ public sealed class OpenAiTextTranslator : ITextTranslator
                 $"OCRテキストが翻訳上限（UTF-8で{_options.MaxInputUtf8Bytes:N0}バイト）を超えたため、外部送信を停止しました。");
         }
 
-        if (!TryReserveRequest())
-        {
-            throw new ScanException(
-                ScanFailureCode.TranslationUsageLimitReached,
-                ScanStage.Translation,
-                $"この起動中の翻訳上限（{_options.MaxRequestsPerSession}回）に達したため、外部送信を停止しました。必要ならアプリを再起動してください。");
-        }
+        cancellationToken.ThrowIfCancellationRequested();
 
         string model = Model;
         using HttpRequestMessage request = CreateRequest(sourceText, model);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.Timeout);
+
+        if (!_requestQuota.TryReserve())
+        {
+            throw new ScanException(
+                ScanFailureCode.TranslationUsageLimitReached,
+                ScanStage.Translation,
+                $"この起動中の翻訳上限（{_requestQuota.Maximum}回）に達したため、外部送信を停止しました。必要ならアプリを再起動してください。");
+        }
 
         HttpResponseMessage response;
         try
@@ -188,23 +206,6 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         request.Headers.UserAgent.ParseAdd("vrchat-visual-assistant/0.1");
         return request;
-    }
-
-    private bool TryReserveRequest()
-    {
-        while (true)
-        {
-            int current = Volatile.Read(ref _requestAttempts);
-            if (current >= _options.MaxRequestsPerSession)
-            {
-                return false;
-            }
-
-            if (Interlocked.CompareExchange(ref _requestAttempts, current + 1, current) == current)
-            {
-                return true;
-            }
-        }
     }
 
     private static string ValidateModel(string model)

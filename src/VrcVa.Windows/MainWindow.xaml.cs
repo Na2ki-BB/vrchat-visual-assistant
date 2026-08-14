@@ -12,6 +12,7 @@ using VrcVa.Windows.Osc;
 using VrcVa.Windows.Rendering;
 using VrcVa.Windows.Security;
 using VrcVa.Windows.Settings;
+using VrcVa.Windows.Translation;
 using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows;
@@ -27,17 +28,14 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _windowLifetimeCancellation = new();
     private readonly WindowsCredentialStore _openAiCredentialStore = new();
     private readonly VrcVaSettingsStore _settingsStore = new();
+    private readonly TranslationRequestQuota _translationRequestQuota = new();
     private readonly PrivacySafeFileLogger _logger;
-    private readonly IAnalyzer _analyzer;
+    private readonly TranslationRuntimeFactory _translationRuntimeFactory;
+    private readonly ReloadableAnalyzer _analyzer;
     private readonly IResultRenderer _renderer;
     private readonly IXsOverlayNotificationSink _xsOverlayNotificationSink;
     private readonly SteamVrResultPanel _steamVrResultPanel;
     private readonly ScanPipeline _vrChatPipeline;
-    private readonly string _privacyNotice;
-    private readonly OpenAiTextTranslator? _openAiTranslator;
-    private readonly bool _hasOpenAiApiKey;
-    private readonly bool _hasEnvironmentOpenAiApiKey;
-    private readonly bool _hasStoredOpenAiApiKey;
     private readonly string _captureConfiguration;
     private readonly OscTriggerOptions? _oscTriggerOptions;
     private VrcVaSettings _settings = VrcVaSettings.Default;
@@ -50,6 +48,7 @@ public partial class MainWindow : Window
     private bool _placementCalibrationActive;
     private GlobalHotKey? _globalHotKey;
     private GlobalHotKey? _modelToggleHotKey;
+    private string? _modelToggleHotKeyDisplayText;
     private OscTriggerService? _oscTriggerService;
     private CancellationTokenSource? _activeScanCancellation;
     private int _uiScanRunning;
@@ -104,89 +103,19 @@ public partial class MainWindow : Window
                 exception);
         }
 
-        string? storedApiKey = null;
-        Exception? storedCredentialReadFailure = null;
-        try
-        {
-            storedApiKey = _openAiCredentialStore.Read();
-            _hasStoredOpenAiApiKey = !string.IsNullOrWhiteSpace(storedApiKey);
-        }
-        catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
-        {
-            storedCredentialReadFailure = exception;
-            _logger.Error(
-                "startup.openai_credential_read_failed",
-                Guid.Empty,
-                ScanStage.Translation,
-                ScanFailureCode.TranslationNotConfigured,
-                exception);
-        }
-
-        string? environmentApiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
-        _hasEnvironmentOpenAiApiKey = !string.IsNullOrWhiteSpace(environmentApiKey);
-        string? apiKey = string.IsNullOrWhiteSpace(environmentApiKey)
-            ? storedApiKey
-            : environmentApiKey;
-        string? configuredProvider = Environment.GetEnvironmentVariable("VRCVA_TRANSLATION_PROVIDER");
-        string providerId = TranslationProviderSelection.Resolve(
-            configuredProvider,
-            _hasStoredOpenAiApiKey);
-        if (storedCredentialReadFailure is not null)
-        {
-            _startupWarning = providerId == "openai" && _hasEnvironmentOpenAiApiKey
-                ? "保存済みOpenAI APIキーは読み込めませんでしたが、この起動では明示設定された環境キーを使用します。"
-                : "Windows資格情報マネージャーからOpenAI APIキーを読み込めませんでした。外部送信は行いません。";
-        }
-        IAnalyzer analyzer;
         WindowsOcrEngine windowsOcrEngine = new();
         IOcrEngine ocrEngine = new AdaptiveOcrEngine(
             windowsOcrEngine,
             new WindowsOcrRegionSource());
-        try
-        {
-            switch (providerId)
-            {
-                case "none":
-                    analyzer = new OcrAnalyzer(ocrEngine);
-                    _privacyNotice =
-                        "画像とOCRはWindows内で処理し、保存しません。OCR結果は表示しますが、翻訳未設定のため外部送信しません。";
-                    _translationStatus = "OCRのみ / OpenAI未設定";
-                    break;
-                case "openai":
-                    OpenAiTranslatorOptions openAiOptions = OpenAiTranslatorOptions.FromEnvironment();
-                    _openAiTranslator = new OpenAiTextTranslator(_httpClient, openAiOptions, apiKey);
-                    analyzer = new TranslateAnalyzer(ocrEngine, _openAiTranslator);
-                    _hasOpenAiApiKey = !string.IsNullOrWhiteSpace(apiKey);
-                    _privacyNotice = _hasOpenAiApiKey
-                        ? "画像はWindows内でOCRし、保存しません。翻訳時はOCRテキストだけをOpenAIへ送信します（API従量課金）。"
-                        : "画像はWindows内でOCRし、保存しません。OpenAIが選択されていますが、専用APIキー未設定のため外部送信しません。";
-                    _translationStatus = _hasOpenAiApiKey
-                        ? CreateOpenAiTranslationStatus(openAiOptions.Model)
-                        : "翻訳API: OpenAI / 専用キー未設定";
-                    break;
-                default:
-                    throw new InvalidOperationException(
-                        "VRCVA_TRANSLATION_PROVIDER must be either none or openai.");
-            }
-        }
-        catch (Exception exception) when (
-            exception is InvalidOperationException or UriFormatException)
-        {
-            _startupWarning = "翻訳設定の環境変数が不正です。READMEの設定例を確認してください。";
-            _privacyNotice = "翻訳設定が不正なため、外部送信は行われません。";
-            _translationStatus = "翻訳: 設定エラー";
-            _logger.Error(
-                "startup.translation_configuration_invalid",
-                Guid.Empty,
-                ScanStage.Translation,
-                ScanFailureCode.TranslationNotConfigured,
-                exception);
-            analyzer = new TranslateAnalyzer(
-                ocrEngine,
-                new ConfigurationFailureTranslator(_startupWarning));
-        }
-
-        _analyzer = analyzer;
+        _translationRuntimeFactory = new TranslationRuntimeFactory(
+            _httpClient,
+            ocrEngine,
+            _translationRequestQuota);
+        TranslationRuntime initialTranslationRuntime = CreateTranslationRuntime(
+            preferredModel: null,
+            isStartup: true);
+        _analyzer = new ReloadableAnalyzer(initialTranslationRuntime);
+        _translationStatus = initialTranslationRuntime.Status;
         _xsOverlayNotificationSink = new XsOverlayUdpNotificationSink();
         _steamVrResultPanel = new SteamVrResultPanel(Dispatcher, _resultPanelPlacement);
         _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
@@ -225,12 +154,7 @@ public partial class MainWindow : Window
 
         InitializeModelSelector();
         InitializeResultPanelPlacementControls();
-        OpenAiApiKeyStatusText.Text = _hasStoredOpenAiApiKey
-            ? "Windows資格情報マネージャーへ保存済みです。通常起動で自動的に使います。"
-            : _hasOpenAiApiKey
-                ? "この起動中だけ有効なキーを使用しています。保存すると次回から入力不要です。"
-                : "未登録です。VRCVA専用キーを貼り付け、暗号化して保存してください。";
-        PrivacyText.Text = _privacyNotice;
+        UpdateTranslationSettingsUi(initialTranslationRuntime);
 
         Loaded += MainWindow_Loaded;
         SourceInitialized += MainWindow_SourceInitialized;
@@ -416,35 +340,7 @@ public partial class MainWindow : Window
                 exception);
         }
 
-        if (_openAiTranslator is null)
-        {
-            return;
-        }
-
-        try
-        {
-            HotKeyDefinition definition = HotKeyDefinition.FromEnvironment(
-                "VRCVA_MODEL_TOGGLE_HOTKEY",
-                "Ctrl+Shift+G");
-            _modelToggleHotKey = new GlobalHotKey(
-                new WindowInteropHelper(this).Handle,
-                ModelToggleHotKeyIdentifier,
-                definition);
-            _modelToggleHotKey.Pressed += ModelToggleHotKey_Pressed;
-            TranslationModelHintText.Text = $"次回から反映 / 切替 {definition.DisplayText}";
-        }
-        catch (Exception exception) when (
-            exception is InvalidOperationException
-                or System.ComponentModel.Win32Exception)
-        {
-            StatusText.Text = "モデル切替ホットキーを登録できませんでした。画面の選択欄は使用できます。";
-            _logger.Error(
-                "startup.model_toggle_hotkey_registration_failed",
-                Guid.Empty,
-                ScanStage.Trigger,
-                ScanFailureCode.Unexpected,
-                exception);
-        }
+        UpdateModelToggleHotKeyRegistration();
     }
 
     private async void GlobalHotKey_Pressed(object? sender, EventArgs eventArgs)
@@ -463,7 +359,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (TranslationModelComboBox.Items.Count == 0)
+        if (_analyzer.Current.OpenAiTranslator is null
+            || TranslationModelComboBox.Items.Count == 0)
         {
             return;
         }
@@ -537,6 +434,12 @@ public partial class MainWindow : Window
 
     private void SaveOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
+        if (Volatile.Read(ref _uiScanRunning) != 0)
+        {
+            StatusText.Text = "SCAN完了後にAPIキーを保存してください。";
+            return;
+        }
+
         string apiKey = OpenAiApiKeyPasswordBox.Password.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -549,9 +452,12 @@ public partial class MainWindow : Window
         {
             _openAiCredentialStore.Write(apiKey);
             saved = true;
-            OpenAiApiKeyStatusText.Text =
-                "Windows資格情報マネージャーへ保存しました。VRCVAを一度再起動すると自動で有効になります。";
-            StatusText.Text = "APIキーを暗号化して保存しました。値は画面・ファイル・ログへ出力しません。";
+            TranslationRuntime runtime = ReloadTranslationRuntime();
+            StatusText.Text = runtime.Warning is null
+                ? runtime.HasEffectiveApiKey
+                    ? "APIキーを暗号化して保存しました。次回のSCANから使います。"
+                    : "APIキーを暗号化して保存しました。現在は翻訳が無効なため、外部送信は行いません。"
+                : runtime.Warning;
         }
         catch (Exception exception) when (exception is ArgumentException or ExternalException)
         {
@@ -580,6 +486,12 @@ public partial class MainWindow : Window
 
     private void DeleteOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
+        if (Volatile.Read(ref _uiScanRunning) != 0)
+        {
+            StatusText.Text = "SCAN完了後にAPIキーを削除してください。";
+            return;
+        }
+
         MessageBoxResult confirmation = System.Windows.MessageBox.Show(
             this,
             "Windows資格情報マネージャーからVRCVAのOpenAI APIキーを削除しますか？",
@@ -591,14 +503,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (Volatile.Read(ref _uiScanRunning) != 0)
+        {
+            StatusText.Text = "SCANが開始されたため、APIキーは削除していません。完了後にもう一度お試しください。";
+            return;
+        }
+
         try
         {
             _openAiCredentialStore.Delete();
             OpenAiApiKeyPasswordBox.Clear();
-            OpenAiApiKeyStatusText.Text = _hasEnvironmentOpenAiApiKey
-                ? "保存済みAPIキーだけを削除しました。環境変数のキーは有効です。環境変数を解除してVRCVAを再起動すると完全に無効になります。"
-                : "保存済みAPIキーを削除しました。完全に無効化するにはVRCVAを再起動してください。";
-            StatusText.Text = "OpenAI APIキーを削除しました。";
+            TranslationRuntime runtime = ReloadTranslationRuntime();
+            StatusText.Text = runtime.Warning is null
+                ? runtime.HasEffectiveApiKey
+                    ? "保存済みAPIキーを削除しました。明示設定された環境変数のキーは次回のSCANでも使います。"
+                    : "保存済みAPIキーを削除しました。次回のSCANから外部送信しません。"
+                : runtime.Warning;
         }
         catch (ExternalException exception)
         {
@@ -763,15 +683,17 @@ public partial class MainWindow : Window
         object sender,
         System.Windows.Controls.SelectionChangedEventArgs eventArgs)
     {
+        TranslationRuntime runtime = _analyzer.Current;
+        OpenAiTextTranslator? translator = runtime.OpenAiTranslator;
         if (_modelSelectorInitializing
-            || _openAiTranslator is null
+            || translator is null
             || TranslationModelComboBox.SelectedItem is not TranslationModelChoice choice)
         {
             return;
         }
 
-        _openAiTranslator.SelectModel(choice.ModelId);
-        _translationStatus = _hasOpenAiApiKey
+        translator.SelectModel(choice.ModelId);
+        _translationStatus = runtime.HasEffectiveApiKey
             ? CreateOpenAiTranslationStatus(choice.ModelId)
             : $"翻訳API: OpenAI / {choice.ModelId} / 専用キー未設定";
         StatusText.Text = $"翻訳モデルを {choice.DisplayName} に変更しました。次回のSCANから使います。";
@@ -834,7 +756,11 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = !isRunning;
         ImageButton.IsEnabled = !isRunning;
         CancelButton.IsEnabled = isRunning;
-        TranslationModelComboBox.IsEnabled = !isRunning && _openAiTranslator is not null;
+        OpenAiApiKeyPasswordBox.IsEnabled = !isRunning;
+        SaveOpenAiApiKeyButton.IsEnabled = !isRunning;
+        DeleteOpenAiApiKeyButton.IsEnabled = !isRunning;
+        TranslationModelComboBox.IsEnabled =
+            !isRunning && _analyzer.Current.OpenAiTranslator is not null;
         PlacementSettingsExpander.IsEnabled = !isRunning && !_placementCalibrationActive;
     }
 
@@ -846,9 +772,10 @@ public partial class MainWindow : Window
 
     private void RenderOutcome(ScanOutcome outcome)
     {
-        if (_openAiTranslator is not null && _hasOpenAiApiKey)
+        TranslationRuntime runtime = _analyzer.Current;
+        if (runtime.OpenAiTranslator is not null && runtime.HasEffectiveApiKey)
         {
-            _translationStatus = CreateOpenAiTranslationStatus(_openAiTranslator.Model);
+            _translationStatus = CreateOpenAiTranslationStatus(runtime.OpenAiTranslator.Model);
         }
 
         if (!outcome.IsSuccess || outcome.Result is null)
@@ -946,6 +873,179 @@ public partial class MainWindow : Window
         }
     }
 
+    private TranslationRuntime ReloadTranslationRuntime()
+    {
+        string? preferredModel = TranslationModelComboBox.SelectedItem is TranslationModelChoice choice
+            ? choice.ModelId
+            : null;
+        TranslationRuntime runtime = CreateTranslationRuntime(
+            preferredModel,
+            isStartup: false);
+        _analyzer.Swap(runtime);
+        UpdateTranslationSettingsUi(runtime);
+        UpdateModelToggleHotKeyRegistration();
+        UpdateEnvironmentDetails();
+        return runtime;
+    }
+
+    private TranslationRuntime CreateTranslationRuntime(
+        string? preferredModel,
+        bool isStartup)
+    {
+        string? storedApiKey = null;
+        Exception? credentialReadFailure = null;
+        try
+        {
+            storedApiKey = _openAiCredentialStore.Read();
+        }
+        catch (Exception exception) when (
+            exception is ExternalException or InvalidOperationException)
+        {
+            credentialReadFailure = exception;
+            _logger.Error(
+                isStartup
+                    ? "startup.openai_credential_read_failed"
+                    : "ui.openai_credential_read_failed",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+        }
+
+        string? environmentApiKey = Environment.GetEnvironmentVariable("VRCVA_OPENAI_API_KEY");
+        bool hasEnvironmentApiKey = !string.IsNullOrWhiteSpace(environmentApiKey);
+        bool hasStoredApiKey = !string.IsNullOrWhiteSpace(storedApiKey);
+        TranslationRuntime runtime;
+        try
+        {
+            runtime = _translationRuntimeFactory.Create(
+                Environment.GetEnvironmentVariable("VRCVA_TRANSLATION_PROVIDER"),
+                environmentApiKey,
+                storedApiKey,
+                OpenAiTranslatorOptions.FromEnvironment,
+                preferredModel);
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or UriFormatException
+                or ArgumentException)
+        {
+            const string warning =
+                "翻訳設定が不正か安全要件を満たさないため、外部送信を停止しました。保存済みAPIキーは公式OpenAI接続先にだけ送信します。READMEの設定例を確認してください。";
+            _logger.Error(
+                isStartup
+                    ? "startup.translation_configuration_invalid"
+                    : "ui.translation_configuration_invalid",
+                Guid.Empty,
+                ScanStage.Translation,
+                ScanFailureCode.TranslationNotConfigured,
+                exception);
+            if (isStartup)
+            {
+                AppendStartupWarning(warning);
+            }
+
+            return _translationRuntimeFactory.CreateConfigurationFailure(
+                hasEnvironmentApiKey,
+                hasStoredApiKey,
+                warning);
+        }
+
+        if (credentialReadFailure is null)
+        {
+            return runtime;
+        }
+
+        string credentialWarning = runtime.KeySource == TranslationKeySource.Environment
+            && runtime.HasEffectiveApiKey
+                ? "保存済みOpenAI APIキーは読み込めませんでしたが、明示設定された環境変数のキーを使用します。"
+                : "Windows資格情報マネージャーからOpenAI APIキーを読み込めませんでした。外部送信は行いません。";
+        if (isStartup)
+        {
+            AppendStartupWarning(credentialWarning);
+        }
+
+        return runtime with { Warning = credentialWarning };
+    }
+
+    private void UpdateTranslationSettingsUi(TranslationRuntime runtime)
+    {
+        OpenAiTextTranslator? translator = runtime.OpenAiTranslator;
+        _translationStatus = translator is not null && runtime.HasEffectiveApiKey
+            ? CreateOpenAiTranslationStatus(translator.Model)
+            : runtime.Status;
+        PrivacyText.Text = runtime.PrivacyNotice;
+        OpenAiApiKeyStatusText.Text = runtime.HasStoredApiKey
+            ? runtime.KeySource == TranslationKeySource.Environment
+                ? "Windows資格情報マネージャーへ保存済みです。現在は明示設定された環境変数のキーを優先しています。"
+                : runtime.HasEffectiveApiKey
+                    ? "Windows資格情報マネージャーへ保存済みです。次回のSCANから自動的に使います。"
+                    : "Windows資格情報マネージャーへ保存済みです。現在は翻訳が無効か、設定エラーのため送信しません。"
+            : runtime.KeySource == TranslationKeySource.Environment
+                ? "この起動中だけ有効な環境変数のキーを使用しています。保存すると次回から入力不要です。"
+                : "未登録です。VRCVA専用キーを貼り付け、暗号化して保存してください。";
+        TranslationModelComboBox.IsEnabled =
+            Volatile.Read(ref _uiScanRunning) == 0 && translator is not null;
+        TranslationModelHintText.Text = translator is null
+            ? "OpenAIを有効にした場合に選択できます"
+            : $"次回のSCANから反映（従量課金・1起動最大{translator.MaxRequestsPerSession}回）";
+    }
+
+    private void UpdateModelToggleHotKeyRegistration()
+    {
+        if (_analyzer.Current.OpenAiTranslator is null)
+        {
+            if (_modelToggleHotKey is not null)
+            {
+                _modelToggleHotKey.Pressed -= ModelToggleHotKey_Pressed;
+                _modelToggleHotKey.Dispose();
+                _modelToggleHotKey = null;
+                _modelToggleHotKeyDisplayText = null;
+            }
+
+            return;
+        }
+
+        if (_modelToggleHotKey is not null)
+        {
+            TranslationModelHintText.Text =
+                $"次回から反映 / 切替 {_modelToggleHotKeyDisplayText}";
+            return;
+        }
+
+        try
+        {
+            HotKeyDefinition definition = HotKeyDefinition.FromEnvironment(
+                "VRCVA_MODEL_TOGGLE_HOTKEY",
+                "Ctrl+Shift+G");
+            _modelToggleHotKey = new GlobalHotKey(
+                new WindowInteropHelper(this).Handle,
+                ModelToggleHotKeyIdentifier,
+                definition);
+            _modelToggleHotKey.Pressed += ModelToggleHotKey_Pressed;
+            _modelToggleHotKeyDisplayText = definition.DisplayText;
+            TranslationModelHintText.Text =
+                $"次回から反映 / 切替 {definition.DisplayText}";
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+        {
+            StatusText.Text = "モデル切替ホットキーを登録できませんでした。画面の選択欄は使用できます。";
+            _logger.Error(
+                "startup.model_toggle_hotkey_registration_failed",
+                Guid.Empty,
+                ScanStage.Trigger,
+                ScanFailureCode.Unexpected,
+                exception);
+        }
+    }
+
+    private void AppendStartupWarning(string warning) =>
+        _startupWarning = string.IsNullOrWhiteSpace(_startupWarning)
+            ? warning
+            : $"{_startupWarning} {warning}";
+
     private void InitializeModelSelector()
     {
         List<TranslationModelChoice> choices =
@@ -954,7 +1054,8 @@ public partial class MainWindow : Window
             new("比較用 — GPT-5.4 nano", OpenAiTranslatorOptions.BudgetModel),
         ];
 
-        string selectedModel = _openAiTranslator?.Model ?? OpenAiTranslatorOptions.DefaultModel;
+        OpenAiTextTranslator? translator = _analyzer.Current.OpenAiTranslator;
+        string selectedModel = translator?.Model ?? OpenAiTranslatorOptions.DefaultModel;
         TranslationModelChoice? selectedChoice = choices.FirstOrDefault(
             choice => string.Equals(choice.ModelId, selectedModel, StringComparison.Ordinal));
         if (selectedChoice is null)
@@ -965,10 +1066,10 @@ public partial class MainWindow : Window
 
         TranslationModelComboBox.ItemsSource = choices;
         TranslationModelComboBox.SelectedItem = selectedChoice;
-        TranslationModelComboBox.IsEnabled = _openAiTranslator is not null;
-        TranslationModelHintText.Text = _openAiTranslator is null
+        TranslationModelComboBox.IsEnabled = translator is not null;
+        TranslationModelHintText.Text = translator is null
             ? "OpenAIを有効にした場合に選択できます"
-            : $"次回のSCANから反映（従量課金・1起動最大{_openAiTranslator.MaxRequestsPerSession}回）";
+            : $"次回のSCANから反映（従量課金・1起動最大{translator.MaxRequestsPerSession}回）";
         _modelSelectorInitializing = false;
     }
 
@@ -976,26 +1077,22 @@ public partial class MainWindow : Window
         DetailText.Text =
             $"{_captureConfiguration} / {_ocrInfo} / {_translationStatus} / {_oscStatus} / ログ: {_logger.LogDirectory}";
 
-    private string CreateOpenAiTranslationStatus(string model) =>
-        $"翻訳API: OpenAI / {model}（従量課金・残り{_openAiTranslator?.RemainingRequests ?? 0}"
-        + $"/{_openAiTranslator?.MaxRequestsPerSession ?? 0}回）";
+    private string CreateOpenAiTranslationStatus(string model)
+    {
+        OpenAiTextTranslator? translator = _analyzer.Current.OpenAiTranslator;
+        return $"翻訳API: OpenAI / {model}（従量課金・残り{translator?.RemainingRequests ?? 0}"
+            + $"/{translator?.MaxRequestsPerSession ?? 0}回）";
+    }
 
-    private string CreateOpenAiUsageSuffix() => _openAiTranslator is null || !_hasOpenAiApiKey
-        ? string.Empty
-        : $" / 翻訳API残り {_openAiTranslator.RemainingRequests}/{_openAiTranslator.MaxRequestsPerSession}回";
+    private string CreateOpenAiUsageSuffix()
+    {
+        TranslationRuntime runtime = _analyzer.Current;
+        return runtime.OpenAiTranslator is null || !runtime.HasEffectiveApiKey
+            ? string.Empty
+            : $" / 翻訳API残り {runtime.OpenAiTranslator.RemainingRequests}/{runtime.OpenAiTranslator.MaxRequestsPerSession}回";
+    }
 
     private sealed record TranslationModelChoice(string DisplayName, string ModelId);
 
     private sealed record ResultPanelAnchorChoice(string DisplayName, ResultPanelAnchor Anchor);
-
-    private sealed class ConfigurationFailureTranslator(string message) : ITextTranslator
-    {
-        public Task<TranslationOutput> TranslateToJapaneseAsync(
-            string sourceText,
-            CancellationToken cancellationToken) =>
-            Task.FromException<TranslationOutput>(new ScanException(
-                ScanFailureCode.TranslationNotConfigured,
-                ScanStage.Translation,
-                message));
-    }
 }
