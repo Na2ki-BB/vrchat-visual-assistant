@@ -4,7 +4,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 
 現在は **左手首ランチャー、OCR、任意のOpenAI翻訳まで実装済み** です。SteamVR Inputをpriority 0で観測するため、VRCVAの右トリガー操作中もVRChatの歩行入力を止めません。初回起動は3画面の案内に沿って設定でき、希望した場合はSteamVR起動時にVRCVAも1つだけ起動する登録を行います。OSCは既定では無効の高度な回復経路です。翻訳も専用キーを保存した場合だけ有効になり、未登録ならOCRした英語だけをローカル表示します。結果パネルは左手追従を既定とし、右手・正面への切替と配置調整に対応します。
 
-確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。XSOverlayは短いSCAN開始・エラー通知だけに使い、OCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。
+確認対象の実機環境は **Meta Quest 3SのPCVR + SteamVR + XSOverlay + OVR Advanced Settings** です。WPF窓をXSOverlayのWindow Captureとして常設する案は、実機で「作成手順が長い、表示が大きい、コントローラークリックが機能しない」という問題が確認されたため不採用に変更しました。通常SCANではXSOverlayをエラー通知の補助にだけ使い、進捗とOCR/翻訳結果はVRCVA自身のSteamVRパネルへ表示します。モデル切替と明示的に起動した診断では、短い状態通知にも使います。
 
 > 非公式プロジェクトです。VRChat Inc.、Valve Corporation、OpenAIの承認・提携を示すものではありません。
 
@@ -18,7 +18,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - Windows内蔵OCRでローカル文字認識。通常認識が弱いときは画面全体を横帯に分けて自動再認識
 - OpenAI未設定時は外部送信せず、英語OCR結果を表示
 - 専用キーを明示登録した場合だけ、OCRテキストをOpenAI Responses APIで翻訳
-- 画面取得後のOCR中通知と失敗段階をXSOverlay通知としてVR内表示
+- 画面取得後のOCR中はSteamVRパネルで進捗を表示し、失敗時はXSOverlay通知も補助として使用
 - OCR/翻訳結果をSteamVR内の操作可能なパネルへ表示し、閉じるまで保持
 - 結果パネルを左手、右手、ヘッドセット正面へ追従させ、位置と大きさをVR内で見ながら調整して保存
 - 長い結果を画面上の前後ボタン、または右端のバーのクリックでページ移動
@@ -59,11 +59,11 @@ OpenAIを明示選択した場合の使用量は[OpenAI Usage Dashboard](https:/
 
 - Windows 10 version 2004 / build 19041 以降（Windows 11推奨）
 - 少人数ベータZIPを使う場合、.NET Runtimeの追加導入は不要。ソースからビルドする場合は.NET 8 SDK、framework-dependent開発版を直接使う場合は.NET 8 Desktop Runtime
-- PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。最小化した場合だけSCAN中に短時間、自動復元されます
+- PC版VRChat。デスクトップミラーは他のウィンドウに隠れていても構いません。Windows Graphics Captureへのフォールバック時に最小化していた場合だけ、SCAN中に短時間自動復元されます
 - 翻訳は任意のOpenAI Responses API。専用キーを登録しなければ、キャプチャとOCRだけを無料で利用可能
 - Windowsの英語OCR言語機能。未導入でもアプリは動作しますが、日本語認識器が英語を漢字や全角記号へ誤認識し、結果がほぼ読めなくなる場合があります
-- VR内通知にはSteamVRとXSOverlay（デスクトップだけで使う場合は不要）
-- VRコントローラーからSCANする暫定経路にはOVR Advanced Settings（キーボードなら不要）
+- VR内の通常表示にはSteamVR。XSOverlayは任意のエラー通知補助（デスクトップだけで使う場合はどちらも不要）
+- OVR Advanced Settingsは、手首ランチャーやキーボードが使えないときの任意の回復経路
 
 このリポジトリの確認環境は、Windows build 26200 + WSL2 Ubuntu 24.04.4 + Windows .NET SDK 8.0.422です。Visual Studioは不要です。
 
@@ -206,7 +206,7 @@ SCAN中もVRCVAの窓は消えたり再表示されたりしません。SteamVR�
 
 ## Meta Quest 3S + SteamVRで結果パネルを使う
 
-**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。受付・処理中・結果はVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）はエラー時の補助だけです。
+**XSOverlayのCreate OverlayやWindow Captureは作成しません。** 既に作った`VRChat Visual Assistant`の大きなオーバーレイは削除して構いません。受付・処理中・結果はVRCVAがSteamVRのOpenVR Overlay APIで直接表示します。XSOverlayのローカルExternal Message API（`127.0.0.1:42069/UDP`）は、通常SCANではエラー時の補助だけに使います。モデル切替と明示診断では短い状態も通知しますが、OCR・翻訳本文は送りません。
 
 1. Quest 3SをPCVR接続し、SteamVR、VRChat、VRChat Visual Assistantを起動します。XSOverlayは必須ではありません。
 2. 左手の`VRCVA`を開き、`翻訳 SCAN`を選びます。
@@ -236,7 +236,7 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll --st
 
 ヘッドセット内でパネルをページ移動し、本文下部の`閉じる ×`を選びます。PowerShellに`Overlay close event received.`と出れば、表示と閉じるイベントは成功です。2分以内に閉じられない場合は自動終了します。
 
-### OpenVRアイミラー取得を診断する（第1段階スパイク）
+### OpenVRアイミラー取得を診断する
 
 これは左右眼、DXGI形式、オーバーレイ除外を詳しく確認する開発用診断です。通常SCANは既に左眼アイミラーを優先しますが、この診断は左右を1回ずつ取得し、現行ウィンドウとの解像度差も表示します。SteamVRを自動起動せず、画像も自動保存しません。
 
@@ -281,9 +281,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
   --capture-route-check
 ```
 
-### 一度だけ: QuestコントローラーへSCANを割り当てる
+### 任意の回復経路: OVRASからSCANする
 
-導入済みのOVR Advanced Settingsには、VRコントローラー操作からキーボードショートカットを送る公式機能があります。VRCVAはこれを暫定のコントローラートリガーとして利用し、VRChatやXSOverlayへ入力を注入しません。以下を一度設定すれば、VRプレイ中に物理キーボードへ触れる必要はありません。
+通常はVRCVA自身の左手首ランチャーからSCANします。それが使えない場合のみ、OVR Advanced SettingsのSteamVRアクションからキーボードショートカットを送る回復経路を設定できます。VRCVAはVRChatやXSOverlayへ入力を注入しません。
 
 1. SteamVRを終了し、タスクマネージャー上の`AdvancedSettings.exe`も終了したことを確認します。
 2. Windows PowerShellで、まず変更なしの確認を実行します。
@@ -402,7 +402,7 @@ GUIの「画像で診断」も利用できます。選んだファイルを読�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-capture.ps1
 ```
 
-このスクリプトは開発用の英語テスト窓（プロセス名 `VRChat.exe`）だけを一時起動し、実際のWin32キャプチャとWindows OCRを通してから終了します。実際のVRChatが起動中なら、安全のため実行を拒否します。
+このスクリプトは開発用の英語テスト窓（プロセス名 `VRChat.exe`）だけを一時起動し、実際のWindows Graphics CaptureとWindows OCRを通してから終了します。実際のVRChatが起動中なら、安全のため実行を拒否します。
 
 実際のVRChatからウィンドウ単体キャプチャが利用できるか、画像保存・OCR本文表示なしで確認できます。
 

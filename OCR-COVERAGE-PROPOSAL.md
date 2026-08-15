@@ -1,6 +1,6 @@
 # OCR カバレッジ改善 意見書
 
-**状態:** 優先度1は実装済み。優先度2〜5は提案。2026-08-12の実機検証で行構造保持と全画面Cubic拡大を追加実装
+**状態:** 優先度1（primaryと帯のunion化 + 近似重複除去）は実装済み。行構造保持、全画面Cubic拡大、8 MP以上を1倍に抑える適応スケーリングも実装済み。優先度2〜5は提案のまま
 **対象:** `AdaptiveOcrEngine` を中心とした OCR 精度・レイテンシ・コストの改善
 **作成日:** 2026-08-12
 
@@ -16,7 +16,7 @@
 
 **結論: ある。しかも画面いっぱいの英語こそが最も見切れやすい。**
 
-現在の適応型 OCR は「全画面を 1 回 OCR し、結果が弱ければ画面を 3 本の横帯に分けて再認識する」という構造ですが、この「弱い」の判定方法に構造的な欠陥があります。
+現在の適応型 OCR は「全画面を 1 回 OCR し、結果が弱ければ画面を 3 本の横帯に分けて再認識する」という構造です。union化と近似重複除去は実装済みですが、この「弱い」の判定が ASCII 英数字の絶対量だけである点は残っています。
 
 ---
 
@@ -26,41 +26,41 @@
 
 ```
 EnhancementThreshold = 80   // 行 7
-MinimumImprovement   = 4    // 行 8
 ```
 
 1. 全画面を OCR（`primary`）
-2. `Score(primary.Text) >= 80` なら即 return（行 20）— 帯パスは走らない
-3. 未満なら帯 3 本を OCR し、`MergeUniqueLines` で統合（行 39）
-4. `Score(統合) < primaryScore + 4` なら `primary` を返す（行 40-43）
-5. 採用時は警告文を付与し、帯フレームを `finally` で確実に Dispose（行 54-60）
+2. `Score(primary.Text) >= 80` なら即 return—帯パスは走らない
+3. 未満なら帯 3 本を OCR する
+4. `primary.Text` を先頭にして帯結果と `MergeUniqueLines` で統合し、近似一致する重複行を除く
+5. 強化処理の警告文を付与し、帯フレームを `finally` で確実に Dispose
 
-`Score()`（行 81-100）は **ASCII 英数字 `[A-Za-z0-9]` の個数**です。空白・記号・非 ASCII は 0 点。Windows OCR が返す信頼度（confidence）は**一切使っていません**。既存テストが仕様を固定しています: `Score("Ab c-12_日本語") == 5`。
+`Score()` は **ASCII 英数字 `[A-Za-z0-9]` の個数**です。空白・記号・非 ASCII は 0 点。Windows OCR が返す信頼度（confidence）は使っていません。既存テストが `Score("Ab c-12_日本語") == 5` を固定しています。
 
 ### 2.2 帯の生成 — [`src/VrcVa.Windows/Ocr/WindowsOcrRegionSource.cs`](src/VrcVa.Windows/Ocr/WindowsOcrRegionSource.cs)
 
 - `RegionCount = 3`、全幅 × 高さ `(H+1)/2`
 - `startY = 0, round(maxStart/2), maxStart`（`maxStart = H - regionHeight`）
 - 1920×1080 なら `[0,540] / [270,810] / [540,1080]`
-- `scale = Math.Min(2d, min(MaxImageDimension/W, MaxImageDimension/h))` → **通常のミラー解像度では常に 2 倍拡大**
+- 帯の切り出し自体は1倍で行い、OCR時に元フレームと共通の適応スケールを1回だけ適用
+- 元フレームが8 MP未満なら最大2倍、8 MP以上なら1倍。どちらも `OcrEngine.MaxImageDimension` と16,777,216画素の上限を守る
 
 **帯の幾何自体は健全です。** 垂直方向は全域をカバーし、各帯の切断面は必ず隣接帯の内側に入るため、行が帯境界で失われることはありません。ここは変更不要です。
 
 ### 2.3 全画面パスは拡大しない（提案作成時点。現在は解消済み）
 
-提案作成時点では`MaxImageDimension`超過時に例外を投げるだけで、拡大も縮小もしませんでした。2026-08-12の実機比較後、全画面と帯で共通の最大2倍スケール計算と`BitmapInterpolationMode.Cubic`を使用する実装へ変更しました。
+提案作成時点では`MaxImageDimension`超過時に例外を投げるだけで、拡大も縮小もしませんでした。2026-08-12の実機比較後、全画面と帯で共通の`BitmapInterpolationMode.Cubic`を使い、8 MP未満は最大2倍、8 MP以上は1倍とする適応スケールへ変更しました。
 
 ### 2.4 その他の関連する契約
 
 | 箇所 | 事実 | 影響 |
 |---|---|---|
-| [`Models.cs:42`](src/VrcVa.Core/Models.cs#L42) | `CapturedFrame` が `byte[] encodedImage` を保持 | 帯を PNG 経由で渡すしかない（後述の往復コスト） |
-| [`Models.cs:93-96`](src/VrcVa.Core/Models.cs#L93-L96) | `OcrOutput` は `Text` / 言語 / 警告のみ | レイアウト情報を上位に渡せない |
-| [`Contracts.cs:8-11`](src/VrcVa.Core/Contracts.cs#L8-L11) | `IOcrEngine` に進捗チャネルがない | 帯パス中に進捗を出せない |
-| [`OcrAnalyzer.cs:17-21`](src/VrcVa.Core/OcrAnalyzer.cs#L17-L21) | 進捗報告は OCR 開始前の 1 回のみ | 数秒間メッセージが無変化 |
-| [`ScanPipeline.cs:81-85`](src/VrcVa.Core/ScanPipeline.cs#L81-L85) | `InlineProgress` が `.GetAwaiter().GetResult()` で同期ブロック | 進捗報告を増やす際の注意点 |
-| [`OpenAiTranslatorOptions.cs:16`](src/VrcVa.Infrastructure/OpenAiTranslatorOptions.cs#L16) | `MaxOutputTokens = 1_200` | 出力に天井あり、入力は青天井 |
-| [`OpenAiTextTranslator.cs:166-201`](src/VrcVa.Infrastructure/OpenAiTextTranslator.cs#L166-L201) | `ExtractOutputText` が `status` / `incomplete_details` を見ない | 切れた翻訳が成功として表示される |
+| [`Models.cs`](src/VrcVa.Core/Models.cs) | `CapturedFrame` が `byte[] encodedImage` を保持 | 帯を PNG 経由で渡すしかない（後述の往復コスト） |
+| [`Models.cs`](src/VrcVa.Core/Models.cs) | `OcrOutput` は `Text` / 言語 / 警告のみ | レイアウト情報を上位に渡せない |
+| [`Contracts.cs`](src/VrcVa.Core/Contracts.cs) | `IOcrEngine` に進捗チャネルがない | 帯パス中に進捗を出せない |
+| [`OcrAnalyzer.cs`](src/VrcVa.Core/OcrAnalyzer.cs) | 進捗報告は OCR 開始前の 1 回のみ | 数秒間メッセージが無変化 |
+| [`ScanPipeline.cs`](src/VrcVa.Core/ScanPipeline.cs) | `InlineProgress` が `.GetAwaiter().GetResult()` で同期ブロック | 進捗報告を増やす際の注意点 |
+| [`OpenAiTranslatorOptions.cs`](src/VrcVa.Infrastructure/OpenAiTranslatorOptions.cs) | 入力はUTF-8で4,000バイト、出力は1,200トークンが上限 | 入出力とも送信前に有界 |
+| [`OpenAiResponsesTextModelClient.cs`](src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs) | `ExtractOutputText` が `status` / `incomplete_details` を見ない | 打ち切り理由の警告は未実装 |
 
 ---
 
@@ -72,26 +72,28 @@ MinimumImprovement   = 4    // 行 8
 
 | 画面 | primaryScore | 帯パス | 実際に受ける処理 |
 |---|---|---|---|
-| 文字が少ない看板 | 20 | 走る | 2 倍拡大あり（手厚い） |
-| 掲示板いっぱいの英語 | 800 | **走らない** | 素の解像度のみ（手薄） |
+| 文字が少ない看板 | 20 | 走る | 全画面と帯を統合 |
+| 掲示板いっぱいの英語 | 800 | **走らない** | 全画面だけ（適応スケールは適用） |
 
 1000 文字あるうち 120 文字しか拾えなくても `120 >= 80` で「strong」判定となり、残り 880 文字を取りに行く経路が存在しません。**これが「見切れ」の本体です。**
 
-### 問題 2: 帯採用時に primary 固有の行が消える
+### 問題 2（解消済み）: 帯採用時に primary 固有の行が消える
 
-[`AdaptiveOcrEngine.cs:39`](src/VrcVa.Core/AdaptiveOcrEngine.cs#L39) の `MergeUniqueLines` に渡るのは `regionOutputs` **だけ**で、`primary` が含まれていません。帯が採用されると全画面パスだけが拾っていた行は捨てられます。`+4` のゲートは合計スコアで見るため、帯が +20 稼いで primary 固有の行を -10 失っても net +10 で採用され、その 10 文字は消えます。
+提案作成時は帯結果だけを統合していました。現在は `primary.Text` を先頭に含めるため、全画面パス固有の行は保持されます。
 
-### 問題 3: 重複除去の甘さがゲートを骨抜きにする
+### 問題 3（解消済み）: 重複除去の甘さがゲートを骨抜きにする
 
-帯は約 50% 重なるため同じ行が 2 本の帯に現れます。dedup が**行単位の完全一致（大小無視）**なので、`Emergency exit` と `Emergency exlt` のような 1 文字違いは両方残ります。結果、実質の情報量が増えていないのにスコアだけ約 2 倍になり、`+4` のゲートは自明に通過します。**加えて、この重複は翻訳の入力トークンをそのまま増やすため、現状すでに余計な料金を払っている可能性があります。**
+提案作成時は大小文字を無視した完全一致だけでした。現在は出現回数を保持する保守的な編集距離マッチを使い、帯の重なりによる近似重複を除いています。
 
 ### 問題 4: 翻訳が黙って切れる
 
-`max_output_tokens = 1200` は、画面いっぱいの英語を日本語訳する際に現実的に到達し得ます。`ExtractOutputText` は `status` を見ないため、**途中で切れた翻訳が何の警告もなく成功として表示されます**。
+`max_output_tokens = 1200` は、画面いっぱいの英語を日本語訳する際に現実的に到達し得ます。`OpenAiResponsesTextModelClient.ExtractOutputText` は `status` を見ないため、**途中で切れた応答の理由を警告できません**。
 
 ---
 
 ## 4. コスト分析
+
+以下の時間と画素数は提案作成時の旧実装を1920×1080で見積もった記録です。現行のOpenVRアイミラーと適応スケールの実測値は`DESIGN.md`を正とします。
 
 ### 4.1 処理コスト（1920×1080 想定・見積もり）
 
@@ -131,10 +133,10 @@ MinimumImprovement   = 4    // 行 8
 
 | 状態 | 相対量 |
 |---|---|
-| 現状・帯なし | ×1.0 |
-| 現状・帯採用（重複残りあり） | ×1.5 – 2.0 |
-| union 化のみ | ×1.6 – 2.2 |
-| **union 化 + 近似重複除去** | **×1.0 – 1.2** |
+| 帯なし | ×1.0 |
+| 旧実装・帯採用（重複残りあり） | ×1.5 – 2.0 |
+| union 化のみ（未採用） | ×1.6 – 2.2 |
+| **現行のunion化 + 近似重複除去** | **×1.0 – 1.2** |
 
 なお `OpenAiTranslatorOptions` は `BudgetModel` / `QualityModel` を持ち既定は Quality 側です。**モデル選択のほうが、本提案のどの変更よりも桁違いに大きい料金レバーです。** 料金最適化が目的ならそちらを先に検討してください。
 
@@ -142,15 +144,15 @@ MinimumImprovement   = 4    // 行 8
 
 ## 5. 採用する改善案
 
-### 優先度 1: union 化 + 近似重複除去（セットで実施）
+### 優先度 1（実装済み）: union 化 + 近似重複除去
 
-処理時間の増加ゼロ、料金はむしろ減少方向、リスク最小。**ここから着手すること。**
+処理時間を増やさず、primary固有行の保持と帯重複の抑制を実装しました。
 
 - `MergeUniqueLines` に `primary.Text` を**先頭に**含める
-- 結果が primary の上位集合になることが保証されるため、`MinimumImprovement` による比較ゲート（行 40-43）を**削除**する
+- 結果が primary の上位集合になるため、`MinimumImprovement` による比較ゲートを削除済み
 - dedup を近似一致に変更する（正規化キー、または編集距離ベース）
 
-**必ずセットで行う理由:** 現状の「勝った方を選ぶ」構造は、primary が誤認識したゴミ行を丸ごと捨てるフィルタとしても機能していました。union 化はその安全弁を外すため、近似重複除去による品質担保が前提になります。片方だけの実装は品質を悪化させ得ます。
+**セットで行った理由:** 提案時の「勝った方を選ぶ」構造は、primary が誤認識したゴミ行を丸ごと捨てるフィルタとしても機能していました。union 化はその安全弁を外すため、近似重複除去による品質担保を同時に実装しました。
 
 近似一致の閾値は緩めすぎないこと。メニュー項目のような**正当な繰り返し行**を消してはいけません。
 
@@ -161,7 +163,7 @@ MinimumImprovement   = 4    // 行 8
 現状、帯パスが数秒動く間、ユーザーが見ているのは「画像から文字を認識しています…」という変化しない 1 行だけです。3 秒の無変化は「処理中」ではなく「**固まった**」と読まれます。
 
 - `IOcrEngine.RecognizeAsync` に進捗チャネルを追加し、`AdaptiveOcrEngine` が「強化処理に切り替えた」旨を報告できるようにする
-- **注意:** [`ScanPipeline.cs:81-85`](src/VrcVa.Core/ScanPipeline.cs#L81-L85) の `InlineProgress` は `.GetAwaiter().GetResult()` で同期ブロックします。報告を増やすと、そのたびに OCR スレッドが WPF ディスパッチと XSOverlay の UDP 送信を待ちます。**報告を増やすなら `IProgress` の受け方も同時に見直してください。**
+- **注意:** [`ScanPipeline.cs`](src/VrcVa.Core/ScanPipeline.cs) の `InlineProgress` は `.GetAwaiter().GetResult()` で同期ブロックします。報告を増やすと、そのたびに OCR スレッドが現行のWPF/SteamVR表示更新を待つため、**報告を増やすなら `IProgress` の受け方も同時に見直してください。**
 
 ### 優先度 3: カバレッジ判定への置き換え（本丸）
 
@@ -202,30 +204,30 @@ MinimumImprovement   = 4    // 行 8
 
 ### 対象外: キャプチャ段の見切れ
 
-HWND 指定の VRChat ウィンドウのみをキャプチャするため、VR 内の実 FOV とデスクトップミラーの画は一致しません。ミラーに写っていない文字は最初から画素として存在せず、**OCR 側では原理的に救えません。** 本提案の対象外です。
+現行の主経路はOpenVRの片眼アイミラー、代替経路はHWND指定のWindows Graphics Captureです。どちらでも取得画像に写っていない文字は画素として存在せず、**OCR 側では原理的に救えません。** 本提案の対象外です。
 
 ---
 
 ## 7. 受け入れ基準
 
-1. 画面いっぱいの英語（primaryScore が 80 を大きく超える場面）で、従来より認識行数が増えること
-2. 帯パス採用時に、primary のみが拾っていた行が結果から消えないこと
-3. 帯の重なりに由来する近似重複行が結果に残らないこと
-4. 正当な繰り返し行（同一文言のメニュー項目など）が誤って除去されないこと
-5. 帯パス中に進捗表示が変化すること
-6. 翻訳が `max_output_tokens` で打ち切られた場合に警告が表示されること
+- [ ] 画面いっぱいの英語（primaryScore が 80 を大きく超える場面）で、従来より認識行数が増えること
+- [x] 帯パス採用時に、primary のみが拾っていた行が結果から消えないこと
+- [x] 帯の重なりに由来する近似重複行が結果に残らないこと
+- [x] 正当な繰り返し行（同一文言のメニュー項目など）が誤って除去されないこと
+- [ ] 帯パス中に進捗表示が変化すること
+- [ ] 翻訳が `max_output_tokens` で打ち切られた場合に警告が表示されること
 
 ---
 
 ## 8. 既存テストへの影響
 
-[`tests/VrcVa.Core.Tests/AdaptiveOcrEngineTests.cs`](tests/VrcVa.Core.Tests/AdaptiveOcrEngineTests.cs) は**全面的な見直しが必要**です。実装前に必ず確認してください。
+[`tests/VrcVa.Core.Tests/AdaptiveOcrEngineTests.cs`](tests/VrcVa.Core.Tests/AdaptiveOcrEngineTests.cs) には優先度1のunion化・近似重複除去・正当な繰り返し保持のテストが反映済みです。優先度3で判定基準を変える場合は、次の前提を再度見直します。
 
 | テスト | 影響 |
 |---|---|
 | `RecognizeAsync_SkipsEnhancementWhenPrimaryTextIsStrong` | 優先度 3 で判定基準が変わるため前提が変化 |
-| `RecognizeAsync_UsesBetterOverlappingRegionTextAndRemovesDuplicates` | union 化で primary の `"EXIT"` が結果先頭に加わるため**期待値が変わる** |
-| `RecognizeAsync_KeepsPrimaryTextWhenRegionsAreNotBetter` | union は常に primary の上位集合になるため**テストの前提そのものが消滅**。「上位集合であること」を検証する内容に書き換えること |
+| `RecognizeAsync_UsesBetterOverlappingRegionTextAndRemovesDuplicates` | 優先度1を現在検証済み。優先度3で帯起動条件が変わる場合はfixtureを更新 |
+| `RecognizeAsync_UnionsPrimaryAndRegionTextWithoutImprovementGate` | primaryが強化結果の上位集合に残る現行契約を維持 |
 | `Score_CountsOnlyAsciiLettersAndDigits` | 優先度 3 で `Score` を廃止するため**削除**対象 |
 
 帯フレームが `Dispose` されることを検証している箇所（行 44-45）は**維持してください**。プライバシー要件です。
@@ -248,7 +250,7 @@ HWND 指定の VRChat ウィンドウのみをキャプチャするため、VR �
 ## 10. 推奨する実施順序
 
 ```
-優先度 1（union 化 + 近似重複除去）  ← ここから。低リスク・即効・料金減
+優先度 1（union 化 + 近似重複除去）  ← 実装済み
         ↓
 優先度 2（進捗表示）                 ← 知覚レイテンシの改善
         ↓
