@@ -52,16 +52,20 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     {
         if (!outcome.IsSuccess || outcome.Result is null)
         {
-            await _dispatcher.InvokeAsync(_panel.Hide, DispatcherPriority.Normal, cancellationToken);
+            await _dispatcher.InvokeAsync(
+                () =>
+                {
+                    _panel.Hide();
+                    _panel.ReturnToLauncher();
+                },
+                DispatcherPriority.Normal,
+                cancellationToken);
             return;
         }
 
-        bool ocrOnly = string.IsNullOrWhiteSpace(outcome.Result.JapaneseText);
-        string resultTitle = ocrOnly ? "OCR結果（翻訳未設定）" : "日本語訳";
-        string title = $"{resultTitle} — {CaptureSourceDisplayName.Get(outcome.Result.CaptureSourceKind)}";
-        string body = ocrOnly
-            ? outcome.Result.SourceText
-            : outcome.Result.JapaneseText;
+        ResultSection primary = outcome.Result.PrimarySection;
+        string title = $"{primary.Title} — {CaptureSourceDisplayName.Get(outcome.Result.CaptureSourceKind)}";
+        string body = primary.Text;
 
         try
         {
@@ -85,6 +89,9 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
                 exception);
         }
 
+        await _dispatcher.InvokeAsync(
+            () => _panel.ReturnToLauncher(),
+            DispatcherPriority.Normal);
         await ReportFallbackOnceAsync(cancellationToken);
     }
 

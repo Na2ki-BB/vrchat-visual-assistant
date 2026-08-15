@@ -227,6 +227,8 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 ## Post-MVP Milestone D — Interactive SteamVR result panel
 
+**Implemented**
+
 - [x] Initialize OpenVR as `VRApplication_Overlay` only when SteamVR is already running; never start or modify VRChat.
 - [x] Render a static test texture and verify it appears over VRChat.
 - [x] Feed a text texture from the existing `IResultRenderer` contract.
@@ -238,19 +240,86 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [x] Keep the WPF renderer and XSOverlay error fallback when SteamVR is unavailable.
 - [x] Stop sending successful long-form results as fixed-duration XSOverlay notifications.
 - [x] Verify that overlay rendering never logs or persists OCR/translation content.
+- [x] Add left/right controller-relative transforms, HMD fallback, a large-target in-VR position/size calibration screen, and atomic non-secret settings persistence for a wrist-like position.
+
+**Completed device evidence**
+
 - [x] Device acceptance: read at leisure, close immediately, scroll a long result, and run another scan without returning to desktop.
 - [x] Device-check automatic interaction, explicit close/input restoration, OSC Action Menu settle delay, and the resized WPF window.
 - [x] Device-check the ordered owned-overlay sequence (immediate acknowledgement, capture, OCR, result), flicker-free page navigation, laser page selection, and explicit close/input restoration. Minor visual polish remains acceptable follow-up work.
-- [x] Add left/right controller-relative transforms, HMD fallback, a large-target in-VR position/size calibration screen, and atomic non-secret settings persistence for a wrist-like position.
 - [x] Device-check in-VR adjustment/save/cancel, calibrated pointer alignment, and the next SCAN after leaving calibration.
+
+**Device evidence still required**
+
 - [ ] Device-check left/right/HMD placement and saved placement after a normal VRCVA restart.
-- [ ] Add optional SteamVR input actions only after overlay stability is proven.
 
 ## Post-MVP Milestone E — Analyzer expansion
 
-- [ ] Add analyzer capability metadata, typed inputs/outputs, and explicit data-boundary labels.
+- [x] Add analyzer capability metadata, typed inputs/outputs, and explicit data-boundary labels through the compile-time feature descriptors and feature-neutral result sections.
 - [x] Add the OCR-only analyzer used when no translation provider is selected.
 - [ ] Add multilingual translation analyzers.
 - [ ] Add opt-in vision/VQA and summarization providers.
 - [ ] Add puzzle-hint/object-recognition analyzers with clear uncertainty display.
 - [ ] Add web search only as a distinct opt-in capability with query preview and source links.
+
+## Post-MVP Milestone F — SteamVR pass-through input and wrist launcher
+
+Implementation status and headset acceptance are intentionally separate. An automated test or a successful historical click is not device acceptance for the current build.
+
+**Implementation**
+
+- [x] Add an OpenVR Input 2.0 action manifest and Oculus Touch default binding without joystick actions.
+- [x] Add ABI-checked `IVRInput_010`, right-hand pose, and `IVROverlay_027` intersection adapters without a new package.
+- [x] Add `--steamvr-input-pass-through-check`; keep product interaction unchanged until its device gate passes.
+- [x] Define shared logical-surface primitives for texture drawing, pointer conversion, and hit testing, with direct edge, corner, +/-1 pixel, and coordinate-transform tests.
+- [x] Replace result, page, scrollbar, close, and calibration mouse events with the priority-zero VRCVA pointer.
+- [x] Keep `MakeOverlaysInteractiveIfVisible` false; input failure disables only VRCVA controls rather than taking scene input.
+- [x] Replace joystick page navigation with visible previous/next controls and the existing scrollbar.
+- [x] Keep Previous/Next/Close in a fixed visible body control rail whose rendered and hit rectangles are the same shared values; the title-only header is not an action surface on the supported runtime.
+- [x] Add the left-wrist `DimChip -> ArmedChip -> Menu -> Scanning -> Result` state machine with pose-loss and cancellation cleanup.
+- [x] Persist a launcher-specific left-controller transform and common chip/menu scale in versioned non-secret settings, with v1/v2 defaults and lossless version-3 Euler-to-quaternion migration.
+- [x] Align the default left-hand result position and orientation to the saved VRCVA/SCAN launcher, migrate version-1 through version-4 left-hand result poses once in settings version 5, and follow later launcher saves only while the result pose still matches the old launcher; preserve result width and deliberately independent result placement.
+- [x] Add a VR-only launcher calibration surface for XYZ, three-axis local rotation, scale, reset, cancel, and save; quaternion orientation and version-3 Euler migration prevent axis collapse near singularities.
+- [x] Hide launcher/result/cursor surfaces under capture suppression before the established eye-mirror discard sequence.
+- [x] Configure one full 1280x720 OpenVR intersection mask, distinguish native misses from selected-view mapping rejects in diagnostics, and render each interactive result page through a matching full 1280x720 texture view. Integrated tests cover `raw intersection -> full view -> logical point -> hit test` for result pages 1/2/3; generic atlas-view tests remain for atlas-backed surfaces. The header remains display-only.
+- [x] Keep the visible cursor center at the native OpenVR intersection point and use overlay sort order for stacking; a panel-normal offset is forbidden because it creates view-dependent parallax from the logical hit target.
+
+**Device evidence**
+
+- [x] Pass-through gate: Quest 3S received exactly 20/20 VRCVA right-trigger edges with valid right-hand poses while walking continuously in VRChat, without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
+- [ ] Device gate: on the current Windows Release build, activate every enabled Previous/Next/Close control at its visible body-rail rectangle on full-texture result pages 1/2/3, verify disabled controls do nothing, sweep the full lower rail without cursor loss, confirm the scrollbar remains usable, and verify the visible cursor center stays on the hit target while moving the HMD. Then start another SCAN and confirm the status atlas returns; record any page-change flash. The header is intentionally display-only.
+- [ ] Device gate: complete ten captures with zero launcher/result/cursor marker in the adopted eye image after capture suppression.
+- [ ] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify placement, facing feedback, menu hit targets, and walking input remain correct.
+- [ ] Device gate: from that saved launcher pose, select SCAN and verify the result replaces the menu at the same position and orientation without moving the left hand; then verify result Reset, another SCAN, and a normal VRCVA restart preserve the intended independent result size/adjustment.
+
+**Deferred or superseded**
+
+- [-] Add a second optional SteamVR input-action interaction route. This is superseded by the shipped priority-zero action set and VRCVA-owned pointer; duplicating that route would recreate two coordinate/input contracts.
+- [ ] Keep desktop SCAN as recovery; demote OSC/OVRAS to advanced fallback documentation only after full device acceptance.
+
+## Post-MVP Milestone G — small-group onboarding and stable startup
+
+- [x] Add a versioned application settings store and migrate version-1 result-panel placement without losing it.
+- [x] Store onboarding and auto-launch preferences only; prove serialized settings never contain an API key or OCR/result text.
+- [x] Add a single-instance guard for manual plus SteamVR launches.
+- [>] Generate/register a fixed-key SteamVR application manifest and enable auto-launch only after an explicit wizard choice. Generation, ABI checks, and typed registration flow are complete; real SteamVR registration remains a device check.
+- [x] Treat SteamVR-not-running registration as pending, never start SteamVR as a side effect, and preserve desktop operation.
+- [x] Add a three-step first-run wizard for SteamVR startup, English OCR readiness, and optional OpenAI BYOK.
+- [x] Keep the normal desktop window minimized for `--steamvr-autostart`, with an obvious way to reopen settings.
+- [x] Make API-key save/delete affect the next SCAN without restart while preserving one process-wide ten-attempt limit.
+- [x] Keep Credential Manager as the only persistent API-key store and the official OpenAI endpoint as the only saved-key destination.
+- [x] Add a dependency-free self-contained beta publish path and document one stable extraction folder; do not build a commercial installer.
+
+## Post-MVP Milestone H — feature foundation and AI-development harness
+
+- [x] Add compile-time feature descriptors/catalog and keep unknown feature IDs as typed failures.
+- [x] Separate backend selection/credential availability, process-lifetime usage policy, provider transport, and feature-specific prompt/result mapping.
+- [x] Preserve local-only/no-key behavior and prove it performs zero HTTP requests.
+- [x] Keep dynamic plug-ins, autonomous loops, arbitrary tools, vision uploads, and managed accounts out of this slice.
+- [x] Prove the boundary with an unregistered summarization feature and fake text-model client before enabling another paid provider. It is not exposed in the UI and cannot create a new paid request path.
+- [x] Prepare a repository-local `vrcva-development` Skill using the official skill scaffold.
+- [x] Include project workflow, privacy boundaries, OpenVR ABI/coordinate rules, verification commands, review gates, and evidence format.
+- [x] Add setup instructions only; do not copy the Skill into a personal skill directory or change Codex/Claude settings.
+- [x] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes. The final runbook path covers restore, focused/full verification, untracked files, baseline format failures, secret inspection, and device-evidence boundaries without installing the Skill.
+
+Phase 3 completion requires Windows Release build/tests/format, `git diff --check`, a tracked-file secret scan, independent correctness review, and the Quest 3S acceptance gates above. Missing hardware evidence must remain explicitly unchecked rather than being inferred from unit tests.

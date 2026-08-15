@@ -22,7 +22,7 @@ public sealed class OpenVrOverlayCaptureSequenceTests
             CancellationToken.None);
 
         Assert.Equal(
-            ["hide-confirm", "wait", "wait", "wait", "capture", "wait", "capture"],
+            ["hide-confirm", "wait", "wait", "wait", "capture", "wait", "capture", "suppress-end"],
             overlay.Events);
         Assert.Equal(2, frames.Count);
         Assert.True(frames[0].ContainsMarker);
@@ -30,6 +30,19 @@ public sealed class OpenVrOverlayCaptureSequenceTests
         Assert.False(adopted.ContainsMarker);
         Assert.False(adopted.IsDisposed);
         adopted.Dispose();
+    }
+
+    [Fact]
+    public void CaptureAfterOverlayHidden_ReleasesSuppressionWhenHideFails()
+    {
+        FailingHideOverlay overlay = new();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            OpenVrOverlayCaptureSequence.CaptureAfterOverlayHidden(
+                overlay,
+                () => new SyntheticFrame(containsMarker: false),
+                CancellationToken.None));
+        Assert.True(overlay.SuppressionEnded);
     }
 
     private sealed class SyntheticOverlay : IOpenVrOverlayCaptureGate
@@ -44,6 +57,8 @@ public sealed class OpenVrOverlayCaptureSequenceTests
             _events.Add("hide-confirm");
         }
 
+        public void EndCaptureSuppression() => _events.Add("suppress-end");
+
         public void WaitFrameSync(uint timeoutMilliseconds = 1000) => _events.Add("wait");
 
         public void RecordCapture() => _events.Add("capture");
@@ -56,6 +71,19 @@ public sealed class OpenVrOverlayCaptureSequenceTests
         public bool IsDisposed { get; private set; }
 
         public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class FailingHideOverlay : IOpenVrOverlayCaptureGate
+    {
+        public bool SuppressionEnded { get; private set; }
+
+        public void HideAndConfirmInvisible(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("synthetic hide failure");
+
+        public void EndCaptureSuppression() => SuppressionEnded = true;
+
+        public void WaitFrameSync(uint timeoutMilliseconds = 1000) =>
+            throw new InvalidOperationException("wait must not run");
     }
 }
 
@@ -108,26 +136,10 @@ public sealed class ResultPanelTextureTests
     }
 
     [Theory]
-    [InlineData(173, 517.5, 173, 202.5)]
-    [InlineData(795, 357.5, 795, 362.5)]
-    [InlineData(188, 160, 188, 560)]
-    public void MapFullTexturePointer_MapsOpenVrBottomOriginToLogicalUi(
-        float rawX,
-        float rawY,
-        float expectedX,
-        float expectedY)
-    {
-        (float actualX, float actualY) = ResultPanelTexture.MapFullTexturePointer(rawX, rawY);
-
-        Assert.Equal(expectedX, actualX, precision: 2);
-        Assert.Equal(expectedY, actualY, precision: 2);
-    }
-
-    [Theory]
-    [InlineData(1020, 0)]
-    [InlineData(1188, 719)]
-    [InlineData(1100, 300)]
-    public void IsCloseButton_AcceptsLargeButton(float x, float y)
+    [InlineData(1020, 580)]
+    [InlineData(1180, 660)]
+    [InlineData(1100, 620)]
+    public void IsCloseButton_AcceptsVisibleBottomRailButton(float x, float y)
     {
         ResultPanelTexture texture = new();
 
@@ -135,14 +147,118 @@ public sealed class ResultPanelTextureTests
     }
 
     [Theory]
-    [InlineData(1019, 180)]
-    [InlineData(1189, 60)]
-    [InlineData(1235, 640)]
+    [InlineData(1019, 620)]
+    [InlineData(1181, 620)]
+    [InlineData(1100, 579)]
+    [InlineData(1100, 661)]
+    [InlineData(1100, 300)]
     public void IsCloseButton_RejectsPointsOutsideButton(float x, float y)
     {
         ResultPanelTexture texture = new();
 
         Assert.False(texture.IsCloseButton(x, y));
+    }
+
+    [Fact]
+    public void VisiblePageButtons_UseTheSameBoundsForHitTesting()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        Assert.Equal(ResultPanelAction.None, texture.HitTestResult(816, 620));
+        Assert.Equal(ResultPanelAction.NextPage, texture.HitTestResult(952, 620));
+        Assert.Equal(ResultPanelAction.Close, texture.HitTestResult(1100, 620));
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        Assert.Equal(1, texture.CurrentResultPage);
+        Assert.Equal(ResultPanelAction.PreviousPage, texture.HitTestResult(816, 620));
+        Assert.True(texture.Apply(ResultPanelAction.PreviousPage));
+        Assert.Equal(0, texture.CurrentResultPage);
+    }
+
+    [Fact]
+    public void ResultRailControls_UseSharedBoundsAtCornersAndOnePixelOutside()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.NextPageButtonBounds,
+            ResultPanelAction.NextPage);
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.CloseButtonBounds,
+            ResultPanelAction.Close);
+
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        AssertHitBounds(
+            texture,
+            ResultPanelTexture.PreviousPageButtonBounds,
+            ResultPanelAction.PreviousPage);
+    }
+
+    [Fact]
+    public void ResultRail_UsesFixedGeometryInsideTheBodyHitBandAndClearOfScrollbar()
+    {
+        Assert.Equal(
+            new System.Windows.Rect(748, 580, 136, 80),
+            ResultPanelTexture.PreviousPageButtonBounds);
+        Assert.Equal(
+            new System.Windows.Rect(884, 580, 136, 80),
+            ResultPanelTexture.NextPageButtonBounds);
+        Assert.Equal(
+            new System.Windows.Rect(1020, 580, 160, 80),
+            ResultPanelTexture.CloseButtonBounds);
+        Assert.Equal(
+            ResultPanelTexture.PreviousPageButtonBounds.Right,
+            ResultPanelTexture.NextPageButtonBounds.Left);
+        Assert.Equal(
+            ResultPanelTexture.NextPageButtonBounds.Right,
+            ResultPanelTexture.CloseButtonBounds.Left);
+
+        System.Windows.Rect scrollbarBounds = new(
+            ResultPanelTexture.ScrollTrackLeft,
+            ResultPanelTexture.BodyTop,
+            ResultPanelTexture.ScrollTrackRight - ResultPanelTexture.ScrollTrackLeft,
+            ResultPanelTexture.BodyBottom - ResultPanelTexture.BodyTop);
+        System.Windows.Rect[] controls =
+        [
+            ResultPanelTexture.PreviousPageButtonBounds,
+            ResultPanelTexture.NextPageButtonBounds,
+            ResultPanelTexture.CloseButtonBounds,
+        ];
+        foreach (System.Windows.Rect bounds in controls)
+        {
+            Assert.True(bounds.Left >= ResultPanelTexture.BodyLeft);
+            Assert.True(bounds.Right <= ResultPanelTexture.BodyRight);
+            Assert.True(bounds.Top > ResultPanelTexture.BodyTextBottom);
+            Assert.True(bounds.Top >= ResultPanelTexture.BodyTop);
+            Assert.True(bounds.Bottom <= ResultPanelTexture.BodyBottom);
+            Assert.False(bounds.IntersectsWith(scrollbarBounds));
+        }
+    }
+
+    [Fact]
+    public void HeaderArea_DoesNotExposeResultActions()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        for (int y = 0; y <= ResultPanelTexture.HeaderHeight; y++)
+        {
+            for (int x = 0; x <= ResultPanelTexture.PixelWidth; x++)
+            {
+                Assert.Equal(ResultPanelAction.None, texture.HitTestResult(x, y));
+            }
+        }
+    }
+
+    [Fact]
+    public void DisabledRailControls_ReturnNoneWithoutFallingThrough()
+    {
+        ResultPanelTexture texture = CreateScrollableTexture();
+
+        Assert.Equal(ResultPanelAction.None, texture.HitTestResult(816, 620));
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        Assert.True(texture.Apply(ResultPanelAction.NextPage));
+        Assert.Equal(ResultPanelAction.None, texture.HitTestResult(952, 620));
     }
 
     [Fact]
@@ -167,29 +283,8 @@ public sealed class ResultPanelTextureTests
         Assert.Equal(0, texture.CurrentResultPage);
     }
 
-    [Theory]
-    [InlineData(3, 1173, 460, 1066, 60)]
-    [InlineData(3, 1257, 419, 1234, 183)]
-    [InlineData(5, 1161, 207, 1042, 99)]
-    [InlineData(5, 1260, 32, 1240, 624)]
-    public void MapOpenVrPointer_MapsAtlasCoordinatesToVisiblePage(
-        int cell,
-        float openVrX,
-        float openVrY,
-        float expectedX,
-        float expectedY)
-    {
-        (float actualX, float actualY) = ResultPanelTexture.MapOpenVrPointer(
-            openVrX,
-            openVrY,
-            cell);
-
-        Assert.Equal(expectedX, actualX, precision: 0);
-        Assert.Equal(expectedY, actualY, precision: 0);
-    }
-
     [Fact]
-    public void Scroll_SelectsPreRenderedResultCellsWithoutRenderingAgain()
+    public void Scroll_AdvancesTheLegacyAtlasCellIndexWithTheCurrentPage()
     {
         ResultPanelTexture texture = CreateScrollableTexture();
 
@@ -212,6 +307,55 @@ public sealed class ResultPanelTextureTests
             texture.RenderRgba().Length);
     }
 
+    [Fact]
+    public void RenderCurrentResultRgba_RendersEachPageAsFullTextureAndMatchesAtlasCells()
+    {
+        ResultPanelTexture texture = new();
+        texture.SetContent(
+            "title",
+            string.Join('\n', Enumerable.Range(1, 80).Select(index => $"result line {index:D2}")));
+
+        byte[] firstPage = texture.RenderCurrentResultRgba();
+
+        Assert.Equal(
+            ResultPanelTexture.PixelWidth * ResultPanelTexture.PixelHeight * 4,
+            firstPage.Length);
+        Assert.Equal(3, texture.ResultPageCount);
+        Assert.True(texture.ResultTruncated);
+        Assert.Equal(0, texture.CurrentResultPage);
+
+        byte[] atlas = texture.RenderRgba();
+        byte[] previousPage = firstPage;
+        for (int expectedPage = 0; expectedPage < texture.ResultPageCount; expectedPage++)
+        {
+            byte[] currentPage = expectedPage == 0
+                ? firstPage
+                : texture.RenderCurrentResultRgba();
+
+            Assert.Equal(
+                ResultPanelTexture.PixelWidth * ResultPanelTexture.PixelHeight * 4,
+                currentPage.Length);
+            Assert.Equal(3, texture.ResultPageCount);
+            Assert.True(texture.ResultTruncated);
+            Assert.Equal(expectedPage, texture.CurrentResultPage);
+            Assert.True(FullTextureMatchesAtlasCell(
+                atlas,
+                currentPage,
+                texture.CurrentResultCell));
+
+            if (expectedPage > 0)
+            {
+                Assert.False(previousPage.AsSpan().SequenceEqual(currentPage));
+            }
+
+            previousPage = currentPage;
+            if (expectedPage < texture.ResultPageCount - 1)
+            {
+                Assert.True(texture.Apply(ResultPanelAction.NextPage));
+            }
+        }
+    }
+
     [Theory]
     [InlineData(1197, 300)]
     [InlineData(1269, 300)]
@@ -231,41 +375,106 @@ public sealed class ResultPanelTextureTests
         _ = texture.RenderRgba();
         return texture;
     }
+
+    private static bool FullTextureMatchesAtlasCell(
+        byte[] atlas,
+        byte[] fullTexture,
+        int atlasCell)
+    {
+        int column = atlasCell % ResultPanelTexture.AtlasColumns;
+        int row = atlasCell / ResultPanelTexture.AtlasColumns;
+        int fullStride = ResultPanelTexture.PixelWidth * 4;
+        int atlasStride = ResultPanelTexture.AtlasPixelWidth * 4;
+        int cellLeftBytes = column * fullStride;
+        int cellTop = row * ResultPanelTexture.PixelHeight;
+        for (int y = 0; y < ResultPanelTexture.PixelHeight; y++)
+        {
+            int atlasOffset = ((cellTop + y) * atlasStride) + cellLeftBytes;
+            int fullOffset = y * fullStride;
+            if (!atlas.AsSpan(atlasOffset, fullStride)
+                .SequenceEqual(fullTexture.AsSpan(fullOffset, fullStride)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void AssertHitBounds(
+        ResultPanelTexture texture,
+        System.Windows.Rect bounds,
+        ResultPanelAction expected)
+    {
+        (float X, float Y)[] inside =
+        [
+            ((float)bounds.Left + 1, (float)bounds.Top + 1),
+            ((float)bounds.Right - 1, (float)bounds.Top + 1),
+            ((float)bounds.Left + 1, (float)bounds.Bottom - 1),
+            ((float)bounds.Right - 1, (float)bounds.Bottom - 1),
+            ((float)bounds.Left + (float)(bounds.Width / 2), (float)bounds.Top),
+            ((float)bounds.Left + (float)(bounds.Width / 2), (float)bounds.Bottom),
+            ((float)bounds.Left, (float)bounds.Top + (float)(bounds.Height / 2)),
+            ((float)bounds.Right - 1, (float)bounds.Top + (float)(bounds.Height / 2)),
+        ];
+        foreach ((float x, float y) in inside)
+        {
+            Assert.Equal(expected, texture.HitTestResult(x, y));
+        }
+
+        (float X, float Y)[] outside =
+        [
+            ((float)bounds.Left - 1, (float)bounds.Top),
+            ((float)bounds.Right + 1, (float)bounds.Top),
+            ((float)bounds.Left, (float)bounds.Top - 1),
+            ((float)bounds.Left, (float)bounds.Bottom + 1),
+        ];
+        foreach ((float x, float y) in outside)
+        {
+            Assert.NotEqual(expected, texture.HitTestResult(x, y));
+        }
+    }
 }
 
 public sealed class ResultPanelImageUploadTrackerTests
 {
     [Theory]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, false)]
-    [InlineData(false, false, false)]
-    public void CalibrationCompletion_ReloadsAtlasOnlyForPendingPostCalibrationDisplay(
+    [InlineData((int)ResultPanelImageUploadKind.Calibration, true, false, true)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage, true, false, true)]
+    [InlineData((int)ResultPanelImageUploadKind.Calibration, true, true, false)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage, true, true, false)]
+    [InlineData((int)ResultPanelImageUploadKind.Calibration, false, false, false)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage, false, false, false)]
+    [InlineData((int)ResultPanelImageUploadKind.Atlas, true, false, false)]
+    public void FullTextureCompletion_ReloadsAtlasOnlyForPendingAtlasDisplay(
+        int completedUploadValue,
         bool showAfterImageLoad,
-        bool calibrationActive,
+        bool fullTextureStillActive,
         bool expected)
     {
+        ResultPanelImageUploadKind completedUpload =
+            (ResultPanelImageUploadKind)completedUploadValue;
         Assert.Equal(
             expected,
             SteamVrResultPanel.RequiresAtlasReloadAfterImageLoaded(
-                ResultPanelImageUploadKind.Calibration,
-                calibrationActive,
-                showAfterImageLoad));
-        Assert.False(
-            SteamVrResultPanel.RequiresAtlasReloadAfterImageLoaded(
-                ResultPanelImageUploadKind.Atlas,
-                calibrationActive,
+                completedUpload,
+                fullTextureStillActive,
                 showAfterImageLoad));
     }
 
-    [Fact]
-    public void CompletedCalibrationUpload_DoesNotMarkAtlasAsLoaded()
+    [Theory]
+    [InlineData((int)ResultPanelImageUploadKind.Calibration)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage)]
+    public void CompletedFullTextureUpload_DoesNotMarkAtlasAsLoaded(
+        int uploadKindValue)
     {
+        ResultPanelImageUploadKind uploadKind = (ResultPanelImageUploadKind)uploadKindValue;
         ResultPanelImageUploadTracker tracker = new();
 
-        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+        tracker.Begin(uploadKind);
         ResultPanelImageUploadKind completed = tracker.Complete();
 
-        Assert.Equal(ResultPanelImageUploadKind.Calibration, completed);
+        Assert.Equal(uploadKind, completed);
         Assert.False(tracker.InFlight);
         Assert.False(tracker.AtlasLoaded);
     }
@@ -283,24 +492,32 @@ public sealed class ResultPanelImageUploadTrackerTests
         Assert.True(tracker.AtlasLoaded);
     }
 
-    [Fact]
-    public void CalibrationUploadAfterAtlas_InvalidatesAtlasEvenAfterCompletion()
+    [Theory]
+    [InlineData((int)ResultPanelImageUploadKind.Calibration)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage)]
+    public void FullTextureUploadAfterAtlas_InvalidatesAtlasEvenAfterCompletion(
+        int uploadKindValue)
     {
+        ResultPanelImageUploadKind uploadKind = (ResultPanelImageUploadKind)uploadKindValue;
         ResultPanelImageUploadTracker tracker = new();
         tracker.Begin(ResultPanelImageUploadKind.Atlas);
         tracker.Complete();
 
-        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+        tracker.Begin(uploadKind);
         tracker.Complete();
 
         Assert.False(tracker.AtlasLoaded);
     }
 
-    [Fact]
-    public void ResetDuringCalibrationUpload_LeavesNoLoadedImageState()
+    [Theory]
+    [InlineData((int)ResultPanelImageUploadKind.Calibration)]
+    [InlineData((int)ResultPanelImageUploadKind.ResultPage)]
+    public void ResetDuringFullTextureUpload_LeavesNoLoadedImageState(
+        int uploadKindValue)
     {
+        ResultPanelImageUploadKind uploadKind = (ResultPanelImageUploadKind)uploadKindValue;
         ResultPanelImageUploadTracker tracker = new();
-        tracker.Begin(ResultPanelImageUploadKind.Calibration);
+        tracker.Begin(uploadKind);
 
         tracker.Reset();
 

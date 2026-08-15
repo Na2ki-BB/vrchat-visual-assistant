@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text.Json;
 
 namespace VrcVa.Windows.OpenVr;
 
@@ -27,6 +26,8 @@ internal sealed record ResultPanelPlacement(
     public const double MinimumWidthMeters = 0.25;
     public const double MaximumWidthMeters = 1.5;
 
+    private const float WristLauncherAlignmentTolerance = 1e-5f;
+
     public static ResultPanelPlacement Default => CreateDefault(ResultPanelAnchor.LeftHand);
 
     public static ResultPanelPlacement HeadsetFallback =>
@@ -34,15 +35,9 @@ internal sealed record ResultPanelPlacement(
 
     public static ResultPanelPlacement CreateDefault(ResultPanelAnchor anchor) => anchor switch
     {
-        ResultPanelAnchor.LeftHand => new(
-            anchor,
-            X: 0.08,
-            Y: 0.12,
-            Z: -0.28,
-            PitchDegrees: 0,
-            YawDegrees: 0,
-            RollDegrees: 0,
-            WidthMeters: 0.62),
+        ResultPanelAnchor.LeftHand => CreateAlignedToWristLauncher(
+            WristLauncherPlacement.Default,
+            widthMeters: 0.62),
         ResultPanelAnchor.RightHand => new(
             anchor,
             X: -0.08,
@@ -63,6 +58,94 @@ internal sealed record ResultPanelPlacement(
             WidthMeters: 1.15),
         _ => throw new ArgumentOutOfRangeException(nameof(anchor)),
     };
+
+    public static ResultPanelPlacement CreateAlignedToWristLauncher(
+        WristLauncherPlacement launcher,
+        double widthMeters)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        launcher.Validate();
+        (
+            double pitchDegrees,
+            double yawDegrees,
+            double rollDegrees) = launcher.Rotation.ToRzRyRxEulerDegrees();
+
+        ResultPanelPlacement placement = new(
+            ResultPanelAnchor.LeftHand,
+            launcher.X,
+            launcher.Y,
+            launcher.Z,
+            pitchDegrees,
+            yawDegrees,
+            rollDegrees,
+            widthMeters);
+        placement.Validate();
+        return placement;
+    }
+
+    public bool IsAlignedToWristLauncher(WristLauncherPlacement launcher)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        Validate();
+        launcher.Validate();
+
+        if (Anchor != ResultPanelAnchor.LeftHand)
+        {
+            return false;
+        }
+
+        ResultPanelTransform panelTransform = CreateTransform();
+        ResultPanelTransform launcherTransform = launcher.CreateTransform();
+        return IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M0,
+                launcherTransform.M0)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M1,
+                launcherTransform.M1)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M2,
+                launcherTransform.M2)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M3,
+                launcherTransform.M3)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M4,
+                launcherTransform.M4)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M5,
+                launcherTransform.M5)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M6,
+                launcherTransform.M6)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M7,
+                launcherTransform.M7)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M8,
+                launcherTransform.M8)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M9,
+                launcherTransform.M9)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M10,
+                launcherTransform.M10)
+            && IsWithinWristLauncherAlignmentTolerance(
+                panelTransform.M11,
+                launcherTransform.M11);
+    }
+
+    public ResultPanelPlacement FollowWristLauncherChange(
+        WristLauncherPlacement previousLauncher,
+        WristLauncherPlacement updatedLauncher)
+    {
+        ArgumentNullException.ThrowIfNull(previousLauncher);
+        ArgumentNullException.ThrowIfNull(updatedLauncher);
+        updatedLauncher.Validate();
+
+        return IsAlignedToWristLauncher(previousLauncher)
+            ? CreateAlignedToWristLauncher(updatedLauncher, WidthMeters)
+            : this;
+    }
 
     public void Validate()
     {
@@ -142,6 +225,12 @@ internal sealed record ResultPanelPlacement(
     private static double DegreesToRadians(double value) => value * Math.PI / 180;
 
     private static float ToFloat(double value) => checked((float)value);
+
+    private static bool IsWithinWristLauncherAlignmentTolerance(
+        float panelComponent,
+        float launcherComponent) =>
+        MathF.Abs(panelComponent - launcherComponent)
+            <= WristLauncherAlignmentTolerance;
 }
 
 internal readonly record struct ResultPanelTransform(
@@ -234,73 +323,4 @@ internal static class ResultPanelCalibration
         value,
         ResultPanelPlacement.MinimumPosition,
         ResultPanelPlacement.MaximumPosition);
-}
-
-internal sealed class ResultPanelPlacementStore
-{
-    private const int CurrentVersion = 1;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-    };
-
-    private readonly string _path;
-
-    public ResultPanelPlacementStore(string? path = null)
-    {
-        _path = path ?? System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VrcVa",
-            "settings.json");
-    }
-
-    public string Path => _path;
-
-    public ResultPanelPlacement Load()
-    {
-        if (!File.Exists(_path))
-        {
-            return ResultPanelPlacement.Default;
-        }
-
-        string json = File.ReadAllText(_path);
-        StoredSettings? stored = JsonSerializer.Deserialize<StoredSettings>(json, JsonOptions);
-        if (stored is null || stored.Version != CurrentVersion || stored.ResultPanel is null)
-        {
-            throw new InvalidDataException("The VRCVA settings file is invalid or unsupported.");
-        }
-
-        stored.ResultPanel.Validate();
-        return stored.ResultPanel;
-    }
-
-    public void Save(ResultPanelPlacement placement)
-    {
-        placement.Validate();
-        string? directory = System.IO.Path.GetDirectoryName(_path);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new InvalidOperationException("The VRCVA settings path has no directory.");
-        }
-
-        Directory.CreateDirectory(directory);
-        string temporaryPath = $"{_path}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            string json = JsonSerializer.Serialize(
-                new StoredSettings(CurrentVersion, placement),
-                JsonOptions);
-            File.WriteAllText(temporaryPath, json);
-            File.Move(temporaryPath, _path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
-    }
-
-    private sealed record StoredSettings(int Version, ResultPanelPlacement? ResultPanel);
 }

@@ -1,6 +1,3 @@
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using VrcVa.Core;
 
 namespace VrcVa.Infrastructure.Tests;
@@ -30,173 +27,93 @@ public sealed class OpenAiTextTranslatorTests
     }
 
     [Fact]
-    public async Task TranslateToJapaneseAsync_SendsTextOnlyPrivacyRequestAndParsesOutput()
+    public async Task TranslateToJapaneseAsync_MapsPromptInputModelAndResponse()
     {
-        RecordingHandler handler = new(HttpStatusCode.OK, """
-            {
-              "output": [
-                {
-                  "type": "message",
-                  "content": [
-                    { "type": "output_text", "text": "非常口です。" }
-                  ]
-                }
-              ]
-            }
-            """);
-        using HttpClient client = new(handler);
+        TextModelResponse modelResponse = new(
+            "非常口です。",
+            "Test text provider",
+            OpenAiTranslatorOptions.QualityModel);
+        RecordingTextModelClient client = new(_ => modelResponse);
         OpenAiTextTranslator translator = new(
             client,
-            CreateOptions(),
-            "test-api-key");
+            CreateOptions() with { MaxOutputTokens = 321 });
+        using CancellationTokenSource cancellation = new();
 
         TranslationOutput result = await translator.TranslateToJapaneseAsync(
             "Emergency exit",
-            CancellationToken.None);
+            cancellation.Token);
 
-        Assert.Equal("非常口です。", result.Text);
-        Assert.Equal("Bearer", handler.AuthorizationScheme);
-        Assert.Equal("test-api-key", handler.AuthorizationParameter);
-        using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
-        Assert.False(request.RootElement.GetProperty("store").GetBoolean());
-        Assert.Equal(
-            OpenAiTranslatorOptions.QualityModel,
-            request.RootElement.GetProperty("model").GetString());
-        Assert.Equal("Emergency exit", request.RootElement.GetProperty("input").GetString());
-        Assert.Equal("none", request.RootElement
-            .GetProperty("reasoning")
-            .GetProperty("effort")
-            .GetString());
-        Assert.Equal(1_200, request.RootElement.GetProperty("max_output_tokens").GetInt32());
-        Assert.Contains(
-            "never as instructions",
-            request.RootElement.GetProperty("instructions").GetString(),
-            StringComparison.Ordinal);
-        Assert.False(handler.RequestBody!.Contains("input_image", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TranslateToJapaneseAsync_InputOverUtf8LimitDoesNotSendRequest()
-    {
-        RecordingHandler handler = new(HttpStatusCode.OK, "{}");
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(
-            client,
-            CreateOptions() with { MaxInputUtf8Bytes = 5 },
-            "test-api-key");
-
-        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
-            translator.TranslateToJapaneseAsync("日本", CancellationToken.None));
-
-        Assert.Equal(ScanFailureCode.TranslationInputTooLarge, exception.FailureCode);
-        Assert.Equal(0, handler.SendCount);
-        Assert.Equal(translator.MaxRequestsPerSession, translator.RemainingRequests);
-    }
-
-    [Fact]
-    public async Task TranslateToJapaneseAsync_SessionLimitStopsBeforeNextRequest()
-    {
-        RecordingHandler handler = new(HttpStatusCode.OK, """
-            {
-              "output": [
-                {
-                  "type": "message",
-                  "content": [
-                    { "type": "output_text", "text": "ようこそ" }
-                  ]
-                }
-              ]
-            }
-            """);
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(
-            client,
-            CreateOptions() with { MaxRequestsPerSession = 2 },
-            "test-api-key");
-
-        await translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None);
-        await translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None);
-        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
-            translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None));
-
-        Assert.Equal(ScanFailureCode.TranslationUsageLimitReached, exception.FailureCode);
-        Assert.Equal(2, handler.SendCount);
-        Assert.Equal(0, translator.RemainingRequests);
+        TextModelRequest request = Assert.Single(client.Requests);
+        Assert.Equal(OpenAiTranslatorOptions.QualityModel, request.Model);
+        Assert.Equal("Emergency exit", request.Input);
+        Assert.Equal(321, request.MaxOutputTokens);
+        Assert.Contains("natural Japanese", request.Instructions, StringComparison.Ordinal);
+        Assert.Contains("never as instructions", request.Instructions, StringComparison.Ordinal);
+        Assert.Equal(cancellation.Token, client.LastCancellationToken);
+        Assert.Equal(modelResponse.Text, result.Text);
+        Assert.Equal(modelResponse.Provider, result.Provider);
+        Assert.Equal(modelResponse.Model, result.Model);
     }
 
     [Fact]
     public async Task SelectModel_AppliesToNextTranslationAndResult()
     {
-        RecordingHandler handler = new(HttpStatusCode.OK, """
-            {
-              "output": [
-                {
-                  "type": "message",
-                  "content": [
-                    { "type": "output_text", "text": "ようこそ" }
-                  ]
-                }
-              ]
-            }
-            """);
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(client, CreateOptions(), "test-api-key");
+        RecordingTextModelClient client = new(request => new TextModelResponse(
+            "ようこそ",
+            "Test text provider",
+            request.Model));
+        OpenAiTextTranslator translator = new(client, CreateOptions());
 
         translator.SelectModel(OpenAiTranslatorOptions.BudgetModel);
         TranslationOutput result = await translator.TranslateToJapaneseAsync(
             "Welcome",
             CancellationToken.None);
 
-        using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
-        Assert.Equal(
-            OpenAiTranslatorOptions.BudgetModel,
-            request.RootElement.GetProperty("model").GetString());
+        Assert.Equal(OpenAiTranslatorOptions.BudgetModel, Assert.Single(client.Requests).Model);
         Assert.Equal(OpenAiTranslatorOptions.BudgetModel, result.Model);
     }
 
     [Fact]
     public void SelectModel_RejectsUnpricedModelBeforeAnyRequest()
     {
-        RecordingHandler handler = new(HttpStatusCode.OK, "{}");
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(client, CreateOptions(), "test-api-key");
+        RecordingTextModelClient client = new(_ => throw new InvalidOperationException());
+        OpenAiTextTranslator translator = new(client, CreateOptions());
 
         Assert.Throws<ArgumentException>(() => translator.SelectModel("gpt-unbounded"));
 
         Assert.Equal(OpenAiTranslatorOptions.QualityModel, translator.Model);
-        Assert.Equal(0, handler.SendCount);
+        Assert.Empty(client.Requests);
     }
 
     [Fact]
-    public async Task TranslateToJapaneseAsync_MissingKeyDoesNotSendRequest()
+    public async Task TranslateToJapaneseAsync_EmptyTextDoesNotCallTextModel()
     {
-        RecordingHandler handler = new(HttpStatusCode.OK, "{}");
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(client, CreateOptions(), apiKey: null);
+        RecordingTextModelClient client = new(_ => throw new InvalidOperationException());
+        OpenAiTextTranslator translator = new(client, CreateOptions());
+
+        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
+            translator.TranslateToJapaneseAsync("  ", CancellationToken.None));
+
+        Assert.Equal(ScanFailureCode.NoTextDetected, exception.FailureCode);
+        Assert.Equal(ScanStage.Ocr, exception.Stage);
+        Assert.Empty(client.Requests);
+    }
+
+    [Fact]
+    public async Task TranslateToJapaneseAsync_RejectsEmptyTextModelResponse()
+    {
+        RecordingTextModelClient client = new(_ => new TextModelResponse(
+            "  ",
+            "Test text provider",
+            OpenAiTranslatorOptions.QualityModel));
+        OpenAiTextTranslator translator = new(client, CreateOptions());
 
         ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
             translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None));
 
-        Assert.Equal(ScanFailureCode.TranslationNotConfigured, exception.FailureCode);
-        Assert.Equal(0, handler.SendCount);
-    }
-
-    [Fact]
-    public async Task TranslateToJapaneseAsync_ClassifiesAuthenticationFailure()
-    {
-        RecordingHandler handler = new(
-            HttpStatusCode.Unauthorized,
-            "secret provider body",
-            requestId: "req_test_123");
-        using HttpClient client = new(handler);
-        OpenAiTextTranslator translator = new(client, CreateOptions(), "bad-key");
-
-        ScanException exception = await Assert.ThrowsAsync<ScanException>(() =>
-            translator.TranslateToJapaneseAsync("Welcome", CancellationToken.None));
-
-        Assert.Equal(ScanFailureCode.TranslationAuthenticationFailed, exception.FailureCode);
-        Assert.DoesNotContain("secret provider body", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("req_test_123", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(ScanFailureCode.TranslationFailed, exception.FailureCode);
+        Assert.Equal(ScanStage.Translation, exception.Stage);
+        Assert.Single(client.Requests);
     }
 
     [Fact]
@@ -233,40 +150,20 @@ public sealed class OpenAiTextTranslatorTests
         Timeout = TimeSpan.FromSeconds(2),
     };
 
-    private sealed class RecordingHandler(
-        HttpStatusCode statusCode,
-        string responseBody,
-        string? requestId = null)
-        : HttpMessageHandler
+    private sealed class RecordingTextModelClient(
+        Func<TextModelRequest, TextModelResponse> responseFactory) : ITextModelClient
     {
-        public int SendCount { get; private set; }
+        public List<TextModelRequest> Requests { get; } = [];
 
-        public string? RequestBody { get; private set; }
+        public CancellationToken LastCancellationToken { get; private set; }
 
-        public string? AuthorizationScheme { get; private set; }
-
-        public string? AuthorizationParameter { get; private set; }
-
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
+        public Task<TextModelResponse> GenerateAsync(
+            TextModelRequest request,
             CancellationToken cancellationToken)
         {
-            SendCount++;
-            RequestBody = request.Content is null
-                ? null
-                : await request.Content.ReadAsStringAsync(cancellationToken);
-            AuthorizationScheme = request.Headers.Authorization?.Scheme;
-            AuthorizationParameter = request.Headers.Authorization?.Parameter;
-            HttpResponseMessage response = new(statusCode)
-            {
-                Content = new StringContent(responseBody, Encoding.UTF8, "application/json"),
-            };
-            if (requestId is not null)
-            {
-                response.Headers.Add("x-request-id", requestId);
-            }
-
-            return response;
+            Requests.Add(request);
+            LastCancellationToken = cancellationToken;
+            return Task.FromResult(responseFactory(request));
         }
     }
 }

@@ -2,7 +2,7 @@
 
 Status: MVP implementation baseline
 
-Last updated: 2026-08-12 (Asia/Tokyo)
+Last updated: 2026-08-14 (Asia/Tokyo)
 
 ## 1. Problem
 
@@ -318,15 +318,75 @@ The receive-only OSCQuery subset now advertises Windows-assigned OSC/HTTP ports,
 
 ### Phase 1.7 — interactive VR result panel
 
-The XSOverlay notification evaluation exposed material limitations: fixed lifetime, no explicit close, and no long-text scrolling. The implemented VRCVA-owned OpenVR scene overlay uses the existing renderer contract, keeps a tracked-device-relative result until close/replacement, and retains WPF diagnostics and graceful fallback. It automatically takes laser input while visible and releases it on close/replacement, avoiding any separate interaction binding at the accepted cost of pausing VRChat movement during reading. The default anchor is the left controller; the right controller and HMD are selectable on the desktop. Fine-grained desktop sliders were rejected after immediate usability feedback because switching between the monitor and headset for every adjustment is impractical. A dedicated 1280×720 VR calibration texture instead provides eight large movement/size targets plus save/reset/cancel; every adjustment changes the overlay transform immediately without re-uploading its texture. Calibration deliberately uses one full texture whose dimensions match `SetOverlayMouseScale`, because device measurements showed that input Y for the 2×3 bounded atlas did not share the assumed one-third-cell mapping. This removes the mismatch rather than adding a device-specific correction. Values remain bounded and are atomically persisted as non-secret local settings only on explicit save. The controller role is resolved for every display instead of retaining a stale device index, and an unavailable selected controller uses the established HMD-relative placement for ordinary results.
+The XSOverlay notification evaluation exposed material limitations: fixed lifetime, no explicit close, and no long-text scrolling. The implemented VRCVA-owned OpenVR scene overlay uses the existing renderer contract, keeps a tracked-device-relative result until close/replacement, and retains WPF diagnostics and graceful fallback. Its first interaction path temporarily used SteamVR's global laser mode and therefore paused VRChat movement while reading; Phase 3 supersedes that path with priority-zero input observation, explicit overlay intersection, and a VRCVA-owned cursor. The default anchor is the left controller; its initial position and orientation are derived from the saved VRCVA/SCAN wrist-launcher transform so the result replaces the menu without requiring another wrist movement. Result width remains independent and larger for readability. Settings versions 1 through 4 migrate a left-anchored result pose to that saved launcher transform once while preserving the result width. A version-5 result that still has the same pose as the previous launcher follows a later launcher-calibration save, again preserving width; moving the result pose independently breaks that relationship, while changing only result size does not. This transform-derived rule avoids hidden persistence state and protects deliberate result calibration. Right-controller and HMD placements are not affected and remain selectable on the desktop. Fine-grained desktop sliders were rejected after immediate usability feedback because switching between the monitor and headset for every adjustment is impractical. A dedicated 1280×720 VR calibration texture instead provides eight large movement/size targets plus save/reset/cancel; every adjustment changes the overlay transform immediately without re-uploading its texture. Calibration deliberately uses one full texture whose dimensions match the logical surface. Values remain bounded and are atomically persisted as non-secret local settings only on explicit save. The controller role is resolved for every display instead of retaining a stale device index, and an unavailable selected controller uses the established HMD-relative placement for ordinary results.
 
-The same overlay owns OSC acknowledgement and OCR progress. A fixed 2x3 atlas contains three status views and up to three result pages. `SetOverlayRaw` is used only when the atlas content changes; joystick or scrollbar navigation calls only `SetOverlayTextureBounds`. This removes the compositor image replacement that caused a visible flash on every former pixel-scroll step. Text beyond the bounded VR atlas remains complete in the WPF view.
+The same overlay owns OSC acknowledgement and OCR progress. A fixed 2x3 atlas retains the three non-interactive status views. Interactive results instead upload only the current page as one 1280x720 texture, wait for `ImageLoaded`, select full bounds, and then re-enable pointer input. Page buttons and the scrollbar repeat that guarded upload for the new page. This deliberately accepts a possible brief page-change flash to remove the backing-atlas aspect ambiguity from the native intersection surface. Text beyond the three bounded VR pages remains complete in the WPF view.
 
-The result close action is rendered in a dedicated column inside the known interactive body area, separate from the scrollbar. Scene overlays do not opt into SteamVR dashboard Control Bar flags. The close column intentionally ignores vertical pointer position after atlas-to-page X conversion, so compositor-specific vertical hit offsets cannot strand the user in input-capture mode.
+The result header is title-only. Previous, Next, and Close live in a fixed, visibly rendered control rail inside the result body because the supported SteamVR/headset path did not provide a reliable pointer surface over the visible header. Rendering and hit testing consume the same shared rectangles; a control must not rely on an X-only column, ignore Y, or use an invisible fallback target. Result interaction uses one shared full-texture view for both the bounds sent to OpenVR and the inverse transform used for intersection. Atlas-backed status and launcher views retain the same selected-view invariant rather than independently reconstructing either side from a cell number.
+
+The 2026-08-15 recurrence exposed two independent layers that must not be
+collapsed into one diagnosis. Changing from result cell 3 to cell 4 produced
+the expected discontinuity in atlas-global raw UVs while mapping to a
+continuous 1280x720 logical point, and historical traces contain successful
+Next, Previous, and Close activations. That proves the post-intersection atlas
+inverse and button dispatch for those samples. Current traces also show a
+successful Close hit at logical Y≈656 followed by native `ComputeOverlayIntersection`
+misses lower on the still-visible surface; no managed rectangle or dispatch
+code runs for those misses. Treating either the header rectangle or the body
+rail rectangle as the whole root cause was therefore an invalid completion
+claim.
+
+The result overlay establishes its input surface explicitly with OpenVR's
+`SetOverlayIntersectionMask`: one 1280x720 rectangle matching the mouse scale.
+Pointer diagnostics distinguish a native OpenVR miss from a native hit rejected
+by the selected-view mapping and reset their bounded capture window when a new
+result starts. Despite the explicit full-surface mask, the 2026-08-15 current-
+build headset check found native misses near both the header and lower result
+surface. Result pages therefore use the same full 1280x720 texture shape that
+already produced stable calibration alignment, instead of selecting a 16:9
+cell from a 32:27 backing atlas. The header remains display-only and all result
+actions remain in the fixed body control rail. Do not add a guessed offset,
+move controls to hide a native-surface failure, or create an invisible target
+without new device evidence that first explains the runtime mismatch.
 
 ### Phase 4 — analyzer expansion
 
 Add typed analyzer selection and explicit data-boundary indicators for OCR-only, multilingual translation, VQA, summarization, puzzle hints, object recognition, and opt-in web search.
+
+### Phase 3 — wrist launcher, local-first setup, and feature foundation
+
+The next approved slice replaces the normal OVRAS/OSC launch path with a VRCVA-owned left-wrist launcher. SteamVR Input 2.0 is read with action-set priority `0`, so VRCVA observes the right trigger without suppressing VRChat's scene actions. The left joystick is absent from VRCVA's action manifest and remains dedicated to VRChat movement. The existing `MakeOverlaysInteractiveIfVisible` path is removed from ordinary result/menu use because OpenVR defines it as system-wide laser-mouse mode while the overlay is visible; that flag is the identified cause of movement loss.
+
+VRCVA computes the right-controller ray and overlay intersection itself. Pointer position, button rectangles, rendering, and hit testing share one logical surface specification. Interactive result pages and calibration use a full 1280x720 texture view. Atlas-backed status and launcher views additionally preserve one explicit coordinate chain: OpenVR's atlas-global normalized, lower-origin intersection UV; the exact selected texture bounds; then the top-origin logical surface used by both drawing and hit testing. The trigger's rising edge is accepted only while the pointer is over an enabled VRCVA control; a trigger already held when hover begins must be released before it can activate anything. Input failure disables only VRCVA interaction and never falls back to taking scene input. The same input route must serve the launcher, result pages, close button, scrollbar, and placement calibration. Joystick scrolling is retired so walking and reading do not share one physical control.
+
+The cursor overlay is centered at OpenVR's native tracking-space intersection point. It must not be displaced along the panel normal: even a small physical offset creates HMD-view-dependent parallax between the visible cursor and the logical hit point. Cursor-over-panel ordering is controlled solely by the cursor overlay's higher sort order. Tests must preserve the cursor center at the native intersection for both surface-normal signs and oblique rays.
+
+The initial device gate is `--steamvr-input-pass-through-check`: Quest 3S must report 20/20 right-trigger edges while the owner continuously walks in VRChat, with no Action Menu, OSC, OVRAS action, manual binding edit, or movement pause. This gate passed on 2026-08-14: all 20 edges were received with an active action set and valid right-hand poses, and the owner independently confirmed that walking never stopped. Default Oculus Touch bindings ship with the app; this removes user-authored bindings, although SteamVR still uses a normal application binding internally. Trigger input remains visible to VRChat by design. Selectively suppressing it would require SteamVR's experimental overlay-input override and is outside this slice.
+
+After the gate, a small non-blocking chip follows the left controller. It becomes armed only after its surface faces the HMD for 150 ms, using hysteresis to avoid flicker. The right-hand pointer expands a compact feature menu. Starting a feature immediately hides every VRCVA overlay before the existing compositor-boundary/discard capture sequence. A completed result does not enable global laser mode; closing it returns to the wrist chip. SteamVR loss, controller pose loss, cancellation, and disposal all fail open for VRChat input.
+
+SteamVR exposes the HMD and controller poses used here, not a measured forearm or elbow pose. The launcher therefore remains compositor-tracked relative to the left controller instead of introducing a jitter-prone virtual-elbow estimate. Its feature menu opens a dedicated calibration surface fixed in front of the HMD while the left-hand preview remains visible. Position changes use 1 cm controller-local steps, orientation uses 5-degree post-multiplied steps about the panel's local X/Y/Z axes, and one scale changes both chip and expanded menu. Launcher orientation is stored as a normalized canonical quaternion so the three controls remain distinct near Euler-angle singularities; version-3 Euler settings migrate by preserving the complete transform matrix. Save and cancel are explicit; versioned non-secret settings migrate older files to the tested Quest default. Facing feedback uses the absolute panel-plane alignment because the supported runtime displays both sides of the overlay, while invalid or missing poses remain fail-closed.
+
+The small-group onboarding flow is local-first and has three short checks: SteamVR auto-launch registration, English OCR readiness, and optional OpenAI BYOK storage. It does not start SteamVR without consent and does not require an installer. A stable self-contained beta folder is the supported distribution shape; the first run registers its fixed executable path with SteamVR and may require one SteamVR restart before auto-launch is recognized. Later launches occur with SteamVR and stay minimized unless setup or diagnostics need the desktop window. A single-instance guard prevents a manual launch and SteamVR launch from creating two processes.
+
+Windows Credential Manager remains the selected personal-use secret store. It gives the API key an OS-managed, per-user boundary without placing it in `settings.json`, environment files, command history, or logs. Saving or deleting a key must affect the next SCAN without restarting VRCVA. A process-lifetime quota object survives runtime reconstruction so editing settings cannot reset the ten-attempt guard. Saved OpenAI credentials are valid only for the official endpoint preset; custom endpoints require a separate future profile and credential.
+
+Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The second feature should reuse OCR plus the text-model boundary (for example summarization) to prove the extension point before adding image models or tools. OCR/world text is untrusted content; future tool-capable features must never interpret it as authority and must require explicit confirmation before external side effects.
+
+The foundation now resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the process-wide ten-attempt quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
+
+The AI-development harness is stored in the repository but is not installed or enabled automatically. It consists of a concise skill, project-specific references, deterministic validation scripts, and evidence rules. Product invariants remain in source code and tests; the skill is a runbook that invokes them. Its setup document may explain how to copy or link the skill into a supported agent environment, but this project must not write to personal Codex/Claude settings, install plug-ins, or register MCP services.
+
+#### Phase 3 implementation gates
+
+1. Characterize the current capture, atlas, close, scrollbar, calibration, key, and no-network behavior with tests.
+2. Add the Input 2.0 ABI and pass-through diagnostic; do not change normal interaction until Quest validation succeeds.
+3. Move result/calibration interaction to the shared pointer contract and permanently keep global laser mode off.
+4. Add the wrist chip/menu state machine and route `Translation` through the existing single-flight pipeline.
+5. Add app-manifest auto-launch, single-instance behavior, versioned settings migration, and the first-run wizard.
+6. Extract the feature/backend composition boundaries without changing translation output or privacy behavior.
+7. Prepare and validate the uninstalled AI-development skill and its configuration instructions.
+8. Run Windows build/tests/format, secret inspection, diagnostic checks, independent review, and Quest acceptance before replacing OSC/OVRAS documentation with fallback-only wording.
 
 ## 12. Decision log
 
@@ -367,6 +427,8 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-14 | Default the result panel to a user-calibrated left-controller transform | It shortens normal reading access without adding an input binding; right-hand/HMD choices and a per-display HMD fallback keep placement recoverable |
 | 2026-08-14 | Perform placement calibration inside VR instead of with desktop sliders | The user must see the panel while adjusting it; large laser targets provide immediate spatial feedback and avoid repeated headset/monitor switching |
 | 2026-08-14 | Render calibration as one full logical-UI texture instead of an atlas cell | Five device measurements showed X mapping was correct but bounded-atlas Y clicks expanded about 1.5× from center; matching texture and mouse-scale dimensions removes the ambiguous bounds transform without a headset-specific correction |
+| 2026-08-15 | Render each interactive result page as one full 1280x720 texture and restore the status atlas before the next SCAN | Native misses occurred before managed mapping near the lower visible surface while successful hits still dispatched the correct rail action; matching the stable calibration texture shape removes the result-atlas ambiguity, with a possible brief page-change flash accepted for reliable input |
+| 2026-08-15 | Align the left-hand result pose to the saved VRCVA/SCAN launcher pose in settings version 5 and follow later launcher saves only while those poses still match | Opening the result at a different hand-relative transform forced an unexplained wrist movement after SCAN; transform-derived following keeps new/default results together without hidden state, while result width and deliberately independent position calibration remain intact and right/HMD placements are unchanged |
 | 2026-08-12 | Keep OpenVR eye-mirror capture at research status | The API is feasible, but correct GPU selection, D3D11 readback, shared OpenVR lifetime, overlay exclusion, fallback, and Quest 3S validation make it a separate medium-sized vertical slice |
 | 2026-08-12 | Complete the OpenVR eye-mirror diagnostic with the left eye as the Stage 2 default candidate | Quest 3S returned 3072×3352 per eye; both eyes restored the tall sign's missing vertical content, the left kept the target nearer center, and adopted frames excluded the result overlay after a mandatory throwaway acquisition |
 | 2026-08-12 | Prefer one OpenVR eye mirror and fall back to the VRChat window | The left eye restored vertical FOV and cut measured capture-plus-OCR from about 4.17 s to 2.29 s; SteamVR is never auto-started and the retained HWND path covers OpenVR acquisition failures |
@@ -374,10 +436,16 @@ Add typed analyzer selection and explicit data-boundary indicators for OCR-only,
 | 2026-08-12 | Apply `BitmapTransform` scaling once and convert crop bounds into scaled coordinates | Microsoft documents scale before crop; the previous band transform could double-scale and made middle/lower 1× crops invalid |
 | 2026-08-13 | Implement a receive-only OSCQuery subset with no new dependency | VRChat only needs the advertised `/avatar` namespace and dynamic OSC target; a full OSCQuery/WebSocket client would add unrelated surface area |
 | 2026-08-13 | Register DNS-SD on Windows interfaces but reject non-local senders | Windows returned `0x8007232A` when registering a strict loopback DNS-SD socket; local-address filtering and `OSC_IP=127.0.0.1` preserve same-PC processing without falling back to fixed port 9001 |
+| 2026-08-14 | Replace global overlay laser mode with priority-zero SteamVR Input 2.0 and VRCVA-owned hit testing | OpenVR permits overlay actions to be observed without suppressing the scene app unless experimental high priority is selected; this keeps VRChat walking active |
+| 2026-08-14 | Use a left-wrist chip and right-hand laser instead of physical tapping | It matches the accepted XSOverlay-like interaction, avoids pose-tap tuning, and removes user-authored OVRAS/OSC bindings from normal use |
+| 2026-08-14 | Keep Windows Credential Manager for small-group BYOK and apply changes without restart | It is the strongest built-in per-user store available without adding an account service, while immediate runtime refresh removes the current usability defect |
+| 2026-08-14 | Use a compile-time feature catalog before considering plug-ins or an agent kernel | It gives the next OCR/text-AI feature a stable boundary without introducing third-party code loading, broad tool authority, or premature compatibility promises |
+| 2026-08-14 | Prepare the AI-development harness in-repository without installing it | Repeatable agent instructions and evidence formats are useful, but personal agent configuration remains an explicit user action |
+| 2026-08-15 | Keep the result header display-only and place actions in a fixed body rail | The selected-view mapping and explicit full-surface intersection mask passed automated checks, but the current headset still had no usable pointer over the visible header; moving the visible controls into the established body region is safer than another hidden offset or hit-target workaround |
 
 ## 13. Official sources reviewed
 
-All sources below were checked on 2026-08-11 through 2026-08-13.
+All sources below were checked on 2026-08-11 through 2026-08-15.
 
 - VRChat OSC overview and ports: <https://docs.vrchat.com/docs/osc-overview>
 - VRChat OSCQuery and multiple-receiver discovery: <https://docs.vrchat.com/docs/oscquery>
@@ -391,7 +459,7 @@ All sources below were checked on 2026-08-11 through 2026-08-13.
 - Microsoft `Graphics.CopyFromScreen` API: <https://learn.microsoft.com/en-us/dotnet/api/system.drawing.graphics.copyfromscreen>
 - Valve OpenVR API overview: <https://github.com/ValveSoftware/openvr/wiki/API-Documentation>
 - Valve OpenVR source/bindings, including compositor mirror texture access: <https://github.com/ValveSoftware/openvr>
-- Valve current `openvr.h`, including `GetOutputDevice`, `GetMirrorTextureD3D11`, `ReleaseMirrorTextureD3D11`, `IsOverlayVisible`, and `WaitFrameSync`: <https://raw.githubusercontent.com/ValveSoftware/openvr/master/headers/openvr.h>
+- Valve OpenVR v1.26.7 `openvr.h`, matching the runtime interfaces used here and documenting overlay texture bounds/intersection coordinates: <https://raw.githubusercontent.com/ValveSoftware/openvr/v1.26.7/headers/openvr.h>
 - Valve `IVROverlay` overview: <https://github.com/ValveSoftware/openvr/wiki/IVROverlay_Overview>
 - Steamworks SteamVR overlay apps: <https://partner.steamgames.com/doc/features/steamvr/info>
 - Tesseract official repository and license: <https://github.com/tesseract-ocr/tesseract>

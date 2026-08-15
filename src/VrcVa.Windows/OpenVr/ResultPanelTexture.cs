@@ -9,6 +9,19 @@ using Point = System.Windows.Point;
 
 namespace VrcVa.Windows.OpenVr;
 
+internal enum ResultPanelAction
+{
+    None,
+    PreviousPage,
+    NextPage,
+    Close,
+}
+
+internal readonly record struct WristLauncherCalibrationButton(
+    WristLauncherCalibrationAction Action,
+    Rect Bounds,
+    string Label);
+
 internal sealed class ResultPanelTexture
 {
     public const int PixelWidth = 1280;
@@ -22,19 +35,21 @@ internal sealed class ResultPanelTexture
     public const int ProcessingCell = 2;
     private const int FirstResultCell = 3;
     private const int MaximumResultPages = 3;
-    private const double BodyTop = 116;
-    private const double BodyBottom = 668;
-    private const double BodyLeft = 54;
-    private const double BodyRight = 1000;
-    private const double ScrollTrackLeft = 1218;
-    private const double ScrollTrackRight = 1252;
-    private const double ScrollHitLeft = 1198;
-    private const double ScrollHitRight = 1268;
+    internal const double HeaderHeight = 108;
+    internal const double BodyTop = 116;
+    internal const double BodyTextBottom = 568;
+    internal const double BodyBottom = 668;
+    internal const double BodyLeft = 54;
+    internal const double BodyRight = 1180;
+    internal const double ScrollTrackLeft = 1198;
+    internal const double ScrollTrackRight = 1268;
     private const double MinimumThumbHeight = 64;
-    private const float CloseLeft = 1020;
-    private const float CloseRight = 1188;
-    private const float CloseTop = (float)BodyTop;
-    private const float CloseBottom = (float)BodyBottom;
+    // Keep navigation in a fixed rail below the result text. Rendering and hit
+    // testing share these exact rectangles so the visible controls and their
+    // actionable areas cannot drift apart.
+    internal static readonly Rect PreviousPageButtonBounds = new(748, 580, 136, 80);
+    internal static readonly Rect NextPageButtonBounds = new(884, 580, 136, 80);
+    internal static readonly Rect CloseButtonBounds = new(1020, 580, 160, 80);
 
     private readonly Typeface _bodyTypeface = new("Yu Gothic UI");
     private string _title = string.Empty;
@@ -74,37 +89,52 @@ internal sealed class ResultPanelTexture
     }
 
     public bool IsCloseButton(float x, float y) =>
-        x is >= CloseLeft and <= CloseRight;
+        CloseButtonBounds.Contains(x, y);
 
-    internal static (float X, float Y) MapOpenVrPointer(
-        float openVrX,
-        float openVrY,
-        int atlasCell)
+    public ResultPanelAction HitTestResult(float x, float y)
     {
-        if (atlasCell < 0 || atlasCell >= AtlasColumns * AtlasRows)
+        Point point = new(x, y);
+        if (CloseButtonBounds.Contains(point))
         {
-            throw new ArgumentOutOfRangeException(nameof(atlasCell));
+            return ResultPanelAction.Close;
         }
 
-        int column = atlasCell % AtlasColumns;
-        int row = atlasCell / AtlasColumns;
-        float localX = (openVrX * AtlasColumns) - (column * PixelWidth);
-        float localY = ((PixelHeight - openVrY) * AtlasRows) - (row * PixelHeight);
-        return (localX, localY);
+        // Rail buttons are painted Previous -> Next -> Close. Test in the
+        // reverse visual Z order so their shared boundary belongs to the
+        // control the user actually sees. A disabled top control owns its
+        // visible area and must not fall through to a button drawn below it.
+        if (NextPageButtonBounds.Contains(point))
+        {
+            return _resultPage < _resultPageCount - 1
+                ? ResultPanelAction.NextPage
+                : ResultPanelAction.None;
+        }
+
+        if (PreviousPageButtonBounds.Contains(point))
+        {
+            return _resultPage > 0
+                ? ResultPanelAction.PreviousPage
+                : ResultPanelAction.None;
+        }
+
+        return ResultPanelAction.None;
     }
 
-    internal static (float X, float Y) MapFullTexturePointer(
-        float openVrX,
-        float openVrY) =>
-        (openVrX, PixelHeight - openVrY);
+    public bool Apply(ResultPanelAction action)
+    {
+        int previous = _resultPage;
+        _resultPage = action switch
+        {
+            ResultPanelAction.PreviousPage => Math.Max(0, _resultPage - 1),
+            ResultPanelAction.NextPage => Math.Min(_resultPageCount - 1, _resultPage + 1),
+            _ => _resultPage,
+        };
+        return previous != _resultPage;
+    }
 
     public bool BeginScrollbarInteraction(float x, float y)
     {
-        if (_resultPageCount <= 1
-            || x < ScrollHitLeft
-            || x > ScrollHitRight
-            || y < BodyTop
-            || y > BodyBottom)
+        if (!IsScrollbar(x, y))
         {
             return false;
         }
@@ -124,6 +154,13 @@ internal sealed class ResultPanelTexture
         return previous != _resultPage;
     }
 
+    public bool IsScrollbar(float x, float y) =>
+        _resultPageCount > 1
+        && x >= ScrollTrackLeft
+        && x <= ScrollTrackRight
+        && y >= BodyTop
+        && y <= BodyBottom;
+
     public static ResultPanelCalibrationAction HitTestCalibration(float x, float y)
     {
         foreach ((ResultPanelCalibrationAction action, Rect bounds, _) in CalibrationButtons)
@@ -135,6 +172,21 @@ internal sealed class ResultPanelTexture
         }
 
         return ResultPanelCalibrationAction.None;
+    }
+
+    public static WristLauncherCalibrationAction HitTestWristLauncherCalibration(
+        float x,
+        float y)
+    {
+        foreach (WristLauncherCalibrationButton button in WristLauncherCalibrationButtons)
+        {
+            if (button.Bounds.Contains(x, y))
+            {
+                return button.Action;
+            }
+        }
+
+        return WristLauncherCalibrationAction.None;
     }
 
     public byte[] RenderRgba()
@@ -158,12 +210,7 @@ internal sealed class ResultPanelTexture
                 "文字を処理中…",
                 "OCRを実行し、設定時は\n日本語へ翻訳しています。");
 
-            FormattedText body = CreateBodyText();
-            double viewportHeight = BodyBottom - BodyTop;
-            int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
-            _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
-            _resultTruncated = requiredPages > MaximumResultPages;
-            _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+            (FormattedText body, double viewportHeight) = PrepareResultLayout();
             for (int page = 0; page < MaximumResultPages; page++)
             {
                 DrawResultCell(drawing, body, page, viewportHeight);
@@ -173,12 +220,35 @@ internal sealed class ResultPanelTexture
         return RenderVisualRgba(visual, AtlasPixelWidth, AtlasPixelHeight);
     }
 
+    public byte[] RenderCurrentResultRgba()
+    {
+        DrawingVisual visual = new();
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            (FormattedText body, double viewportHeight) = PrepareResultLayout();
+            DrawResultPage(drawing, body, _resultPage, viewportHeight);
+        }
+
+        return RenderVisualRgba(visual, PixelWidth, PixelHeight);
+    }
+
     public byte[] RenderCalibrationRgba()
     {
         DrawingVisual visual = new();
         using (DrawingContext drawing = visual.RenderOpen())
         {
             DrawCalibrationSurface(drawing);
+        }
+
+        return RenderVisualRgba(visual, PixelWidth, PixelHeight);
+    }
+
+    public byte[] RenderWristLauncherCalibrationRgba()
+    {
+        DrawingVisual visual = new();
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            DrawWristLauncherCalibrationSurface(drawing);
         }
 
         return RenderVisualRgba(visual, PixelWidth, PixelHeight);
@@ -244,6 +314,16 @@ internal sealed class ResultPanelTexture
         double viewportHeight)
     {
         drawing.PushTransform(GetCellTransform(FirstResultCell + page));
+        DrawResultPage(drawing, body, page, viewportHeight);
+        drawing.Pop();
+    }
+
+    private void DrawResultPage(
+        DrawingContext drawing,
+        FormattedText body,
+        int page,
+        double viewportHeight)
+    {
         DrawBackground(drawing);
         DrawHeader(drawing);
 
@@ -270,7 +350,7 @@ internal sealed class ResultPanelTexture
             DrawScrollIndicator(drawing, page);
         }
 
-        drawing.Pop();
+        DrawResultControls(drawing, page);
     }
 
     private void DrawCalibrationSurface(DrawingContext drawing)
@@ -325,6 +405,85 @@ internal sealed class ResultPanelTexture
         }
     }
 
+    private void DrawWristLauncherCalibrationSurface(DrawingContext drawing)
+    {
+        DrawBackground(drawing);
+        FormattedText title = CreateText(
+            "手首ランチャーの位置調整",
+            34,
+            FontWeights.SemiBold,
+            Brushes.White,
+            1180);
+        drawing.DrawText(title, new Point(44, 21));
+        FormattedText hint = CreateText(
+            "左手のランチャーを見ながら調整（1回：位置1 cm / 向き5° / サイズ5%）",
+            22,
+            FontWeights.Normal,
+            new SolidColorBrush(Color.FromRgb(190, 205, 225)),
+            1180);
+        drawing.DrawText(hint, new Point(44, 66));
+
+        DrawCalibrationGroupHeading(drawing, "腕の表裏", 44, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "上下", 437, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "腕に沿って", 830, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "縦の向き", 44, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "横の向き", 437, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "傾き", 830, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "大きさ", 437, 416, 362);
+
+        foreach (WristLauncherCalibrationButton button in WristLauncherCalibrationButtons)
+        {
+            Color color = button.Action switch
+            {
+                WristLauncherCalibrationAction.Save => Color.FromRgb(22, 115, 154),
+                WristLauncherCalibrationAction.Cancel => Color.FromRgb(92, 74, 80),
+                WristLauncherCalibrationAction.Reset => Color.FromRgb(67, 79, 96),
+                _ => Color.FromRgb(53, 72, 96),
+            };
+            drawing.DrawRoundedRectangle(
+                new SolidColorBrush(color),
+                new System.Windows.Media.Pen(
+                    new SolidColorBrush(Color.FromRgb(113, 143, 181)),
+                    2),
+                button.Bounds,
+                14,
+                14);
+            FormattedText text = CreateText(
+                button.Label,
+                button.Action is WristLauncherCalibrationAction.Save
+                    or WristLauncherCalibrationAction.Cancel
+                    or WristLauncherCalibrationAction.Reset
+                    ? 27
+                    : 25,
+                FontWeights.SemiBold,
+                Brushes.White,
+                button.Bounds.Width - 16);
+            text.TextAlignment = TextAlignment.Center;
+            drawing.DrawText(
+                text,
+                new Point(
+                    button.Bounds.Left + 8,
+                    button.Bounds.Top + ((button.Bounds.Height - text.Height) / 2)));
+        }
+    }
+
+    private void DrawCalibrationGroupHeading(
+        DrawingContext drawing,
+        string label,
+        double left,
+        double top,
+        double width)
+    {
+        FormattedText text = CreateText(
+            label,
+            21,
+            FontWeights.SemiBold,
+            new SolidColorBrush(Color.FromRgb(177, 191, 211)),
+            width);
+        text.TextAlignment = TextAlignment.Center;
+        drawing.DrawText(text, new Point(left, top));
+    }
+
     private static readonly (ResultPanelCalibrationAction Action, Rect Bounds, string Label)[] CalibrationButtons =
     [
         (ResultPanelCalibrationAction.MoveLeft, new Rect(48, 140, 250, 125), "←  左へ"),
@@ -340,6 +499,81 @@ internal sealed class ResultPanelTexture
         (ResultPanelCalibrationAction.Save, new Rect(692, 500, 539, 120), "保存して閉じる"),
     ];
 
+    internal static IReadOnlyList<WristLauncherCalibrationButton>
+        WristLauncherCalibrationControls => WristLauncherCalibrationButtons;
+
+    private static readonly WristLauncherCalibrationButton[] WristLauncherCalibrationButtons =
+    [
+        new(
+            WristLauncherCalibrationAction.MoveTowardHandBack,
+            new Rect(44, 145, 174, 99),
+            "甲へ  −X"),
+        new(
+            WristLauncherCalibrationAction.MoveTowardPalm,
+            new Rect(232, 145, 174, 99),
+            "掌へ  ＋X"),
+        new(
+            WristLauncherCalibrationAction.MoveDown,
+            new Rect(437, 145, 174, 99),
+            "下へ  −Y"),
+        new(
+            WristLauncherCalibrationAction.MoveUp,
+            new Rect(625, 145, 174, 99),
+            "上へ  ＋Y"),
+        new(
+            WristLauncherCalibrationAction.MoveTowardFingertips,
+            new Rect(830, 145, 174, 99),
+            "手先へ  −Z"),
+        new(
+            WristLauncherCalibrationAction.MoveTowardElbow,
+            new Rect(1018, 145, 174, 99),
+            "肘へ  ＋Z"),
+        new(
+            WristLauncherCalibrationAction.DecreasePitch,
+            new Rect(44, 298, 174, 99),
+            "縦  −5°"),
+        new(
+            WristLauncherCalibrationAction.IncreasePitch,
+            new Rect(232, 298, 174, 99),
+            "縦  ＋5°"),
+        new(
+            WristLauncherCalibrationAction.DecreaseYaw,
+            new Rect(437, 298, 174, 99),
+            "横  −5°"),
+        new(
+            WristLauncherCalibrationAction.IncreaseYaw,
+            new Rect(625, 298, 174, 99),
+            "横  ＋5°"),
+        new(
+            WristLauncherCalibrationAction.DecreaseRoll,
+            new Rect(830, 298, 174, 99),
+            "傾き  −5°"),
+        new(
+            WristLauncherCalibrationAction.IncreaseRoll,
+            new Rect(1018, 298, 174, 99),
+            "傾き  ＋5°"),
+        new(
+            WristLauncherCalibrationAction.MakeSmaller,
+            new Rect(437, 453, 174, 83),
+            "小さく  −5%"),
+        new(
+            WristLauncherCalibrationAction.MakeLarger,
+            new Rect(625, 453, 174, 83),
+            "大きく  ＋5%"),
+        new(
+            WristLauncherCalibrationAction.Reset,
+            new Rect(44, 575, 270, 105),
+            "初期値"),
+        new(
+            WristLauncherCalibrationAction.Cancel,
+            new Rect(348, 575, 270, 105),
+            "中止"),
+        new(
+            WristLauncherCalibrationAction.Save,
+            new Rect(652, 575, 540, 105),
+            "保存して閉じる"),
+    ];
+
     private static TranslateTransform GetCellTransform(int cell) => new(
         (cell % AtlasColumns) * PixelWidth,
         (cell / AtlasColumns) * PixelHeight);
@@ -353,7 +587,7 @@ internal sealed class ResultPanelTexture
         drawing.DrawRectangle(
             new SolidColorBrush(Color.FromRgb(35, 45, 60)),
             null,
-            new Rect(0, 0, PixelWidth, 108));
+            new Rect(0, 0, PixelWidth, HeaderHeight));
     }
 
     private void DrawHeader(DrawingContext drawing)
@@ -363,25 +597,58 @@ internal sealed class ResultPanelTexture
             34,
             FontWeights.SemiBold,
             Brushes.White,
-            1130);
+            1184);
         drawing.DrawText(title, new Point(48, 31));
+    }
 
-        Rect closeButton = new(CloseLeft, CloseTop, CloseRight - CloseLeft, CloseBottom - CloseTop);
-        drawing.DrawRoundedRectangle(
-            new SolidColorBrush(Color.FromRgb(79, 91, 109)),
+    private void DrawResultControls(DrawingContext drawing, int page)
+    {
+        DrawResultButton(drawing, PreviousPageButtonBounds, "◀ 前へ", page > 0);
+        DrawResultButton(
+            drawing,
+            NextPageButtonBounds,
+            "次へ ▶",
+            page < _resultPageCount - 1);
+        DrawResultButton(drawing, CloseButtonBounds, "閉じる ×", enabled: true);
+    }
+
+    private void DrawResultButton(
+        DrawingContext drawing,
+        Rect bounds,
+        string label,
+        bool enabled)
+    {
+        Color background = enabled
+            ? Color.FromRgb(72, 91, 118)
+            : Color.FromRgb(48, 57, 70);
+        Color foreground = enabled
+            ? Color.FromRgb(245, 249, 255)
+            : Color.FromRgb(111, 123, 140);
+        drawing.DrawRectangle(new SolidColorBrush(background), null, bounds);
+        // WPF centers a Pen on the supplied geometry. Inset the border by its
+        // one-pixel half-width so no visible pixel extends beyond the exact
+        // rectangle consumed by HitTestResult.
+        Rect borderBounds = new(
+            bounds.Left + 1,
+            bounds.Top + 1,
+            bounds.Width - 2,
+            bounds.Height - 2);
+        drawing.DrawRectangle(
             null,
-            closeButton,
-            14,
-            14);
-        FormattedText closeText = CreateText(
-            "閉\nじ\nる\n\nC\nL\nO\nS\nE",
+            new System.Windows.Media.Pen(
+                new SolidColorBrush(Color.FromRgb(103, 128, 161)),
+                2),
+            borderBounds);
+        FormattedText text = CreateText(
+            label,
             28,
             FontWeights.SemiBold,
-            Brushes.White,
-            150);
-        closeText.TextAlignment = TextAlignment.Center;
-        closeText.LineHeight = 43;
-        drawing.DrawText(closeText, new Point(1029, 170));
+            new SolidColorBrush(foreground),
+            bounds.Width);
+        text.TextAlignment = TextAlignment.Center;
+        drawing.DrawText(
+            text,
+            new Point(bounds.Left, bounds.Top + ((bounds.Height - text.Height) / 2) - 2));
     }
 
     private FormattedText CreateBodyText()
@@ -394,6 +661,17 @@ internal sealed class ResultPanelTexture
             BodyRight - BodyLeft - 20);
         body.LineHeight = 43;
         return body;
+    }
+
+    private (FormattedText Body, double ViewportHeight) PrepareResultLayout()
+    {
+        FormattedText body = CreateBodyText();
+        double viewportHeight = BodyTextBottom - BodyTop;
+        int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
+        _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
+        _resultTruncated = requiredPages > MaximumResultPages;
+        _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+        return (body, viewportHeight);
     }
 
     private void DrawScrollIndicator(DrawingContext drawing, int page)

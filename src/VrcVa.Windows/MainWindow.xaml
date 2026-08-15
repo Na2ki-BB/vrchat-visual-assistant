@@ -21,13 +21,25 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0">
-      <TextBlock FontSize="28" FontWeight="SemiBold" Text="VRChat Visual Assistant" />
-      <TextBlock Margin="0,5,0,0"
-                 Foreground="{StaticResource TextSecondary}"
-                 FontSize="14"
-                 Text="見えている英語を、1回のSCANで日本語へ" />
-    </StackPanel>
+    <Grid Grid.Row="0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel Grid.Column="0">
+        <TextBlock FontSize="28" FontWeight="SemiBold" Text="VRChat Visual Assistant" />
+        <TextBlock Margin="0,5,0,0"
+                   Foreground="{StaticResource TextSecondary}"
+                   FontSize="14"
+                   Text="見えている英語を、1回のSCANで日本語へ" />
+      </StackPanel>
+      <Button x:Name="OpenSetupButton"
+              Grid.Column="1"
+              Margin="12,0,0,0"
+              VerticalAlignment="Center"
+              Click="OpenSetupButton_Click"
+              Content="初期設定を開く" />
+    </Grid>
 
     <Border Grid.Row="1"
             Margin="0,16,0,0"
@@ -127,11 +139,13 @@
                        MinWidth="180"
                        MinHeight="36"
                        VerticalContentAlignment="Center" />
-          <Button Grid.Column="2"
+          <Button x:Name="SaveOpenAiApiKeyButton"
+                  Grid.Column="2"
                   Margin="8,0,0,0"
                   Click="SaveOpenAiApiKeyButton_Click"
                   Content="暗号化して保存" />
-          <Button Grid.Column="3"
+          <Button x:Name="DeleteOpenAiApiKeyButton"
+                  Grid.Column="3"
                   Margin="8,0,0,0"
                   Click="DeleteOpenAiApiKeyButton_Click"
                   Content="削除" />
@@ -224,7 +238,8 @@
                 Content="常に手前" />
     </Grid>
 
-    <GroupBox Grid.Row="6"
+    <GroupBox x:Name="SourceResultGroupBox"
+              Grid.Row="6"
               Margin="0,0,0,12"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
@@ -236,7 +251,8 @@
                VerticalScrollBarVisibility="Auto" />
     </GroupBox>
 
-    <GroupBox Grid.Row="7"
+    <GroupBox x:Name="PrimaryResultGroupBox"
+              Grid.Row="7"
               Padding="10"
               Foreground="{StaticResource TextSecondary}"
               Header="日本語訳">
@@ -263,7 +279,8 @@
                    Foreground="{StaticResource TextSecondary}"
                    TextWrapping="Wrap" />
       </StackPanel>
-      <Button Grid.Column="1"
+      <Button x:Name="CopyPrimaryResultButton"
+              Grid.Column="1"
               Margin="12,0,0,0"
               Click="CopyButton_Click"
               Content="日本語訳をコピー" />

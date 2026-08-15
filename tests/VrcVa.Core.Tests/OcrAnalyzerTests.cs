@@ -19,6 +19,11 @@ public sealed class OcrAnalyzerTests
         Assert.Empty(result.JapaneseText);
         Assert.Equal("OCRのみ", result.TranslationModel);
         Assert.Contains("翻訳サービスは未設定", result.Warning, StringComparison.Ordinal);
+        Assert.Equal(FeatureIds.Translation, result.FeatureResult.FeatureId);
+        Assert.Equal(
+            TranslationResultSectionIds.SourceText,
+            Assert.Single(result.FeatureResult.Sections).Id);
+        Assert.Equal(result.SourceText, result.FeatureResult.PrimarySection.Text);
     }
 
     [Fact]
