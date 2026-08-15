@@ -349,6 +349,17 @@ actions remain in the fixed body control rail. Do not add a guessed offset,
 move controls to hide a native-surface failure, or create an invisible target
 without new device evidence that first explains the runtime mismatch.
 
+The subsequent 2026-08-15 full-texture acceptance passed on the current
+Windows Release build: result pages 1 through 3 remained operable, the complete
+lower rail could be swept without cursor loss, and the scrollbar remained
+usable. Ten adopted eye captures contained zero launcher, result, or cursor
+markers after capture suppression. Saved left-, right-, and HMD-relative
+placements survived a normal VRCVA restart, and SCAN replaced the launcher with
+the result at the same left-hand position and orientation without requiring a
+hand movement. These observations close the original atlas-surface and initial
+placement device gates while retaining the diagnostic contract for future
+layout or runtime regressions.
+
 ### Phase 4 — analyzer expansion
 
 Add typed analyzer selection and explicit data-boundary indicators for OCR-only, multilingual translation, VQA, summarization, puzzle hints, object recognition, and opt-in web search.

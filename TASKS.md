@@ -251,7 +251,7 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 
 **Device evidence still required**
 
-- [ ] Device-check left/right/HMD placement and saved placement after a normal VRCVA restart.
+- [x] Device-check left/right/HMD placement and saved placement after a normal VRCVA restart.
 
 ## Post-MVP Milestone E — Analyzer expansion
 
@@ -287,10 +287,13 @@ Implementation status and headset acceptance are intentionally separate. An auto
 **Device evidence**
 
 - [x] Pass-through gate: Quest 3S received exactly 20/20 VRCVA right-trigger edges with valid right-hand poses while walking continuously in VRChat, without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
-- [ ] Device gate: on the current Windows Release build, activate every enabled Previous/Next/Close control at its visible body-rail rectangle on full-texture result pages 1/2/3, verify disabled controls do nothing, sweep the full lower rail without cursor loss, confirm the scrollbar remains usable, and verify the visible cursor center stays on the hit target while moving the HMD. Then start another SCAN and confirm the status atlas returns; record any page-change flash. The header is intentionally display-only.
-- [ ] Device gate: complete ten captures with zero launcher/result/cursor marker in the adopted eye image after capture suppression.
-- [ ] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify placement, facing feedback, menu hit targets, and walking input remain correct.
-- [ ] Device gate: from that saved launcher pose, select SCAN and verify the result replaces the menu at the same position and orientation without moving the left hand; then verify result Reset, another SCAN, and a normal VRCVA restart preserve the intended independent result size/adjustment.
+- [x] Device gate: on the current Windows Release build, activate Previous/Next/Close across full-texture result pages 1/2/3, sweep the full lower rail without cursor loss, and confirm the scrollbar remains usable. The header is intentionally display-only.
+- [ ] Device follow-up: while moving the HMD, confirm the visible cursor center remains on the hit target; verify disabled Previous/Next controls remain inert, the next SCAN restores the status atlas, and record any page-change flash.
+- [x] Device gate: complete ten captures with zero launcher/result/cursor marker in the adopted eye image after capture suppression.
+- [x] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify the placement remains correct.
+- [ ] Device follow-up: after that restart, explicitly re-check facing feedback, menu hit targets, and walking input together.
+- [x] Device gate: from the saved launcher pose, select SCAN and verify the result replaces the menu at the same position and orientation without moving the left hand; confirm the saved placement survives a normal VRCVA restart.
+- [ ] Device follow-up: verify Result Reset, another SCAN, and a normal VRCVA restart preserve an intentionally independent result size/position adjustment.
 
 **Deferred or superseded**
 
