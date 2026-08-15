@@ -163,7 +163,7 @@ End-to-end acceptance:
 - [x] Record actual capture, OCR, translation, and total latency for ten scans: 10/10 completed, total 1.59–6.70 s, median 3.04 s, mean 3.40 s; attempt 11 was rejected before API I/O by the per-process usage guard.
 - [x] Confirm by unit test that logs omit exception messages; implementation never sends image/text/key content to the logger.
 - [x] Write `README.md` with prerequisites, exact commands, privacy behavior, normal use, local-image diagnostics, and stage-by-stage troubleshooting.
-- [x] Record known limitations: temporary mirror restoration, occluded window, OCR pack, cloud text, and notification-only VR rendering.
+- [x] Record the vertical slice's then-known limitations: temporary mirror restoration, occluded window, OCR pack, cloud text, and notification-only VR rendering. Later milestones supersede the capture and VR-rendering limitations below.
 - [x] Update completed boxes and decision log based on observed results.
 
 Exit: the owner can reproduce the vertical slice and identify which stage failed without opening the source code.
@@ -189,12 +189,12 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Evaluate `VRChat Visual Assistant` as an XSOverlay Window Capture.
 - [x] Record device feedback: too many setup actions, oversized window, controller click failure, window hide/show, and unclear completion.
 - [x] Reject the persistent Window Capture route for normal use.
-- [x] Add a localhost XSOverlay notification renderer for SCAN start, OCR/translation result, and failure stage.
+- [x] Add the initial localhost XSOverlay notification renderer for SCAN start, OCR/translation result, and failure stage; the owned OpenVR panel later superseded its normal progress/result role.
 - [x] Confirm from privacy-safe logs that two scans captured 1922×1041 frames and reached translation after OCR; the old no-provider behavior caused the missing result.
 - [x] Add a safe OVR Advanced Settings helper for SCAN and model-toggle keyboard actions; do not modify user settings unless `-Apply` is explicit.
 - [x] Confirm the XSOverlay test notification and latest VRCVA result notification are visible in the headset.
 - [x] Apply the OVRAS shortcut helper and validate `KeyboardTwo` from a left-grip + right-grip chord on Quest controllers.
-- [x] Keep the progress notification to one second and move it after capture so neither it nor the Action Menu enters the captured eye image.
+- [x] Keep the then-current XSOverlay progress notification to one second and move it after capture so neither it nor the Action Menu enters the captured eye image; later replace normal progress with the owned status panel.
 - [ ] Complete qualitative scoring for OCR accuracy, readability, and self-capture failures. Ten translated scans have already completed (1.59–6.70 s total); content-free timing and success metrics are recorded above.
 
 ## Post-MVP Milestone B — OCR/capture hardening
@@ -205,9 +205,9 @@ Current state: publication, authentication, and the initial CI run are complete.
 - [x] Compare unscaled, Fant 2x, and Cubic 2x OCR on the same self-authored image; use the better Cubic result for full-frame and band paths.
 - [ ] Add optional ROI selection or contrast preprocessing only if the full-view fallback remains insufficient in measured scenes.
 - [x] Document OpenVR compositor mirror feasibility, required APIs, overlay-exclusion invariant, window-capture fallback, and implementation size without implementing it.
-- [x] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR: Quest 3S acquisition, format/timing, coarse GPU sample, shared lifetime, overlay exclusion, explicit-save FOV comparison, and left-eye choice are complete; normal SCAN remains unchanged pending Stage 2 approval.
+- [x] Spike OpenVR compositor mirror capture (`GetMirrorTextureD3D11`) in a separate PR: Quest 3S acquisition, format/timing, coarse GPU sample, shared lifetime, overlay exclusion, explicit-save FOV comparison, and left-eye choice were completed before the Stage 2 promotion recorded next.
 - [x] Promote the left OpenVR eye mirror to normal SCAN with a configurable eye, mandatory stale-frame discard, automatic window fallback, adaptive OCR pixel budget, route display, tests, Quest 3S latency/GPU measurements, and a SteamVR-stopped DPI-aware fixture fallback check.
-- [x] Implement and device-check Windows Graphics Capture as the primary source; one content-free check returned a 1922×1041 frame.
+- [x] Implement and device-check Windows Graphics Capture as the automatic fallback when SteamVR or eye-mirror capture is unavailable; one content-free check returned a 1922×1041 frame.
 - [>] Verify on the owner's VRChat window that client-area capture removes the Windows `VRChat` title while preserving in-world text.
 - [ ] Verify with the latest GUI build that a browser/editor visibly covering the VRChat desktop window is not included in OCR.
 - [ ] Evaluate Tesseract as a local `IOcrEngine` fallback, including native packaging and notices.
@@ -249,9 +249,9 @@ Current state: the Windows listener, minimal receive-only OSCQuery namespace, DN
 - [x] Device-check the ordered owned-overlay sequence (immediate acknowledgement, capture, OCR, result), flicker-free page navigation, laser page selection, and explicit close/input restoration. Minor visual polish remains acceptable follow-up work.
 - [x] Device-check in-VR adjustment/save/cancel, calibrated pointer alignment, and the next SCAN after leaving calibration.
 
-**Device evidence still required**
+**Additional completed device evidence**
 
-- [ ] Device-check left/right/HMD placement and saved placement after a normal VRCVA restart.
+- [x] Device-check left/right/HMD placement and saved placement after a normal VRCVA restart.
 
 ## Post-MVP Milestone E — Analyzer expansion
 
@@ -287,15 +287,18 @@ Implementation status and headset acceptance are intentionally separate. An auto
 **Device evidence**
 
 - [x] Pass-through gate: Quest 3S received exactly 20/20 VRCVA right-trigger edges with valid right-hand poses while walking continuously in VRChat, without movement loss, Action Menu, OSC, OVRAS, or a manual SteamVR binding edit.
-- [ ] Device gate: on the current Windows Release build, activate every enabled Previous/Next/Close control at its visible body-rail rectangle on full-texture result pages 1/2/3, verify disabled controls do nothing, sweep the full lower rail without cursor loss, confirm the scrollbar remains usable, and verify the visible cursor center stays on the hit target while moving the HMD. Then start another SCAN and confirm the status atlas returns; record any page-change flash. The header is intentionally display-only.
-- [ ] Device gate: complete ten captures with zero launcher/result/cursor marker in the adopted eye image after capture suppression.
-- [ ] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify placement, facing feedback, menu hit targets, and walking input remain correct.
-- [ ] Device gate: from that saved launcher pose, select SCAN and verify the result replaces the menu at the same position and orientation without moving the left hand; then verify result Reset, another SCAN, and a normal VRCVA restart preserve the intended independent result size/adjustment.
+- [x] Device gate: on the current Windows Release build, activate Previous/Next/Close across full-texture result pages 1/2/3, sweep the full lower rail without cursor loss, and confirm the scrollbar remains usable. The header is intentionally display-only.
+- [ ] Device follow-up: while moving the HMD, confirm the visible cursor center remains on the hit target; verify disabled Previous/Next controls remain inert, the next SCAN restores the status atlas, and record any page-change flash.
+- [x] Device gate: complete ten captures with zero launcher/result/cursor marker in the adopted eye image after capture suppression.
+- [x] Device gate: calibrate the launcher in a natural reading pose, save, restart VRCVA, and verify the placement remains correct.
+- [ ] Device follow-up: after that restart, explicitly re-check facing feedback, menu hit targets, and walking input together.
+- [x] Device gate: from the saved launcher pose, select SCAN and verify the result replaces the menu at the same position and orientation without moving the left hand; confirm the saved placement survives a normal VRCVA restart.
+- [ ] Device follow-up: verify Result Reset, another SCAN, and a normal VRCVA restart preserve an intentionally independent result size/position adjustment.
 
 **Deferred or superseded**
 
 - [-] Add a second optional SteamVR input-action interaction route. This is superseded by the shipped priority-zero action set and VRCVA-owned pointer; duplicating that route would recreate two coordinate/input contracts.
-- [ ] Keep desktop SCAN as recovery; demote OSC/OVRAS to advanced fallback documentation only after full device acceptance.
+- [x] Keep desktop SCAN as recovery and document OSC/OVRAS as advanced fallback paths after the core wrist-launcher device gates passed.
 
 ## Post-MVP Milestone G — small-group onboarding and stable startup
 

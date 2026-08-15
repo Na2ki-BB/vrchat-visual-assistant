@@ -6,15 +6,15 @@ Read only the sections relevant to the requested change.
 | --- | --- | --- |
 | Project rules and authority | Active session and current task instructions | Repository `AGENTS.md` when present |
 | Product decisions and measurement history | `DESIGN.md` | `README.md` user-facing behavior |
-| App composition and lifecycle | `src/VrcVa.Windows/MainWindow.xaml.cs`, `App.xaml.cs` | Windows test project |
-| OpenVR runtime, ABI, and overlay ownership | `src/VrcVa.Windows/OpenVr/OpenVrRuntime.cs`, `OpenVrInterop.cs` | Matching Valve OpenVR header and OpenVR-focused tests |
-| Placement and coordinates | `src/VrcVa.Windows/OpenVr/ResultPanelPlacement.cs`, `WristLauncherPlacement.cs`, `OpenVrInterop.cs` | Placement and settings-store tests plus headset validation |
-| Result texture, pointer mapping, and controls | `src/VrcVa.Windows/OpenVr/OverlaySurfaceSpec.cs`, `OpenVrInterop.cs`, `ResultPanelTexture.cs`, `SteamVrResultPanel.cs` | `OpenVrOverlayIntersectionTests`, `ResultPanelTextureTests`, `PointerActivationGateTests`, and current-build headset evidence |
-| Eye-mirror privacy ordering | `src/VrcVa.Windows/OpenVr/OpenVrOverlayCaptureSequence.cs`, `OpenVrEyeMirrorCapture.cs` | `OpenVrOverlayCaptureSequenceTests.cs` |
+| App composition and lifecycle | `src/VrcVa.Windows/MainWindow.xaml.cs`, `src/VrcVa.Windows/App.xaml.cs` | Windows test project |
+| OpenVR runtime, ABI, and overlay ownership | `src/VrcVa.Windows/OpenVr/OpenVrRuntime.cs`, `src/VrcVa.Windows/OpenVr/OpenVrInterop.cs` | Matching Valve OpenVR header and OpenVR-focused tests |
+| Placement and coordinates | `src/VrcVa.Windows/OpenVr/ResultPanelPlacement.cs`, `src/VrcVa.Windows/OpenVr/WristLauncherPlacement.cs`, `src/VrcVa.Windows/OpenVr/OpenVrInterop.cs` | Placement and settings-store tests plus headset validation |
+| Result texture, pointer mapping, and controls | `src/VrcVa.Windows/OpenVr/OverlaySurfaceSpec.cs`, `src/VrcVa.Windows/OpenVr/OpenVrInterop.cs`, `src/VrcVa.Windows/OpenVr/ResultPanelTexture.cs`, `src/VrcVa.Windows/OpenVr/SteamVrResultPanel.cs` | `OpenVrOverlayIntersectionTests`, `ResultPanelTextureTests`, `PointerActivationGateTests`, and current-build headset evidence |
+| Eye-mirror privacy ordering | `src/VrcVa.Windows/OpenVr/OpenVrOverlayCaptureSequence.cs`, `src/VrcVa.Windows/OpenVr/OpenVrEyeMirrorCapture.cs` | `OpenVrOverlayCaptureSequenceTests.cs` |
 | Desktop fallback | `src/VrcVa.Windows/Capture/` | Capture tests and Windows fixture check |
-| Settings persistence | `src/VrcVa.Windows/Settings/` and placement store | Corresponding settings-store tests |
-| AI feature selection and results | `src/VrcVa.Core/Features.cs`, `Models.cs`, `ScanPipeline.cs` | Feature catalog, analyzer, and presentation tests |
-| Text-model transport and usage policy | `src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs`, `TranslationRequestQuota.cs` | Infrastructure transport tests and official provider documentation |
+| Settings persistence | `src/VrcVa.Windows/Settings/VrcVaSettingsStore.cs` and placement classes under `src/VrcVa.Windows/OpenVr/` | Corresponding settings-store tests |
+| AI feature selection and results | `src/VrcVa.Core/Features.cs`, `src/VrcVa.Core/Models.cs`, `src/VrcVa.Core/ScanPipeline.cs` | Feature catalog, analyzer, and presentation tests |
+| Text-model transport and usage policy | `src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs`, `src/VrcVa.Infrastructure/TranslationRequestQuota.cs` | Infrastructure transport tests and official provider documentation |
 
 For OpenVR, use the exact header matching the interface version requested at runtime. The current overlay contract is checked against Valve OpenVR v1.26.7 and requests `IVROverlay_027`. Existing code intentionally supports published older interface versions; do not replace a version or table slot without proving ABI compatibility.
 
@@ -44,8 +44,9 @@ Expanding a managed `Rect` after `ComputeOverlayIntersection` is not a fix for a
 missing native surface. The 2026-08-15 device check found native misses near
 both the header and lower visible result surface after applying that mask.
 Production result pages therefore use a matching full 1280x720 backing texture,
-while controls remain in the body rail; current-build device verification of
-that texture path remains pending.
+while controls remain in the body rail. The subsequent 2026-08-15 current-build
+device check passed across result pages 1 through 3 and the full lower rail
+without cursor loss; the scrollbar also remained usable.
 Diagnostics must preserve these distinct outcomes:
 overlay hidden, native OpenVR miss, native hit rejected by selected-view
 mapping, and mapped hit. Reset the bounded diagnostic window when a result
@@ -63,4 +64,4 @@ Direct rectangle tests and direct transform tests remain useful but cannot repla
 
 Do not add a headset-specific scale or offset from visual impressions. First capture privacy-safe diagnostics containing only native-hit state, mapping state, full-texture/view state, page, raw coordinates, logical coordinates, target ID, and activated target. Full-texture results must report the legacy atlas-cell field as unset. Existing successful Next/Previous/Close traces prove only that those individual native hits survived mapping; they do not prove that the visible result texture is a continuous hit surface. Never log OCR/result content while diagnosing coordinates.
 
-Automated coverage proves the ABI and coordinate contracts, not headset usability. A current Windows Release build must activate every enabled Previous/Next/Close control at the visible body rail on full-texture result pages 1, 2, and 3, verify disabled controls do nothing, sweep the lower rail without cursor loss, exercise the scrollbar, and confirm the status atlas returns on the next SCAN. Keep the corresponding `TASKS.md` device gate unchecked until that exact build passes; historical activations or a passing unit test are not substitutes.
+Automated coverage proves the ABI and coordinate contracts, not headset usability. The 2026-08-15 Windows Release build passed the recorded result pages 1, 2, and 3 control check, full lower-rail sweep without cursor loss, and scrollbar check. Any later change to the result layout, texture upload/view, pointer mapping, or activation path must repeat the complete current-build device gate; historical acceptance or a passing unit test is not a substitute for that changed build.
