@@ -793,7 +793,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _resultPanelPlacement = ResultPanelPlacement.CreateDefault(choice.Anchor);
+        _resultPanelPlacement = choice.Anchor == ResultPanelAnchor.LeftHand
+            ? ResultPanelPlacement.CreateAlignedToWristLauncher(
+                _settings.WristLauncher,
+                ResultPanelPlacement.Default.WidthMeters)
+            : ResultPanelPlacement.CreateDefault(choice.Anchor);
         ApplyResultPanelPlacement("追従先を変更しました。必要ならVR内で位置を調整してください。");
         TrySaveResultPanelPlacement(
             "追従先を保存しました。必要ならVR内で位置を調整してください。");
@@ -849,16 +853,34 @@ public partial class MainWindow : Window
             return;
         }
 
+        ResultPanelPlacement previousResultPanel = _resultPanelPlacement;
+        ResultPanelPlacement updatedResultPanel = previousResultPanel;
+        VrcVaSettings? updatedSettings = null;
+        bool resultPoseFollowedLauncher = false;
         try
         {
-            VrcVaSettings updatedSettings = _settings with
+            updatedResultPanel = previousResultPanel.FollowWristLauncherChange(
+                _settings.WristLauncher,
+                eventArgs.Placement);
+            resultPoseFollowedLauncher = updatedResultPanel != previousResultPanel;
+            updatedSettings = _settings with
             {
+                ResultPanel = updatedResultPanel,
                 WristLauncher = eventArgs.Placement,
             };
             _settingsStore.Save(updatedSettings);
             _settings = updatedSettings;
-            ResultPanelPlacementStatusText.Text =
-                "左手ランチャーの位置・角度・大きさを保存しました。";
+            if (resultPoseFollowedLauncher)
+            {
+                _resultPanelPlacement = updatedResultPanel;
+                ApplyResultPanelPlacement(
+                    "左手ランチャーと結果パネルの位置・角度を揃えて保存しました。");
+            }
+            else
+            {
+                ResultPanelPlacementStatusText.Text =
+                    "左手ランチャーの位置・角度・大きさを保存しました。";
+            }
         }
         catch (Exception exception) when (
             exception is IOException
@@ -866,8 +888,28 @@ public partial class MainWindow : Window
                 or InvalidOperationException
                 or InvalidDataException)
         {
+            if (updatedSettings is not null)
+            {
+                // Persistence failed, but the launcher calibration was already
+                // committed to the live OpenVR state. Keep the in-memory source
+                // of truth current so another calibration in this session
+                // compares against this launcher rather than the stale disk value.
+                _settings = updatedSettings;
+            }
+
+            if (resultPoseFollowedLauncher)
+            {
+                // The launcher calibration already changed the live OpenVR pose.
+                // Keep an otherwise-following result beside it for this session,
+                // even when the atomic settings write itself fails.
+                _resultPanelPlacement = updatedResultPanel;
+                ApplyResultPanelPlacement(string.Empty);
+            }
+
             ResultPanelPlacementStatusText.Text =
-                "左手ランチャーの配置を保存できませんでした。現在の起動中だけ反映します。";
+                resultPoseFollowedLauncher
+                    ? "左手ランチャーの配置を保存できませんでした。現在の起動中だけ、結果パネルも同じ位置・角度へ揃えます。"
+                    : "左手ランチャーの配置を保存できませんでした。現在の起動中だけ反映します。";
             LogResultPanelPlacementFailure(
                 "ui.wrist_launcher_placement_save_failed",
                 exception);

@@ -26,6 +26,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
     private bool _launcherPoseAvailable;
     private bool _cursorImageLoading;
     private bool _cursorReady;
+    private bool _cursorShown;
     private OpenVrIntersection? _pendingCursorIntersection;
     private WristLauncherAction _launcherHover;
     private bool _captureSuppressed;
@@ -204,6 +205,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
         _launcherInterop?.Hide();
         _cursorInterop?.Hide();
+        _cursorShown = false;
         _pendingCursorIntersection = null;
         _activationGate.Reset();
     }
@@ -288,6 +290,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
             _launcherInterop?.Hide();
             _cursorInterop?.Hide();
+            _cursorShown = false;
             _calibrationOriginalPlacement = placement;
             _calibrationActive = true;
             BeginCalibrationUpload();
@@ -315,6 +318,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
         try
         {
+            // A long launcher-only session can exhaust the bounded diagnostic
+            // budget before a result is shown. Start a fresh bounded window so
+            // the result surface itself is always observable during device
+            // acceptance and future regressions.
+            _pointerDiagnosticCount = 0;
+            _lastPointerDiagnostic = null;
+            _nextPointerDiagnosticAt = _interactionClock.Elapsed;
             _scanSessionActive = true;
             _resultDesired = true;
             _launcherState.ShowResult();
@@ -332,8 +342,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             }
 
             _texture.SetContent(title, body);
-            BeginAtlasUpload();
-            _pendingCell = _texture.CurrentResultCell;
+            BeginResultPageUpload();
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = true;
             _eventTimer.Start();
@@ -422,8 +431,14 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         }
 
         SetPointerEnabled(false);
-        if (_imageUpload.InFlight)
+        if (!_imageUpload.AtlasLoaded)
         {
+            if (!_imageUpload.InFlight)
+            {
+                _texture.SetContent(string.Empty, string.Empty);
+                BeginAtlasUpload();
+            }
+
             _pendingCell = atlasCell;
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = false;
@@ -512,6 +527,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             _interop?.HideAndConfirmInvisible(cancellationToken);
             _launcherInterop?.HideAndConfirmInvisible(cancellationToken);
             _cursorInterop?.HideAndConfirmInvisible(cancellationToken);
+            _cursorShown = false;
         });
     }
 
@@ -646,24 +662,27 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                             _queuedResultTitle = null;
                             _queuedResultBody = null;
                             _texture.SetContent(title, body);
-                            BeginAtlasUpload(drainEvents: false);
-                            _pendingCell = _texture.CurrentResultCell;
+                            BeginResultPageUpload(drainEvents: false);
                             _showAfterImageLoad = true;
                             _enableInteractionAfterImageLoad = true;
                         }
-                        else if (RequiresAtlasReloadAfterImageLoaded(
-                            completedUpload,
-                            _calibrationActive || _launcherCalibrationActive,
-                            _showAfterImageLoad))
+                        else if (!_enableInteractionAfterImageLoad
+                            && RequiresAtlasReloadAfterImageLoaded(
+                                completedUpload,
+                                _calibrationActive || _launcherCalibrationActive,
+                                _showAfterImageLoad))
                         {
-                            // A SCAN can replace calibration while its image upload is still
-                            // completing. Upload the real atlas before applying atlas bounds.
+                            // A SCAN status can replace a full-texture result or calibration
+                            // while its image upload is still completing. Restore the status
+                            // atlas before applying atlas bounds.
                             _texture.SetContent(string.Empty, string.Empty);
                             BeginAtlasUpload(drainEvents: false);
                         }
                         else if (_showAfterImageLoad)
                         {
-                            if (_calibrationActive || _launcherCalibrationActive)
+                            if (_calibrationActive
+                                || _launcherCalibrationActive
+                                || completedUpload == ResultPanelImageUploadKind.ResultPage)
                             {
                                 _interop.SelectFullTexture();
                             }
@@ -703,7 +722,12 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
             if (textureChanged)
             {
-                SelectAtlasCell(_texture.CurrentResultCell);
+                SetPointerEnabled(false);
+                UpdateCursor(null);
+                _activationGate.Reset();
+                BeginResultPageUpload();
+                _showAfterImageLoad = true;
+                _enableInteractionAfterImageLoad = true;
             }
 
             if (!_visible
@@ -794,6 +818,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             int target = 0;
             int intersectionKind = 0;
             bool intersectionAttempted = false;
+            bool resultIntersectionAttempted = false;
+            OpenVrIntersectionAttempt resultIntersectionAttempt = default;
             OverlayLocalPoint local = default;
             OverlayLocalPoint raw = default;
             WristLauncherAction launcherAction = WristLauncherAction.None;
@@ -806,9 +832,18 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                 intersectionAttempted = _launcherInterop is not null
                     || (_visible && _interactive && _interop is not null);
                 OpenVrRay ray = OpenVrRay.FromPose(sample.Pose);
-                if (_visible
-                    && _interactive
-                    && _interop?.TryComputeIntersection(ray, out OpenVrIntersection resultHit) == true)
+                OpenVrIntersection resultHit = default;
+                bool resultHitFound = false;
+                if (_visible && _interactive && _interop is not null)
+                {
+                    resultIntersectionAttempted = true;
+                    resultHitFound = _interop.TryComputeIntersection(
+                        ray,
+                        out resultHit,
+                        out resultIntersectionAttempt);
+                }
+
+                if (resultHitFound)
                 {
                     intersectionKind = 1;
                     pointerIntersection = resultHit;
@@ -869,6 +904,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                 sample,
                 intersectionAttempted,
                 intersectionKind,
+                resultIntersectionAttempted,
+                resultIntersectionAttempt,
                 raw,
                 local,
                 launcherAction,
@@ -924,6 +961,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         OpenVrPointerInputSample sample,
         bool intersectionAttempted,
         int intersectionKind,
+        bool resultIntersectionAttempted,
+        OpenVrIntersectionAttempt resultIntersectionAttempt,
         OverlayLocalPoint raw,
         OverlayLocalPoint local,
         WristLauncherAction launcherAction,
@@ -936,7 +975,16 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             return;
         }
 
-        int facingDecile = (int)MathF.Round(facing.Alignment * 10);
+        bool resultViewVisible = _visible
+            && !_calibrationActive
+            && !_launcherCalibrationActive
+            && _launcherState.View == WristLauncherView.Result;
+        // Interactive results are uploaded as one full texture per page. Keep
+        // the legacy atlas-cell field explicitly unset so device diagnostics
+        // cannot be mistaken for the superseded cells 3/4/5 path.
+        int resultCell = -1;
+        int resultPage = resultViewVisible ? _texture.CurrentResultPage : -1;
+        int resultPageCount = resultViewVisible ? _texture.ResultPageCount : 0;
         PointerDiagnosticKey key = new(
             sample.SelectActive,
             sample.SelectPressed,
@@ -949,10 +997,21 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             _launcherState.View,
             intersectionAttempted,
             intersectionKind,
+            resultIntersectionAttempted
+                ? resultIntersectionAttempt.Outcome
+                : null,
+            _visible,
+            _interactive,
+            _interop is not null,
+            _cursorShown,
             launcherAction,
             target,
             activated,
-            facingDecile);
+            resultCell,
+            resultPage,
+            resultPageCount,
+            facing.EntersFacingCone,
+            facing.RemainsInFacingCone);
         if (_lastPointerDiagnostic == key)
         {
             return;
@@ -975,6 +1034,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                     ["activated"] = activated,
                     ["connected"] = sample.DeviceConnected ? 1 : 0,
                     ["cursorReady"] = _cursorReady ? 1 : 0,
+                    ["cursorShown"] = _cursorShown ? 1 : 0,
                     ["facingEnters"] = facing.EntersFacingCone ? 1 : 0,
                     ["facingMilli"] = (long)MathF.Round(facing.Alignment * 1000),
                     ["facingRemains"] = facing.RemainsInFacingCone ? 1 : 0,
@@ -992,6 +1052,32 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                     ["poseValid"] = sample.PoseValid ? 1 : 0,
                     ["rawXMilli"] = (long)MathF.Round(raw.X * 1000),
                     ["rawYMilli"] = (long)MathF.Round(raw.Y * 1000),
+                    ["resultCell"] = resultCell,
+                    ["resultFullTexture"] = resultViewVisible ? 1 : 0,
+                    ["resultIntersectionAttempted"] = resultIntersectionAttempted ? 1 : 0,
+                    ["resultIntersectionOutcome"] = resultIntersectionAttempted
+                        ? (int)resultIntersectionAttempt.Outcome
+                        : -1,
+                    ["resultInteropReady"] = _interop is not null ? 1 : 0,
+                    ["resultMappingAccepted"] = resultIntersectionAttempt.Outcome
+                        == OpenVrIntersectionOutcome.Hit
+                        ? 1
+                        : 0,
+                    ["resultNativeHit"] = resultIntersectionAttempt.Outcome is
+                        OpenVrIntersectionOutcome.MappingRejected or
+                        OpenVrIntersectionOutcome.Hit
+                        ? 1
+                        : 0,
+                    ["resultPage"] = resultPage,
+                    ["resultPageCount"] = resultPageCount,
+                    ["resultPointerEnabled"] = _interactive ? 1 : 0,
+                    ["resultRawXMilli"] = resultIntersectionAttempt.HasRawPoint
+                        ? (long)MathF.Round(resultIntersectionAttempt.RawPoint.X * 1000)
+                        : 0,
+                    ["resultRawYMilli"] = resultIntersectionAttempt.HasRawPoint
+                        ? (long)MathF.Round(resultIntersectionAttempt.RawPoint.Y * 1000)
+                        : 0,
+                    ["resultVisible"] = _visible ? 1 : 0,
                     ["selectActive"] = sample.SelectActive ? 1 : 0,
                     ["selectChanged"] = sample.SelectChanged ? 1 : 0,
                     ["selectPressed"] = sample.SelectPressed ? 1 : 0,
@@ -1061,12 +1147,14 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         if (_cursorInterop is null || !_cursorReady || _captureSuppressed || intersection is null)
         {
             _cursorInterop?.Hide();
+            _cursorShown = false;
             return;
         }
 
         _cursorInterop.SetAbsoluteTransform(
             OpenVrAbsoluteTransform.CreateCursor(intersection.Value));
         _cursorInterop.ShowCurrentTransform();
+        _cursorShown = true;
     }
 
     private void HandleLauncherAction(WristLauncherAction action)
@@ -1158,6 +1246,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         _launcherPoseAvailable = false;
         _cursorImageLoading = false;
         _cursorReady = false;
+        _cursorShown = false;
         _pendingCursorIntersection = null;
         _lastPointerDiagnostic = null;
         _input?.Dispose();
@@ -1281,12 +1370,30 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             ResultPanelTexture.AtlasPixelHeight);
     }
 
+    private void BeginResultPageUpload(bool drainEvents = true)
+    {
+        OpenVrInterop interop = _interop
+            ?? throw new InvalidOperationException("The SteamVR overlay is not connected.");
+        while (drainEvents && interop.TryPollEvent(out _))
+        {
+            // Associate the next image completion event with this upload.
+        }
+
+        _imageUpload.Begin(ResultPanelImageUploadKind.ResultPage);
+        byte[] pixels = _texture.RenderCurrentResultRgba();
+        interop.SetImage(
+            pixels,
+            ResultPanelTexture.PixelWidth,
+            ResultPanelTexture.PixelHeight);
+    }
+
     internal static bool RequiresAtlasReloadAfterImageLoaded(
         ResultPanelImageUploadKind completedUpload,
-        bool calibrationActive,
+        bool fullTextureStillActive,
         bool showAfterImageLoad) =>
-        completedUpload == ResultPanelImageUploadKind.Calibration
-        && !calibrationActive
+        (completedUpload is ResultPanelImageUploadKind.ResultPage
+            or ResultPanelImageUploadKind.Calibration)
+        && !fullTextureStillActive
         && showAfterImageLoad;
 
     private void BeginCalibrationUpload()
@@ -1343,7 +1450,12 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                 FinishPlacementCalibration(save: false);
                 return;
             default:
-                ResultPanelPlacement updated = ResultPanelCalibration.Apply(_placement, action);
+                ResultPanelPlacement updated = action == ResultPanelCalibrationAction.Reset
+                    && _placement.Anchor == ResultPanelAnchor.LeftHand
+                        ? ResultPanelPlacement.CreateAlignedToWristLauncher(
+                            _launcherPlacement,
+                            ResultPanelPlacement.Default.WidthMeters)
+                        : ResultPanelCalibration.Apply(_placement, action);
                 if (updated == _placement)
                 {
                     return;
@@ -1493,10 +1605,19 @@ internal readonly record struct PointerDiagnosticKey(
     WristLauncherView LauncherView,
     bool IntersectionAttempted,
     int IntersectionKind,
+    OpenVrIntersectionOutcome? ResultIntersectionOutcome,
+    bool ResultVisible,
+    bool ResultPointerEnabled,
+    bool ResultInteropReady,
+    bool CursorShown,
     WristLauncherAction LauncherAction,
     int Target,
     int Activated,
-    int FacingDecile);
+    int ResultCell,
+    int ResultPage,
+    int ResultPageCount,
+    bool FacingEnters,
+    bool FacingRemains);
 
 internal sealed record ResultPanelPlacementCalibrationEventArgs(
     ResultPanelPlacement Placement,
@@ -1506,6 +1627,7 @@ internal enum ResultPanelImageUploadKind
 {
     None,
     Atlas,
+    ResultPage,
     Calibration,
 }
 

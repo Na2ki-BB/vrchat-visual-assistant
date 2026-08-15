@@ -14,6 +14,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private const int VrEventSize = 64;
     private const int OverlayIntersectionParamsSize = 28;
     private const int OverlayIntersectionResultsSize = 36;
+    private const uint OverlayIntersectionMaskPrimitiveSize = 20;
     private const string DefaultOverlayKey = "com.na2kibb.vrcva.result";
     private const string DefaultOverlayName = "VRChat Visual Assistant Result";
 
@@ -32,19 +33,17 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private readonly SetOverlayInputMethodDelegate _setOverlayInputMethod;
     private readonly SetOverlayMouseScaleDelegate _setOverlayMouseScale;
     private readonly ComputeOverlayIntersectionDelegate _computeOverlayIntersection;
+    private readonly SetOverlayIntersectionMaskDelegate _setOverlayIntersectionMask;
     private readonly SetOverlayFlagDelegate _setOverlayFlag;
     private readonly SetOverlaySortOrderDelegate _setOverlaySortOrder;
     private readonly SetOverlayRawDelegate _setOverlayRaw;
     private readonly ShowOverlayDelegate _showOverlay;
     private readonly PollNextOverlayEventDelegate _pollNextOverlayEvent;
-    private readonly OverlaySurfaceSpec _surface;
     private readonly string _overlayKey;
     private readonly string _overlayName;
     private ResultPanelPlacement _placement;
     private ResultPanelTransform _placementTransform;
-    private int _selectedCell;
-    private int _atlasColumns = 1;
-    private int _atlasRows = 1;
+    private OverlayTextureView _textureView;
     private ulong _overlayHandle;
     private bool _disposed;
 
@@ -62,7 +61,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         _runtime = runtime;
         _placement = placement;
         _placementTransform = placement.CreateTransform();
-        _surface = surface;
+        _textureView = OverlayTextureView.CreateFull(surface);
         _overlayKey = ValidateOverlayText(overlayKey, nameof(overlayKey));
         _overlayName = ValidateOverlayText(overlayName, nameof(overlayName));
         _placement.Validate();
@@ -110,6 +109,9 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         _computeOverlayIntersection = OpenVrRuntime.GetFunction<ComputeOverlayIntersectionDelegate>(
             overlayFunctionTable,
             OverlaySlot.ComputeOverlayIntersection);
+        _setOverlayIntersectionMask = OpenVrRuntime.GetFunction<SetOverlayIntersectionMaskDelegate>(
+            overlayFunctionTable,
+            OverlaySlot.SetOverlayIntersectionMask);
         _setOverlayRaw = OpenVrRuntime.GetFunction<SetOverlayRawDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayRaw);
@@ -278,38 +280,17 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     public void SelectAtlasCell(int cell, int columns, int rows)
     {
         ThrowIfDisposed();
-        if (columns <= 0 || rows <= 0 || cell < 0 || cell >= columns * rows)
-        {
-            throw new ArgumentOutOfRangeException(nameof(cell));
-        }
-
-        float cellWidth = 1f / columns;
-        float cellHeight = 1f / rows;
-        int column = cell % columns;
-        int row = cell / columns;
-        // Each atlas cell is one logical surface. Deriving the full texture
-        // size from the surface keeps result and launcher atlases identical.
-        float halfTexelU = 0.5f / _surface.LogicalWidth / columns;
-        float halfTexelV = 0.5f / _surface.LogicalHeight / rows;
-        VrTextureBounds bounds = new(
-            (column * cellWidth) + halfTexelU,
-            (row * cellHeight) + halfTexelV,
-            ((column + 1) * cellWidth) - halfTexelU,
-            ((row + 1) * cellHeight) - halfTexelV);
-        EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref bounds));
-        _selectedCell = cell;
-        _atlasColumns = columns;
-        _atlasRows = rows;
+        SetTextureView(OverlayTextureView.CreateAtlasCell(
+            _textureView.Surface,
+            cell,
+            columns,
+            rows));
     }
 
     public void SelectFullTexture()
     {
         ThrowIfDisposed();
-        VrTextureBounds bounds = new(0, 0, 1, 1);
-        EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref bounds));
-        _selectedCell = 0;
-        _atlasColumns = 1;
-        _atlasRows = 1;
+        SetTextureView(OverlayTextureView.CreateFull(_textureView.Surface));
     }
 
     public void Show()
@@ -413,10 +394,35 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
 
     public bool TryComputeIntersection(OpenVrRay ray, out OpenVrIntersection intersection)
     {
+        OpenVrIntersectionAttempt attempt;
+        return TryComputeIntersection(ray, out intersection, out attempt);
+    }
+
+    public bool TryComputeIntersection(
+        OpenVrRay ray,
+        out OpenVrIntersection intersection,
+        out OpenVrIntersectionOutcome outcome)
+    {
+        bool hit = TryComputeIntersection(
+            ray,
+            out intersection,
+            out OpenVrIntersectionAttempt attempt);
+        outcome = attempt.Outcome;
+        return hit;
+    }
+
+    public bool TryComputeIntersection(
+        OpenVrRay ray,
+        out OpenVrIntersection intersection,
+        out OpenVrIntersectionAttempt attempt)
+    {
         ThrowIfDisposed();
         if (!_isOverlayVisible(_overlayHandle))
         {
             intersection = default;
+            attempt = new OpenVrIntersectionAttempt(
+                OpenVrIntersectionOutcome.OverlayHidden,
+                default);
             return false;
         }
 
@@ -430,22 +436,23 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         if (!_computeOverlayIntersection(_overlayHandle, ref parameters, ref results))
         {
             intersection = default;
+            attempt = new OpenVrIntersectionAttempt(
+                OpenVrIntersectionOutcome.NativeMiss,
+                default);
             return false;
         }
 
-        intersection = new OpenVrIntersection(
-            _surface.ToAtlasCellLocal(
-                results.UVs.X,
-                results.UVs.Y,
-                _selectedCell,
-                _atlasColumns,
-                _atlasRows),
+        OpenVrNativeIntersection nativeIntersection = new(
+            new OverlayLocalPoint(results.UVs.X, results.UVs.Y),
             results.Point.ToOpenVrVector3(),
             results.Normal.ToOpenVrVector3(),
-            ray.Direction,
-            results.Distance,
-            new OverlayLocalPoint(results.UVs.X, results.UVs.Y));
-        return true;
+            results.Distance);
+        return TryMapNativeIntersection(
+            ray,
+            _textureView,
+            nativeIntersection,
+            out intersection,
+            out attempt);
     }
 
     public bool TryPollEvent(out OpenVrEvent overlayEvent)
@@ -502,12 +509,32 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
             Marshal.FreeCoTaskMem(name);
         }
 
+        SetTextureView(_textureView);
         LastPlacementUsedFallback = ApplyPlacement();
 
         EnsureSuccess(_setOverlayInputMethod(_overlayHandle, VrOverlayInputMethod.None));
-        HmdVector2 mouseScale = new(_surface.LogicalWidth, _surface.LogicalHeight);
-        EnsureSuccess(_setOverlayMouseScale(_overlayHandle, ref mouseScale));
+        ApplyInteractionConfiguration(
+            _textureView.Surface,
+            SetMouseScale,
+            SetIntersectionMask);
         SetFlag(VrOverlayFlag.MakeOverlaysInteractiveIfVisible, false);
+    }
+
+    private void SetMouseScale(OpenVrOverlayMouseScaleCall call)
+    {
+        HmdVector2 mouseScale = new(call.Width, call.Height);
+        EnsureSuccess(_setOverlayMouseScale(_overlayHandle, ref mouseScale));
+    }
+
+    private void SetIntersectionMask(OpenVrOverlayIntersectionMaskCall call)
+    {
+        VrOverlayIntersectionMaskPrimitive intersectionMask =
+            VrOverlayIntersectionMaskPrimitive.CreateRectangle(call.Rectangle);
+        EnsureSuccess(_setOverlayIntersectionMask(
+            _overlayHandle,
+            ref intersectionMask,
+            call.PrimitiveCount,
+            call.PrimitiveSize));
     }
 
     private bool ApplyPlacement()
@@ -566,6 +593,18 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
             RollDegrees: 0,
             placement.MenuWidthMeters);
 
+    private void SetTextureView(OverlayTextureView textureView)
+    {
+        OverlayTextureBounds viewBounds = textureView.UpperLeftTextureBounds;
+        VrTextureBounds nativeBounds = new(
+            viewBounds.UMin,
+            viewBounds.VMin,
+            viewBounds.UMax,
+            viewBounds.VMax);
+        EnsureSuccess(_setOverlayTextureBounds(_overlayHandle, ref nativeBounds));
+        _textureView = textureView;
+    }
+
     private void SetFlag(VrOverlayFlag flag, bool enabled = true) =>
         EnsureSuccess(_setOverlayFlag(_overlayHandle, flag, enabled));
 
@@ -586,6 +625,79 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         AssertSize<HmdVector3>(12);
         AssertSize<VrOverlayIntersectionParams>(OverlayIntersectionParamsSize);
         AssertSize<VrOverlayIntersectionResults>(OverlayIntersectionResultsSize);
+        AssertSize<VrOverlayIntersectionMaskRectangle>(16);
+        AssertSize<VrOverlayIntersectionMaskPrimitiveData>(16);
+        AssertSize<VrOverlayIntersectionMaskPrimitive>(
+            checked((int)OverlayIntersectionMaskPrimitiveSize));
+    }
+
+    internal const int SetOverlayMouseScaleFunctionSlot = OverlaySlot.SetOverlayMouseScale;
+
+    internal const int SetOverlayIntersectionMaskFunctionSlot = OverlaySlot.SetOverlayIntersectionMask;
+
+    internal const uint IntersectionMaskPrimitiveAbiSize = OverlayIntersectionMaskPrimitiveSize;
+
+    internal static OpenVrOverlayInteractionConfiguration CreateInteractionConfiguration(
+        OverlaySurfaceSpec surface)
+    {
+        surface.Validate();
+        return new OpenVrOverlayInteractionConfiguration(
+            surface.LogicalWidth,
+            surface.LogicalHeight,
+            new OpenVrIntersectionMaskRectangleSpec(
+                0,
+                0,
+                surface.LogicalWidth,
+                surface.LogicalHeight));
+    }
+
+    internal static void ApplyInteractionConfiguration(
+        OverlaySurfaceSpec surface,
+        Action<OpenVrOverlayMouseScaleCall> setMouseScale,
+        Action<OpenVrOverlayIntersectionMaskCall> setIntersectionMask)
+    {
+        ArgumentNullException.ThrowIfNull(setMouseScale);
+        ArgumentNullException.ThrowIfNull(setIntersectionMask);
+        OpenVrOverlayInteractionConfiguration configuration =
+            CreateInteractionConfiguration(surface);
+        setMouseScale(new OpenVrOverlayMouseScaleCall(
+            configuration.MouseScaleWidth,
+            configuration.MouseScaleHeight));
+        setIntersectionMask(new OpenVrOverlayIntersectionMaskCall(
+            configuration.IntersectionMask,
+            PrimitiveCount: 1,
+            PrimitiveSize: OverlayIntersectionMaskPrimitiveSize));
+    }
+
+    internal static bool TryMapNativeIntersection(
+        OpenVrRay ray,
+        OverlayTextureView textureView,
+        OpenVrNativeIntersection nativeIntersection,
+        out OpenVrIntersection intersection,
+        out OpenVrIntersectionAttempt attempt)
+    {
+        OverlayLocalPoint rawPoint = nativeIntersection.RawPoint;
+        if (!textureView.TryMapAtlasGlobalLowerOriginToTopLeftLocal(
+                rawPoint.X,
+                rawPoint.Y,
+                out OverlayLocalPoint localPoint))
+        {
+            intersection = default;
+            attempt = new OpenVrIntersectionAttempt(
+                OpenVrIntersectionOutcome.MappingRejected,
+                rawPoint);
+            return false;
+        }
+
+        intersection = new OpenVrIntersection(
+            localPoint,
+            nativeIntersection.Point,
+            nativeIntersection.Normal,
+            ray.Direction,
+            nativeIntersection.Distance,
+            rawPoint);
+        attempt = new OpenVrIntersectionAttempt(OpenVrIntersectionOutcome.Hit, rawPoint);
+        return true;
     }
 
     private static void AssertSize<T>(int expected)
@@ -643,6 +755,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         public const int SetOverlayInputMethod = 48;
         public const int SetOverlayMouseScale = 50;
         public const int ComputeOverlayIntersection = 51;
+        public const int SetOverlayIntersectionMask = 53;
         public const int SetOverlayRaw = 60;
     }
 
@@ -734,6 +847,13 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         ref VrOverlayIntersectionResults results);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate EvrOverlayError SetOverlayIntersectionMaskDelegate(
+        ulong overlayHandle,
+        ref VrOverlayIntersectionMaskPrimitive maskPrimitives,
+        uint numberOfMaskPrimitives,
+        uint primitiveSize);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate EvrOverlayError SetOverlayRawDelegate(
         ulong overlayHandle,
         IntPtr buffer,
@@ -761,6 +881,12 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private enum TrackingUniverseOrigin
     {
         Standing = 1,
+    }
+
+    internal enum VrOverlayIntersectionMaskPrimitiveType
+    {
+        Rectangle = 0,
+        Circle = 1,
     }
 
     [Flags]
@@ -865,6 +991,48 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct VrOverlayIntersectionMaskRectangle
+    {
+        public float TopLeftX;
+        public float TopLeftY;
+        public float Width;
+        public float Height;
+
+        public static VrOverlayIntersectionMaskRectangle From(
+            OpenVrIntersectionMaskRectangleSpec rectangle) => new()
+            {
+                TopLeftX = rectangle.X,
+                TopLeftY = rectangle.Y,
+                Width = rectangle.Width,
+                Height = rectangle.Height,
+            };
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 16)]
+    internal struct VrOverlayIntersectionMaskPrimitiveData
+    {
+        [FieldOffset(0)]
+        public VrOverlayIntersectionMaskRectangle Rectangle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VrOverlayIntersectionMaskPrimitive
+    {
+        public VrOverlayIntersectionMaskPrimitiveType PrimitiveType;
+        public VrOverlayIntersectionMaskPrimitiveData Primitive;
+
+        public static VrOverlayIntersectionMaskPrimitive CreateRectangle(
+            OpenVrIntersectionMaskRectangleSpec rectangle) => new()
+            {
+                PrimitiveType = VrOverlayIntersectionMaskPrimitiveType.Rectangle,
+                Primitive = new VrOverlayIntersectionMaskPrimitiveData
+                {
+                    Rectangle = VrOverlayIntersectionMaskRectangle.From(rectangle),
+                },
+            };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct VrTextureBounds(float uMin, float vMin, float uMax, float vMax)
     {
         public float UMin = uMin;
@@ -923,6 +1091,59 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         public uint CursorIndex;
     }
 }
+
+internal enum OpenVrIntersectionOutcome
+{
+    OverlayHidden,
+    NativeMiss,
+    MappingRejected,
+    Hit,
+}
+
+internal readonly record struct OpenVrIntersectionAttempt(
+    OpenVrIntersectionOutcome Outcome,
+    OverlayLocalPoint RawPoint)
+{
+    public bool HasRawPoint =>
+        Outcome is OpenVrIntersectionOutcome.MappingRejected or OpenVrIntersectionOutcome.Hit;
+}
+
+internal readonly record struct OpenVrNativeIntersection(
+    OverlayLocalPoint RawPoint,
+    OpenVrVector3 Point,
+    OpenVrVector3 Normal,
+    float Distance);
+
+internal readonly record struct OpenVrIntersectionMaskRectangleSpec(
+    float X,
+    float Y,
+    float Width,
+    float Height)
+{
+    public bool Contains(float x, float y) =>
+        x >= X
+        && x <= X + Width
+        && y >= Y
+        && y <= Y + Height;
+
+    public bool ContainsRectangle(float x, float y, float width, float height) =>
+        width >= 0
+        && height >= 0
+        && Contains(x, y)
+        && Contains(x + width, y + height);
+}
+
+internal readonly record struct OpenVrOverlayInteractionConfiguration(
+    float MouseScaleWidth,
+    float MouseScaleHeight,
+    OpenVrIntersectionMaskRectangleSpec IntersectionMask);
+
+internal readonly record struct OpenVrOverlayMouseScaleCall(float Width, float Height);
+
+internal readonly record struct OpenVrOverlayIntersectionMaskCall(
+    OpenVrIntersectionMaskRectangleSpec Rectangle,
+    uint PrimitiveCount,
+    uint PrimitiveSize);
 
 internal readonly record struct OpenVrEvent(
     uint EventType,

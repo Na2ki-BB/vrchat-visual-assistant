@@ -105,7 +105,7 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
-    public void SaveAndLoad_RoundTripsNonSecretSettingsWithoutTemporaryFile()
+    public void SaveAndLoad_Version5RoundTripsNonSecretSettingsWithoutTemporaryFile()
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -129,7 +129,7 @@ public sealed class VrcVaSettingsStoreTests
             Assert.Equal(expected, store.Load());
             Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
             string json = File.ReadAllText(path);
-            Assert.Contains("\"Version\": 4", json, StringComparison.Ordinal);
+            Assert.Contains("\"Version\": 5", json, StringComparison.Ordinal);
             Assert.DoesNotContain("ChipWidthMeters", json, StringComparison.Ordinal);
             Assert.DoesNotContain("ApiKey", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("SourceText", json, StringComparison.OrdinalIgnoreCase);
@@ -148,18 +148,235 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
+    public void SaveAndLoad_Version5IsIdempotentAndDoesNotRealignLeftHandResult()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            VrcVaSettings expected = new(
+                new ResultPanelPlacement(
+                    ResultPanelAnchor.LeftHand,
+                    X: -0.04,
+                    Y: 0.06,
+                    Z: -0.1,
+                    PitchDegrees: 0,
+                    YawDegrees: 0,
+                    RollDegrees: 0,
+                    WidthMeters: 0.92),
+                new VrcVaOnboardingSettings(
+                    IsCompleted: true,
+                    SteamVrAutoLaunchEnabled: true),
+                WristLauncherPlacement.Default with
+                {
+                    X = -0.08,
+                    Y = 0.04,
+                    Z = 0.17,
+                    Rotation = new WristLauncherRotation(
+                        x: 0.620757676358921,
+                        y: -0.30368403351998446,
+                        z: -0.6506664979887965,
+                        w: 0.3147523207563398),
+                    MenuWidthMeters = 0.25,
+                });
+            VrcVaSettingsStore store = new(path);
+
+            store.Save(expected);
+            string firstJson = File.ReadAllText(path);
+            VrcVaSettings loaded = store.Load();
+            store.Save(loaded);
+            string secondJson = File.ReadAllText(path);
+
+            Assert.Equal(expected, loaded);
+            Assert.Equal(firstJson, secondJson);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveAndLoad_Version5LauncherChange_PersistsFollowingResultPoseAndWidth()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            WristLauncherPlacement previousLauncher = WristLauncherPlacement.Default with
+            {
+                X = -0.08,
+                Y = 0.04,
+                Z = 0.17,
+                Rotation = WristLauncherRotation.FromEulerDegrees(-145, 61, -17),
+                MenuWidthMeters = 0.25,
+            };
+            WristLauncherPlacement updatedLauncher = previousLauncher with
+            {
+                X = -0.13,
+                Y = 0.09,
+                Z = 0.24,
+                Rotation = WristLauncherRotation.FromEulerDegrees(172, 72, -8),
+                MenuWidthMeters = 0.41,
+            };
+            ResultPanelPlacement previousResult =
+                ResultPanelPlacement.CreateAlignedToWristLauncher(
+                    previousLauncher,
+                    widthMeters: 0.92);
+            ResultPanelPlacement updatedResult = previousResult.FollowWristLauncherChange(
+                previousLauncher,
+                updatedLauncher);
+            VrcVaSettingsStore store = new(path);
+
+            store.Save(new VrcVaSettings(
+                updatedResult,
+                VrcVaOnboardingSettings.Default,
+                updatedLauncher));
+            VrcVaSettings loaded = store.Load();
+
+            Assert.Equal(0.92, loaded.ResultPanel.WidthMeters);
+            AssertTransformEqual(
+                loaded.WristLauncher.CreateTransform(),
+                loaded.ResultPanel.CreateTransform());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Load_RejectsUnknownFutureVersion()
     {
         string directory = CreateTemporaryDirectory();
         try
         {
             string path = Path.Combine(directory, "settings.json");
-            File.WriteAllText(path, "{\"Version\":5}");
+            File.WriteAllText(path, "{\"Version\":6}");
 
             InvalidDataException exception = Assert.Throws<InvalidDataException>(
                 () => new VrcVaSettingsStore(path).Load());
 
             Assert.Contains("newer", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Load_Version1Through3LeftHandResult_AlignsToStoredOrDefaultLauncher(
+        int version)
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            ResultPanelPlacement storedResult = new(
+                ResultPanelAnchor.LeftHand,
+                X: -0.04,
+                Y: 0.06,
+                Z: -0.1,
+                PitchDegrees: 0,
+                YawDegrees: 0,
+                RollDegrees: 0,
+                WidthMeters: 0.92);
+            File.WriteAllText(path, CreateLegacySettingsJson(version, storedResult));
+
+            VrcVaSettings settings = new VrcVaSettingsStore(path).Load();
+
+            Assert.Equal(ResultPanelAnchor.LeftHand, settings.ResultPanel.Anchor);
+            Assert.Equal(storedResult.WidthMeters, settings.ResultPanel.WidthMeters);
+            AssertTransformEqual(
+                settings.WristLauncher.CreateTransform(),
+                settings.ResultPanel.CreateTransform());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Load_Version4CurrentPlacementFixture_AlignsFullTransformAndPreservesWidth()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            File.WriteAllText(path, """
+                {
+                  "Version": 4,
+                  "ResultPanel": {
+                    "Anchor": 0,
+                    "X": -0.04000000000000001,
+                    "Y": 0.06,
+                    "Z": -0.1,
+                    "PitchDegrees": 0,
+                    "YawDegrees": 0,
+                    "RollDegrees": 0,
+                    "WidthMeters": 0.9200000000000002
+                  },
+                  "Onboarding": {
+                    "IsCompleted": true,
+                    "SteamVrAutoLaunchEnabled": true
+                  },
+                  "WristLauncher": {
+                    "X": -0.08,
+                    "Y": 0.04,
+                    "Z": 0.16999999999999996,
+                    "Rotation": {
+                      "X": 0.620757676358921,
+                      "Y": -0.30368403351998446,
+                      "Z": -0.6506664979887965,
+                      "W": 0.3147523207563398
+                    },
+                    "MenuWidthMeters": 0.25
+                  }
+                }
+                """);
+
+            VrcVaSettings settings = new VrcVaSettingsStore(path).Load();
+
+            Assert.Equal(0.9200000000000002, settings.ResultPanel.WidthMeters);
+            AssertTransformEqual(
+                settings.WristLauncher.CreateTransform(),
+                settings.ResultPanel.CreateTransform());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData((int)ResultPanelAnchor.RightHand)]
+    [InlineData((int)ResultPanelAnchor.Headset)]
+    public void Load_Version4NonLeftHandResult_PreservesPlacement(int anchorValue)
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            ResultPanelAnchor anchor = (ResultPanelAnchor)anchorValue;
+            ResultPanelPlacement storedResult = new(
+                anchor,
+                X: -0.14,
+                Y: 0.31,
+                Z: -0.72,
+                PitchDegrees: -23,
+                YawDegrees: 47,
+                RollDegrees: 11,
+                WidthMeters: 0.79);
+            File.WriteAllText(path, CreateLegacySettingsJson(version: 4, storedResult));
+
+            VrcVaSettings settings = new VrcVaSettingsStore(path).Load();
+
+            Assert.Equal(storedResult, settings.ResultPanel);
         }
         finally
         {
@@ -324,6 +541,66 @@ public sealed class VrcVaSettingsStoreTests
         Assert.Equal(expected.M9, actual.M9, precision: 6);
         Assert.Equal(expected.M10, actual.M10, precision: 6);
         Assert.Equal(expected.M11, actual.M11, precision: 6);
+    }
+
+    private static string CreateLegacySettingsJson(
+        int version,
+        ResultPanelPlacement resultPanel)
+    {
+        VrcVaOnboardingSettings onboarding = new(
+            IsCompleted: true,
+            SteamVrAutoLaunchEnabled: true);
+        return version switch
+        {
+            1 => JsonSerializer.Serialize(new
+            {
+                Version = version,
+                ResultPanel = resultPanel,
+            }),
+            2 => JsonSerializer.Serialize(new
+            {
+                Version = version,
+                ResultPanel = resultPanel,
+                Onboarding = onboarding,
+            }),
+            3 => JsonSerializer.Serialize(new
+            {
+                Version = version,
+                ResultPanel = resultPanel,
+                Onboarding = onboarding,
+                WristLauncher = new
+                {
+                    X = -0.08,
+                    Y = 0.04,
+                    Z = 0.17,
+                    PitchDegrees = -145.0,
+                    YawDegrees = 61.0,
+                    RollDegrees = -17.0,
+                    MenuWidthMeters = 0.25,
+                },
+            }),
+            4 => JsonSerializer.Serialize(new
+            {
+                Version = version,
+                ResultPanel = resultPanel,
+                Onboarding = onboarding,
+                WristLauncher = new
+                {
+                    X = -0.08,
+                    Y = 0.04,
+                    Z = 0.17,
+                    Rotation = new
+                    {
+                        X = 0.620757676358921,
+                        Y = -0.30368403351998446,
+                        Z = -0.6506664979887965,
+                        W = 0.3147523207563398,
+                    },
+                    MenuWidthMeters = 0.25,
+                },
+            }),
+            _ => throw new ArgumentOutOfRangeException(nameof(version)),
+        };
     }
 
     private static string CreateTemporaryDirectory()

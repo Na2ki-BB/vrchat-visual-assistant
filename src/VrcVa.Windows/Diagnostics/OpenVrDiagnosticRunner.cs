@@ -16,15 +16,15 @@ internal static class OpenVrDiagnosticRunner
         const string sampleText = """
             これはVRChat Visual Assistantの表示テストです。
 
-            結果は自動では消えません。右上の「閉じる」を選ぶまで表示されます。
+            結果は自動では消えません。本文下部の「閉じる ×」を選ぶまで表示されます。
 
             この文章はスクロール動作を確認するための固定ダミーです。画像、OCR結果、翻訳結果、APIキーは使用していません。
 
             1. コントローラーのレーザーポインターをパネルへ向けます。
-            2. スティックまたはタッチ操作で下へスクロールします。
-            3. 右側のスクロール位置が動くことを確認します。
-            4. 上へ戻せることも確認します。
-            5. 最後に右上の「閉じる」を選びます。
+            2. 本文下部の「次へ ▶」と「◀ 前へ」でページを往復します。
+            3. 右端の青いバーを下側・上側の順に選び、ページが移動することを確認します。
+            4. パネルを表示したままVRChat内を歩けることを確認します。
+            5. 最後に本文下部の「閉じる ×」を選びます。
 
             長い翻訳結果でも、読む速さに合わせて表示を維持できます。
             次のSCANを開始した場合は、古い結果をいったん閉じ、新しい結果へ置き換えます。
@@ -42,7 +42,7 @@ internal static class OpenVrDiagnosticRunner
         }
 
         Console.WriteLine(
-            "Overlay displayed with interaction enabled. Movement is unavailable until Close is selected.");
+            "Overlay displayed with pass-through interaction enabled. VRChat movement should remain available; use the body control rail and right scrollbar, then select Close.");
         Task completed = await Task.WhenAny(closed.Task, Task.Delay(TestTimeout));
         if (completed != closed.Task)
         {

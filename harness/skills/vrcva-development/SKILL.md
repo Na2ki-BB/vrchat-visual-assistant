@@ -12,7 +12,7 @@ Use this workflow for every VRCVA change.
 1. Follow the active session instructions. If the repository contains an `AGENTS.md`, read it; its absence is not a blocker. Inspect `README.md`, `DESIGN.md`, `TASKS.md`, and the relevant code before proposing behavior.
 2. State the outcome, non-goals, affected files, and validation plan before a multi-file or uncertain change.
 3. Keep product behavior, magic numbers, thresholds, and compatibility workarounds in production code with focused tests; do not encode them in this skill.
-4. Read [source-of-truth.md](references/source-of-truth.md) before changing OpenVR interop, placement, capture sequencing, or persisted settings.
+4. Read [source-of-truth.md](references/source-of-truth.md) before changing OpenVR interop, atlas-backed UI/hit testing, placement, capture sequencing, or persisted settings.
 
 ## 2. Preserve boundaries
 
@@ -26,7 +26,10 @@ Use this workflow for every VRCVA change.
 1. Make the smallest cohesive production and test changes.
 2. Maintain cancellation, disposal, fallback, and interaction-release paths whenever adding UI, capture, or OpenVR state.
 3. Add or update focused tests for changed behavior, especially ABI layouts, capture ordering, persistence, and failure paths.
-4. Keep the desktop fallback functional when SteamVR is absent.
+4. For an atlas-backed control, test the integrated raw-intersection → selected-view inverse → logical hit-test path for every interactive cell. Separate transform and rectangle tests are not sufficient.
+5. Keep interactive result pages on the full 1280x720 texture path and the result header display-only on the supported runtime. Result actions belong to the fixed body control rail; changes must verify the full-surface OpenVR mask, distinguish native miss from mapping rejection, and prove each visible body control through the integrated full-view path on every page. Do not move controls back into the header based on managed rectangle tests alone.
+6. Keep the cursor's visible center at the native intersection point. Use OpenVR sort order for stacking; never add a surface-normal offset that separates the cursor from its hit target.
+7. Keep the desktop fallback functional when SteamVR is absent.
 
 ## 4. Verify and hand off
 
@@ -43,6 +46,12 @@ Use this workflow for every VRCVA change.
    dotnet test .\tests\VrcVa.Core.Tests\VrcVa.Core.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~FeatureCatalogTests|FullyQualifiedName~SummarizeAnalyzerTests"
    dotnet test .\tests\VrcVa.Infrastructure.Tests\VrcVa.Infrastructure.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~OpenAiResponsesTextModelClientTests|FullyQualifiedName~OpenAiTextTranslatorTests"
    dotnet test .\tests\VrcVa.Windows.Tests\VrcVa.Windows.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~FeatureResultPresentationTests|FullyQualifiedName~TranslationRuntimeTests"
+   ```
+
+   For result texture coordinates, body controls, or pointer activation, use:
+
+   ```powershell
+   dotnet test .\tests\VrcVa.Windows.Tests\VrcVa.Windows.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~OpenVrOverlayIntersectionTests|FullyQualifiedName~ResultPanelTextureTests|FullyQualifiedName~PointerActivationGateTests"
    ```
 
 3. Run the repository-wide compile/type check, all tests, and formatting check. In this .NET repository, `dotnet build` is the type check and `dotnet format` is the lint/format check:

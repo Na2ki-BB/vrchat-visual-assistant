@@ -836,7 +836,7 @@ public sealed class PointerCursorTests
                 cursorConnected));
 
     [Fact]
-    public void CreateCursor_OffsetsFromSurfaceAndBuildsFiniteOrthonormalTransform()
+    public void CreateCursor_CentersOnIntersectionAndBuildsFiniteOrthonormalTransform()
     {
         OpenVrIntersection intersection = new(
             new OverlayLocalPoint(640, 360),
@@ -849,7 +849,7 @@ public sealed class PointerCursorTests
 
         Assert.Equal(1, transform.M3, 4);
         Assert.Equal(2, transform.M7, 4);
-        Assert.Equal(3.003f, transform.M11, 4);
+        Assert.Equal(3, transform.M11, 4);
         Assert.Equal(1, transform.M10, 4);
         Assert.All(
             new[]
@@ -864,11 +864,11 @@ public sealed class PointerCursorTests
     [Theory]
     [InlineData(2)]
     [InlineData(-2)]
-    public void CreateCursor_UsesTargetPlaneAtObliqueAngles(float normalZ)
+    public void CreateCursor_UsesTargetPlaneWithoutParallaxAtObliqueAngles(float normalZ)
     {
         OpenVrIntersection intersection = new(
             new OverlayLocalPoint(1100, 100),
-            new OpenVrVector3(0, 0, 0),
+            new OpenVrVector3(0.25f, -0.5f, 0.75f),
             new OpenVrVector3(0, 0, normalZ),
             new OpenVrVector3(0.8660254f, 0, -0.5f),
             1.25f);
@@ -878,9 +878,9 @@ public sealed class PointerCursorTests
         Assert.Equal(0, transform.M2, 6);
         Assert.Equal(0, transform.M6, 6);
         Assert.Equal(1, transform.M10, 6);
-        Assert.Equal(0, transform.M3, 6);
-        Assert.Equal(0, transform.M7, 6);
-        Assert.Equal(0.003f, transform.M11, 6);
+        Assert.Equal(intersection.TrackingPoint.X, transform.M3, 6);
+        Assert.Equal(intersection.TrackingPoint.Y, transform.M7, 6);
+        Assert.Equal(intersection.TrackingPoint.Z, transform.M11, 6);
 
         float sourceFacing =
             (transform.M2 * -intersection.PointerDirection.X)
@@ -903,7 +903,7 @@ public sealed class PointerCursorTests
         })
         {
             float cornerZ = transform.M11 + (transform.M8 * x) + (transform.M9 * y);
-            Assert.Equal(0.003f, cornerZ, 6);
+            Assert.Equal(intersection.TrackingPoint.Z, cornerZ, 6);
         }
     }
 

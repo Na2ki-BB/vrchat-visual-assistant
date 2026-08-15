@@ -8,6 +8,8 @@ namespace VrcVa.Windows.OpenVr;
 /// </summary>
 internal readonly record struct WristLauncherRotation
 {
+    private const double EulerSingularityThreshold = 1e-12;
+
     [JsonConstructor]
     public WristLauncherRotation(double x, double y, double z, double w)
     {
@@ -129,6 +131,54 @@ internal readonly record struct WristLauncherRotation
     public WristLauncherRotation RotateLocalZ(double degrees) =>
         Multiply(this, FromAxisAngle(degrees, x: 0, y: 0, z: 1));
 
+    public (double PitchDegrees, double YawDegrees, double RollDegrees)
+        ToRzRyRxEulerDegrees()
+    {
+        Validate();
+
+        double xx = X * X;
+        double yy = Y * Y;
+        double zz = Z * Z;
+        double xy = X * Y;
+        double xz = X * Z;
+        double yz = Y * Z;
+        double xw = X * W;
+        double yw = Y * W;
+        double zw = Z * W;
+
+        double m00 = 1 - (2 * (yy + zz));
+        double m10 = 2 * (xy + zw);
+        double m20 = 2 * (xz - yw);
+        double m11 = 1 - (2 * (xx + zz));
+        double m12 = 2 * (yz - xw);
+        double m21 = 2 * (yz + xw);
+        double m22 = 1 - (2 * (xx + yy));
+
+        // R = Rz(roll) * Ry(yaw) * Rx(pitch). Use atan2 with the
+        // non-negative horizontal length so yaw stays in [-90, 90].
+        double horizontalLength = Math.Sqrt((m00 * m00) + (m10 * m10));
+        double yaw = Math.Atan2(-m20, horizontalLength);
+        double pitch;
+        double roll;
+        if (horizontalLength > EulerSingularityThreshold)
+        {
+            pitch = Math.Atan2(m21, m22);
+            roll = Math.Atan2(m10, m00);
+        }
+        else
+        {
+            // At yaw +/-90 degrees, pitch and roll are not independently
+            // observable. Choosing roll=0 preserves the complete matrix.
+            pitch = Math.Atan2(-m12, m11);
+            roll = 0;
+        }
+
+        return (
+            RadiansToDegrees(pitch),
+            RadiansToDegrees(yaw),
+            RadiansToDegrees(roll));
+    }
+
     private static WristLauncherRotation FromAxisAngle(
         double degrees,
         double x,
@@ -184,6 +234,8 @@ internal readonly record struct WristLauncherRotation
     }
 
     private static double DegreesToRadians(double value) => value * Math.PI / 180;
+
+    private static double RadiansToDegrees(double value) => value * 180 / Math.PI;
 }
 
 /// <summary>

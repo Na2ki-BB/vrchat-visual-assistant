@@ -35,16 +35,21 @@ internal sealed class ResultPanelTexture
     public const int ProcessingCell = 2;
     private const int FirstResultCell = 3;
     private const int MaximumResultPages = 3;
-    private const double BodyTop = 116;
-    private const double BodyBottom = 668;
-    private const double BodyLeft = 54;
-    private const double BodyRight = 1180;
-    private const double ScrollTrackLeft = 1198;
-    private const double ScrollTrackRight = 1268;
+    internal const double HeaderHeight = 108;
+    internal const double BodyTop = 116;
+    internal const double BodyTextBottom = 568;
+    internal const double BodyBottom = 668;
+    internal const double BodyLeft = 54;
+    internal const double BodyRight = 1180;
+    internal const double ScrollTrackLeft = 1198;
+    internal const double ScrollTrackRight = 1268;
     private const double MinimumThumbHeight = 64;
-    internal static readonly Rect PreviousPageButtonBounds = new(973, 20, 74, 68);
-    internal static readonly Rect NextPageButtonBounds = new(1057, 20, 74, 68);
-    internal static readonly Rect CloseButtonBounds = new(1141, 20, 90, 68);
+    // Keep navigation in a fixed rail below the result text. Rendering and hit
+    // testing share these exact rectangles so the visible controls and their
+    // actionable areas cannot drift apart.
+    internal static readonly Rect PreviousPageButtonBounds = new(748, 580, 136, 80);
+    internal static readonly Rect NextPageButtonBounds = new(884, 580, 136, 80);
+    internal static readonly Rect CloseButtonBounds = new(1020, 580, 160, 80);
 
     private readonly Typeface _bodyTypeface = new("Yu Gothic UI");
     private string _title = string.Empty;
@@ -94,14 +99,22 @@ internal sealed class ResultPanelTexture
             return ResultPanelAction.Close;
         }
 
-        if (_resultPage > 0 && PreviousPageButtonBounds.Contains(point))
+        // Rail buttons are painted Previous -> Next -> Close. Test in the
+        // reverse visual Z order so their shared boundary belongs to the
+        // control the user actually sees. A disabled top control owns its
+        // visible area and must not fall through to a button drawn below it.
+        if (NextPageButtonBounds.Contains(point))
         {
-            return ResultPanelAction.PreviousPage;
+            return _resultPage < _resultPageCount - 1
+                ? ResultPanelAction.NextPage
+                : ResultPanelAction.None;
         }
 
-        if (_resultPage < _resultPageCount - 1 && NextPageButtonBounds.Contains(point))
+        if (PreviousPageButtonBounds.Contains(point))
         {
-            return ResultPanelAction.NextPage;
+            return _resultPage > 0
+                ? ResultPanelAction.PreviousPage
+                : ResultPanelAction.None;
         }
 
         return ResultPanelAction.None;
@@ -118,28 +131,6 @@ internal sealed class ResultPanelTexture
         };
         return previous != _resultPage;
     }
-
-    internal static (float X, float Y) MapOpenVrPointer(
-        float openVrX,
-        float openVrY,
-        int atlasCell)
-    {
-        if (atlasCell < 0 || atlasCell >= AtlasColumns * AtlasRows)
-        {
-            throw new ArgumentOutOfRangeException(nameof(atlasCell));
-        }
-
-        int column = atlasCell % AtlasColumns;
-        int row = atlasCell / AtlasColumns;
-        float localX = (openVrX * AtlasColumns) - (column * PixelWidth);
-        float localY = ((PixelHeight - openVrY) * AtlasRows) - (row * PixelHeight);
-        return (localX, localY);
-    }
-
-    internal static (float X, float Y) MapFullTexturePointer(
-        float openVrX,
-        float openVrY) =>
-        (openVrX, PixelHeight - openVrY);
 
     public bool BeginScrollbarInteraction(float x, float y)
     {
@@ -219,12 +210,7 @@ internal sealed class ResultPanelTexture
                 "文字を処理中…",
                 "OCRを実行し、設定時は\n日本語へ翻訳しています。");
 
-            FormattedText body = CreateBodyText();
-            double viewportHeight = BodyBottom - BodyTop;
-            int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
-            _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
-            _resultTruncated = requiredPages > MaximumResultPages;
-            _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+            (FormattedText body, double viewportHeight) = PrepareResultLayout();
             for (int page = 0; page < MaximumResultPages; page++)
             {
                 DrawResultCell(drawing, body, page, viewportHeight);
@@ -232,6 +218,18 @@ internal sealed class ResultPanelTexture
         }
 
         return RenderVisualRgba(visual, AtlasPixelWidth, AtlasPixelHeight);
+    }
+
+    public byte[] RenderCurrentResultRgba()
+    {
+        DrawingVisual visual = new();
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            (FormattedText body, double viewportHeight) = PrepareResultLayout();
+            DrawResultPage(drawing, body, _resultPage, viewportHeight);
+        }
+
+        return RenderVisualRgba(visual, PixelWidth, PixelHeight);
     }
 
     public byte[] RenderCalibrationRgba()
@@ -316,8 +314,18 @@ internal sealed class ResultPanelTexture
         double viewportHeight)
     {
         drawing.PushTransform(GetCellTransform(FirstResultCell + page));
+        DrawResultPage(drawing, body, page, viewportHeight);
+        drawing.Pop();
+    }
+
+    private void DrawResultPage(
+        DrawingContext drawing,
+        FormattedText body,
+        int page,
+        double viewportHeight)
+    {
         DrawBackground(drawing);
-        DrawHeader(drawing, page);
+        DrawHeader(drawing);
 
         if (page < _resultPageCount)
         {
@@ -342,7 +350,7 @@ internal sealed class ResultPanelTexture
             DrawScrollIndicator(drawing, page);
         }
 
-        drawing.Pop();
+        DrawResultControls(drawing, page);
     }
 
     private void DrawCalibrationSurface(DrawingContext drawing)
@@ -579,29 +587,32 @@ internal sealed class ResultPanelTexture
         drawing.DrawRectangle(
             new SolidColorBrush(Color.FromRgb(35, 45, 60)),
             null,
-            new Rect(0, 0, PixelWidth, 108));
+            new Rect(0, 0, PixelWidth, HeaderHeight));
     }
 
-    private void DrawHeader(DrawingContext drawing, int page)
+    private void DrawHeader(DrawingContext drawing)
     {
         FormattedText title = CreateText(
             _title,
             34,
             FontWeights.SemiBold,
             Brushes.White,
-            895);
+            1184);
         drawing.DrawText(title, new Point(48, 31));
-
-        DrawHeaderButton(drawing, PreviousPageButtonBounds, "◀", page > 0);
-        DrawHeaderButton(
-            drawing,
-            NextPageButtonBounds,
-            "▶",
-            page < _resultPageCount - 1);
-        DrawHeaderButton(drawing, CloseButtonBounds, "×", enabled: true);
     }
 
-    private void DrawHeaderButton(
+    private void DrawResultControls(DrawingContext drawing, int page)
+    {
+        DrawResultButton(drawing, PreviousPageButtonBounds, "◀ 前へ", page > 0);
+        DrawResultButton(
+            drawing,
+            NextPageButtonBounds,
+            "次へ ▶",
+            page < _resultPageCount - 1);
+        DrawResultButton(drawing, CloseButtonBounds, "閉じる ×", enabled: true);
+    }
+
+    private void DrawResultButton(
         DrawingContext drawing,
         Rect bounds,
         string label,
@@ -613,17 +624,24 @@ internal sealed class ResultPanelTexture
         Color foreground = enabled
             ? Color.FromRgb(245, 249, 255)
             : Color.FromRgb(111, 123, 140);
-        drawing.DrawRoundedRectangle(
-            new SolidColorBrush(background),
+        drawing.DrawRectangle(new SolidColorBrush(background), null, bounds);
+        // WPF centers a Pen on the supplied geometry. Inset the border by its
+        // one-pixel half-width so no visible pixel extends beyond the exact
+        // rectangle consumed by HitTestResult.
+        Rect borderBounds = new(
+            bounds.Left + 1,
+            bounds.Top + 1,
+            bounds.Width - 2,
+            bounds.Height - 2);
+        drawing.DrawRectangle(
+            null,
             new System.Windows.Media.Pen(
                 new SolidColorBrush(Color.FromRgb(103, 128, 161)),
                 2),
-            bounds,
-            13,
-            13);
+            borderBounds);
         FormattedText text = CreateText(
             label,
-            34,
+            28,
             FontWeights.SemiBold,
             new SolidColorBrush(foreground),
             bounds.Width);
@@ -643,6 +661,17 @@ internal sealed class ResultPanelTexture
             BodyRight - BodyLeft - 20);
         body.LineHeight = 43;
         return body;
+    }
+
+    private (FormattedText Body, double ViewportHeight) PrepareResultLayout()
+    {
+        FormattedText body = CreateBodyText();
+        double viewportHeight = BodyTextBottom - BodyTop;
+        int requiredPages = Math.Max(1, (int)Math.Ceiling(body.Height / viewportHeight));
+        _resultPageCount = Math.Min(MaximumResultPages, requiredPages);
+        _resultTruncated = requiredPages > MaximumResultPages;
+        _resultPage = Math.Clamp(_resultPage, 0, _resultPageCount - 1);
+        return (body, viewportHeight);
     }
 
     private void DrawScrollIndicator(DrawingContext drawing, int page)
