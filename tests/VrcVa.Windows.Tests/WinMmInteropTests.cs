@@ -44,7 +44,7 @@ public sealed class WinMmInteropTests
     [Fact]
     public void EndpointNotifications_LatchLossAndDefaultChangesWithoutCallingNativeApis()
     {
-        var notifications = new CoreAudioRecordingEndpoint.EndpointNotifications(FakeApi.EndpointId);
+        var notifications = new WinMmEndpointNotifications(FakeApi.EndpointId);
         notifications.OnDeviceRemoved("different-endpoint");
         notifications.OnDeviceStateChanged(FakeApi.EndpointId, WinMmInterop.DeviceStateActive);
         notifications.OnDefaultDeviceChanged(0, 2, "different-render-endpoint");
@@ -54,17 +54,90 @@ public sealed class WinMmInteropTests
         notifications.OnDefaultDeviceChanged(1, 2, FakeApi.EndpointId);
         Assert.True(notifications.Invalidated); // Switching back never makes old audio valid again.
 
-        var unplugged = new CoreAudioRecordingEndpoint.EndpointNotifications(FakeApi.EndpointId);
+        var unplugged = new WinMmEndpointNotifications(FakeApi.EndpointId);
         unplugged.OnDeviceStateChanged(FakeApi.EndpointId, 8);
         unplugged.OnDeviceStateChanged(FakeApi.EndpointId, WinMmInterop.DeviceStateActive);
         Assert.True(unplugged.Invalidated);
-        var removed = new CoreAudioRecordingEndpoint.EndpointNotifications(FakeApi.EndpointId);
+        var removed = new WinMmEndpointNotifications(FakeApi.EndpointId);
         removed.OnDeviceRemoved(FakeApi.EndpointId);
         Assert.True(removed.Invalidated);
-        var noDefault = new CoreAudioRecordingEndpoint.EndpointNotifications(FakeApi.EndpointId);
+        var noDefault = new WinMmEndpointNotifications(FakeApi.EndpointId);
         noDefault.OnDefaultDeviceChanged(1, 2, null);
         Assert.True(noDefault.Invalidated);
     }
+
+#if WINDOWS
+    [Fact]
+    public void EndpointNotifications_CcwExposesOfficialInterfaceAndDispatchesAllFiveNativeSlots()
+    {
+        var notifications = new WinMmEndpointNotifications(FakeApi.EndpointId);
+        Guid notificationId = new("7991EEC9-7E89-4D85-8390-6C703CEC60C0");
+        Assert.Equal(notificationId, typeof(IWinMmNotificationClient).GUID);
+        Assert.Equal(5, typeof(IWinMmNotificationClient).GetMethods().Length);
+        Assert.Equal(20, Marshal.SizeOf<WinMmPropertyKey>());
+        Assert.Equal(16, Marshal.OffsetOf<WinMmPropertyKey>(nameof(WinMmPropertyKey.PropertyId)).ToInt32());
+        nint unknown = 0;
+        nint client = 0;
+        nint ownedCallback = 0;
+        nint sameEndpoint = 0;
+        nint otherEndpoint = 0;
+        try
+        {
+            // This exercises only the managed COM callable wrapper. No endpoint
+            // enumerator, WinMM device, or physical microphone is instantiated.
+            unknown = Marshal.GetIUnknownForObject(notifications);
+            Assert.Equal(0, Marshal.QueryInterface(unknown, ref notificationId, out client));
+            Assert.NotEqual((nint)0, client);
+            ownedCallback = Marshal.GetComInterfaceForObject<WinMmEndpointNotifications, IWinMmNotificationClient>(
+                notifications);
+            Assert.NotEqual((nint)0, ownedCallback);
+            sameEndpoint = Marshal.StringToCoTaskMemUni(FakeApi.EndpointId);
+            otherEndpoint = Marshal.StringToCoTaskMemUni("different-synthetic-endpoint");
+            nint table = Marshal.ReadIntPtr(ownedCallback);
+            var state = Marshal.GetDelegateForFunctionPointer<DeviceStateChangedCallback>(
+                Marshal.ReadIntPtr(table, 3 * IntPtr.Size));
+            var added = Marshal.GetDelegateForFunctionPointer<DeviceChangedCallback>(
+                Marshal.ReadIntPtr(table, 4 * IntPtr.Size));
+            var removed = Marshal.GetDelegateForFunctionPointer<DeviceChangedCallback>(
+                Marshal.ReadIntPtr(table, 5 * IntPtr.Size));
+            var changed = Marshal.GetDelegateForFunctionPointer<DefaultDeviceChangedCallback>(
+                Marshal.ReadIntPtr(table, 6 * IntPtr.Size));
+            var property = Marshal.GetDelegateForFunctionPointer<PropertyValueChangedCallback>(
+                Marshal.ReadIntPtr(table, 7 * IntPtr.Size));
+            Assert.Equal(0, state(ownedCallback, sameEndpoint, WinMmInterop.DeviceStateActive));
+            Assert.Equal(0, added(ownedCallback, otherEndpoint));
+            Assert.Equal(0, removed(ownedCallback, otherEndpoint));
+            Assert.Equal(0, property(ownedCallback, sameEndpoint, new WinMmPropertyKey
+            {
+                FormatId = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"),
+                PropertyId = 14,
+            }));
+            Assert.False(notifications.Invalidated);
+            Assert.Equal(0, changed(ownedCallback, 1, 2, otherEndpoint));
+            Assert.True(notifications.Invalidated);
+            Assert.Equal(0, changed(ownedCallback, 1, 2, sameEndpoint));
+            Assert.True(notifications.Invalidated);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(sameEndpoint);
+            Marshal.FreeCoTaskMem(otherEndpoint);
+            if (ownedCallback != 0) { Marshal.Release(ownedCallback); }
+            if (client != 0) { Marshal.Release(client); }
+            if (unknown != 0) { Marshal.Release(unknown); }
+            GC.KeepAlive(notifications);
+        }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DeviceStateChangedCallback(nint client, nint endpoint, uint state);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DeviceChangedCallback(nint client, nint endpoint);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DefaultDeviceChangedCallback(nint client, int flow, int role, nint endpoint);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int PropertyValueChangedCallback(nint client, nint endpoint, WinMmPropertyKey key);
+#endif
 
     [Fact]
     public async Task Open_QueriesCommunicationMapperAndSnapshotsActualEndpointWithoutRecording()
@@ -310,7 +383,7 @@ public sealed class WinMmInteropTests
         var api = new FakeApi { UnsafeCleanup = true };
         var gate = new WinMmCaptureSafetyGate();
         var factory = new WinMmMicrophoneFactory(api, _ => new FakeEndpoint(), gate);
-        await using IMicrophone microphone = await factory.OpenAsync(CancellationToken.None);
+        IMicrophone microphone = await factory.OpenAsync(CancellationToken.None);
         using var stop = new CancellationTokenSource();
         Task recording = microphone.RecordAsync(_ => { }, stop.Token);
         await api.Started.Task.WaitAsync(TestTimeout);
@@ -331,6 +404,54 @@ public sealed class WinMmInteropTests
             () => factory.OpenAsync(CancellationToken.None));
         Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, reopen.Code);
         Assert.Equal(1, api.Calls.Count(call => call == "open"));
+        VoiceInputException disposal = await Assert.ThrowsAsync<VoiceInputException>(
+            () => microphone.DisposeAsync().AsTask());
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, disposal.Code);
+    }
+
+    [Fact]
+    public async Task EndpointDisposalFailure_QuarantinesAfterNativeCloseAndRefusesReopen()
+    {
+        var api = new FakeApi();
+        var endpoint = new FakeEndpoint { ThrowOnDispose = true };
+        var factory = new WinMmMicrophoneFactory(api, _ => endpoint);
+        IMicrophone microphone = await factory.OpenAsync(CancellationToken.None);
+        using var stop = new CancellationTokenSource();
+        Task recording = microphone.RecordAsync(_ => { }, stop.Token);
+        await api.Started.Task.WaitAsync(TestTimeout);
+        stop.Cancel();
+        VoiceInputException failure = await Assert.ThrowsAsync<VoiceInputException>(
+            () => recording.WaitAsync(TestTimeout));
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, failure.Code);
+        Assert.True(((WinMmMicrophone)microphone).CleanupUnconfirmed);
+        Assert.Equal(1, api.Calls.Count(call => call == "close"));
+        Assert.True(api.AllBuffersWereZeroAtClose);
+        Assert.True(endpoint.DisposeAttempted);
+        Assert.False(endpoint.Disposed);
+        VoiceInputException reopen = await Assert.ThrowsAsync<VoiceInputException>(
+            () => factory.OpenAsync(CancellationToken.None));
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, reopen.Code);
+        Assert.Equal(1, api.Calls.Count(call => call == "open"));
+        VoiceInputException disposal = await Assert.ThrowsAsync<VoiceInputException>(
+            () => microphone.DisposeAsync().AsTask());
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, disposal.Code);
+    }
+
+    [Fact]
+    public async Task DisposeWithoutRecording_ReportsUnsafeCloseAndRefusesReopen()
+    {
+        var api = new FakeApi { CloseResult = 1 };
+        var factory = new WinMmMicrophoneFactory(api, _ => new FakeEndpoint());
+        IMicrophone microphone = await factory.OpenAsync(CancellationToken.None);
+        VoiceInputException failure = await Assert.ThrowsAsync<VoiceInputException>(
+            () => microphone.DisposeAsync().AsTask().WaitAsync(TestTimeout));
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, failure.Code);
+        Assert.True(((WinMmMicrophone)microphone).CleanupUnconfirmed);
+        Assert.DoesNotContain("start", api.Calls);
+        Assert.Equal(WinMmMicrophone.CleanupAttempts, api.Calls.Count(call => call == "close"));
+        VoiceInputException reopen = await Assert.ThrowsAsync<VoiceInputException>(
+            () => factory.OpenAsync(CancellationToken.None));
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, reopen.Code);
     }
 
     [Fact]
@@ -351,6 +472,8 @@ public sealed class WinMmInteropTests
     {
         private int _available = 1;
         internal bool Disposed { get; private set; }
+        internal bool ThrowOnDispose { get; init; }
+        internal bool DisposeAttempted { get; private set; }
         internal List<int> Threads { get; } = [];
         public bool IsAvailable
         {
@@ -365,6 +488,8 @@ public sealed class WinMmInteropTests
         public void Dispose()
         {
             Threads.Add(Environment.CurrentManagedThreadId);
+            DisposeAttempted = true;
+            if (ThrowOnDispose) { throw new InvalidOperationException("synthetic unregister failure"); }
             Disposed = true;
         }
     }

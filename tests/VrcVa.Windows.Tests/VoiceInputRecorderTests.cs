@@ -261,6 +261,27 @@ public sealed class VoiceInputRecorderTests
     }
 
     [Fact]
+    public async Task CleanupFailureBeforeRecordingStillFailsClosedAndDoesNotClaimDeviceDisposed()
+    {
+        ExecutionCoordinator execution = new();
+        FakeMicrophoneFactory factory = new() { DelayOpen = true, Microphone = new() { FailCleanup = true } };
+        VoiceInputRecorder recorder = new(execution, factory);
+        Assert.True(recorder.TryStart(Enabled(), true, (_, _) => Task.CompletedTask,
+            out VoiceRecordingSession? session, out _));
+        await factory.OpenStarted.Task;
+        session!.Stop();
+        factory.AllowOpen.SetResult();
+        VoiceRecordingOutcome failure = await session.Completion;
+        Assert.Equal(VoiceInputFailureCode.MicrophoneCleanupFailed, failure.Failure);
+        Assert.Equal(VoiceRecordingState.Failed, failure.State);
+        Assert.Equal(0, factory.Microphone.Records);
+        Assert.False(factory.Microphone.Disposed);
+        Assert.False(execution.TryBeginSession(Guid.NewGuid(), out _));
+        Assert.True(execution.WhenIdle.IsCompleted);
+        await recorder.DisposeAsync();
+    }
+
+    [Fact]
     public async Task AcceptedRerecordImmediatelyInvalidatesK1TranscriptCandidates()
     {
         ExecutionCoordinator execution = new();
@@ -456,6 +477,7 @@ public sealed class VoiceInputRecorderTests
         public TaskCompletionSource AllowCleanup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool DelayCleanup { get; init; }
         public bool ThrowStopCallback { get; init; }
+        public bool FailCleanup { get; init; }
         public VoiceInputFailureCode? Failure { get; init; }
         public bool Disposed { get; private set; }
         public int Records { get; private set; }
@@ -478,6 +500,7 @@ public sealed class VoiceInputRecorderTests
         {
             CleanupStarted.TrySetResult();
             if (DelayCleanup) { await AllowCleanup.Task; }
+            if (FailCleanup) { throw new InvalidOperationException("private cleanup failure"); }
             Disposed = true;
         }
     }

@@ -178,13 +178,14 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
 {
     private IMMDeviceEnumerator? _enumerator;
     private IMMDevice? _device;
-    private readonly EndpointNotifications _notifications;
+    private readonly WinMmEndpointNotifications _notifications;
+    private nint _notificationPointer;
     private bool _registered;
     private bool _comInitialized;
 
     internal CoreAudioRecordingEndpoint(string endpointId)
     {
-        _notifications = new EndpointNotifications(endpointId);
+        _notifications = new WinMmEndpointNotifications(endpointId);
         Marshal.ThrowExceptionForHR(CoInitializeEx(0, 0));
         _comInitialized = true;
         try
@@ -193,7 +194,11 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
             Guid interfaceId = typeof(IMMDeviceEnumerator).GUID;
             Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out _enumerator));
             Marshal.ThrowExceptionForHR(_enumerator.GetDevice(endpointId, out _device));
-            Marshal.ThrowExceptionForHR(_enumerator.RegisterEndpointNotificationCallback(_notifications));
+            // Register/Unregister do not AddRef/Release the callback. Own one
+            // explicit CCW reference and pass that same pointer to both methods.
+            _notificationPointer = Marshal.GetComInterfaceForObject<WinMmEndpointNotifications, IWinMmNotificationClient>(
+                _notifications);
+            Marshal.ThrowExceptionForHR(_enumerator.RegisterEndpointNotificationCallback(_notificationPointer));
             _registered = true;
         }
         catch
@@ -250,8 +255,20 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
 
         if (_registered)
         {
-            _enumerator!.UnregisterEndpointNotificationCallback(_notifications);
+            if (_enumerator!.UnregisterEndpointNotificationCallback(_notificationPointer) < 0)
+            {
+                // Notifications may still arrive. Keep the explicit callback
+                // reference and endpoint objects alive in the worker's quarantine.
+                throw new VoiceInputException(VoiceInputFailureCode.MicrophoneCleanupFailed);
+            }
+
             _registered = false;
+        }
+
+        if (_notificationPointer != 0)
+        {
+            Marshal.Release(_notificationPointer);
+            _notificationPointer = 0;
         }
 
         if (_device is not null)
@@ -276,8 +293,8 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
         [PreserveSig] int EnumAudioEndpoints(int flow, uint states, out nint collection);
         [PreserveSig] int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice device);
         [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
-        [PreserveSig] int RegisterEndpointNotificationCallback(IMMNotificationClient client);
-        [PreserveSig] int UnregisterEndpointNotificationCallback(IMMNotificationClient client);
+        [PreserveSig] int RegisterEndpointNotificationCallback(nint client);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(nint client);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -289,64 +306,6 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
         [PreserveSig] int GetState(out uint state);
     }
 
-    [ComVisible(true), Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    internal interface IMMNotificationClient
-    {
-        [PreserveSig] int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string id, uint state);
-        [PreserveSig] int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string id);
-        [PreserveSig] int OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string id);
-        [PreserveSig] int OnDefaultDeviceChanged(int flow, int role, [MarshalAs(UnmanagedType.LPWStr)] string? id);
-        [PreserveSig] int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string id, PropertyKey key);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct PropertyKey
-    {
-        internal Guid FormatId;
-        internal uint PropertyId;
-    }
-
-    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-    internal sealed class EndpointNotifications(string endpointId) : IMMNotificationClient
-    {
-        private int _invalidated;
-        internal string EndpointId { get; } = endpointId;
-        internal bool Invalidated => Volatile.Read(ref _invalidated) != 0;
-        public int OnDeviceStateChanged(string id, uint state)
-        {
-            if (Matches(id) && state != WinMmInterop.DeviceStateActive)
-            {
-                Volatile.Write(ref _invalidated, 1);
-            }
-
-            return 0;
-        }
-
-        public int OnDeviceAdded(string id) => 0;
-        public int OnDeviceRemoved(string id)
-        {
-            if (Matches(id))
-            {
-                Volatile.Write(ref _invalidated, 1);
-            }
-
-            return 0;
-        }
-
-        public int OnDefaultDeviceChanged(int flow, int role, string? id)
-        {
-            if (flow == 1 && role == 2 && !Matches(id))
-            {
-                Volatile.Write(ref _invalidated, 1);
-            }
-
-            return 0;
-        }
-
-        public int OnPropertyValueChanged(string id, PropertyKey key) => 0;
-        private bool Matches(string? id) => string.Equals(id, EndpointId, StringComparison.OrdinalIgnoreCase);
-    }
-
     [DllImport("ole32.dll", ExactSpelling = true)]
     private static extern int CoInitializeEx(nint reserved, uint flags);
     [DllImport("ole32.dll", ExactSpelling = true)]
@@ -354,4 +313,65 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
     [DllImport("ole32.dll", ExactSpelling = true)]
     private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId,
         [MarshalAs(UnmanagedType.Interface)] out IMMDeviceEnumerator enumerator);
+}
+
+// CCW-exposed types must be top-level public; ComVisible(true) cannot expose
+// internal types. The callback constructor remains internal and never opens audio.
+[ComVisible(true), Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IWinMmNotificationClient
+{
+    [PreserveSig] int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string id, uint state);
+    [PreserveSig] int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string id);
+    [PreserveSig] int OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string id);
+    [PreserveSig] int OnDefaultDeviceChanged(int flow, int role, [MarshalAs(UnmanagedType.LPWStr)] string? id);
+    [PreserveSig] int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string id, WinMmPropertyKey key);
+}
+
+[ComVisible(true), StructLayout(LayoutKind.Sequential)]
+public struct WinMmPropertyKey
+{
+    public Guid FormatId;
+    public uint PropertyId;
+}
+
+[ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+public sealed class WinMmEndpointNotifications : IWinMmNotificationClient
+{
+    private int _invalidated;
+    internal string EndpointId { get; }
+    internal WinMmEndpointNotifications(string endpointId) => EndpointId = endpointId;
+    internal bool Invalidated => Volatile.Read(ref _invalidated) != 0;
+    public int OnDeviceStateChanged(string id, uint state)
+    {
+        if (Matches(id) && state != WinMmInterop.DeviceStateActive)
+        {
+            Volatile.Write(ref _invalidated, 1);
+        }
+
+        return 0;
+    }
+
+    public int OnDeviceAdded(string id) => 0;
+    public int OnDeviceRemoved(string id)
+    {
+        if (Matches(id))
+        {
+            Volatile.Write(ref _invalidated, 1);
+        }
+
+        return 0;
+    }
+
+    public int OnDefaultDeviceChanged(int flow, int role, string? id)
+    {
+        if (flow == 1 && role == 2 && !Matches(id))
+        {
+            Volatile.Write(ref _invalidated, 1);
+        }
+
+        return 0;
+    }
+
+    public int OnPropertyValueChanged(string id, WinMmPropertyKey key) => 0;
+    private bool Matches(string? id) => string.Equals(id, EndpointId, StringComparison.OrdinalIgnoreCase);
 }

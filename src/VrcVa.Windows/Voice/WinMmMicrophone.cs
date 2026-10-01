@@ -88,6 +88,7 @@ internal sealed class WinMmMicrophone : IMicrophone
     private bool _recordRequested;
     private bool _disposeRequested;
     private bool _cleanupUnconfirmed;
+    private IRecordingEndpoint? _quarantinedEndpoint;
     private nint _handle;
 
     internal WinMmMicrophone(IWinMmApi api, Func<string, IRecordingEndpoint> createEndpoint,
@@ -114,7 +115,7 @@ internal sealed class WinMmMicrophone : IMicrophone
     internal Task Opened => _opened.Task;
     internal bool CleanupUnconfirmed
     {
-        get { lock (_stateLock) { return _cleanupUnconfirmed; } }
+        get { lock (_stateLock) { return _cleanupUnconfirmed || _quarantinedEndpoint is not null; } }
     }
 
     public Task RecordAsync(Action<ReadOnlyMemory<byte>> receiveSamples, CancellationToken stopToken)
@@ -152,13 +153,14 @@ internal sealed class WinMmMicrophone : IMicrophone
             }
         }
 
-        // Recording/opening owns reporting its typed failure. Disposal still waits
-        // for all cleanup, but does not overwrite that original failure.
+        // Ordinary recording/opening failures are already reported by their task.
+        // Cleanup uncertainty must also reach callers disposing before recording
+        // starts, so it always takes precedence over an earlier cancellation.
         try
         {
             await _completed.Task.ConfigureAwait(false);
         }
-        catch (VoiceInputException)
+        catch (VoiceInputException error) when (error.Code != VoiceInputFailureCode.MicrophoneCleanupFailed)
         {
         }
         catch (OperationCanceledException)
@@ -169,6 +171,7 @@ internal sealed class WinMmMicrophone : IMicrophone
     private void Run()
     {
         IRecordingEndpoint? endpoint = null;
+        IRecordingEndpoint? quarantinedEndpoint = null;
         Exception? failure = null;
         bool opened = false;
         bool safeToRelease = true;
@@ -250,13 +253,19 @@ internal sealed class WinMmMicrophone : IMicrophone
             }
             catch (Exception)
             {
-                failure ??= new VoiceInputException(VoiceInputFailureCode.RecordingFailed);
+                // A failed notification unregister can leave the OS using its
+                // callback pointer even after waveInClose succeeds. Retain its
+                // owner and fail closed instead of releasing that CCW reference.
+                quarantinedEndpoint = endpoint;
+                safeToRelease = false;
+                failure = new VoiceInputException(VoiceInputFailureCode.MicrophoneCleanupFailed);
             }
 
             Array.Clear(_scratch);
             lock (_stateLock)
             {
                 _receiveSamples = null;
+                _quarantinedEndpoint = quarantinedEndpoint;
                 _cleanupUnconfirmed = !safeToRelease;
                 // Complete while holding the same lock used by DisposeAsync;
                 // it then cannot race a Set/Cancel against disposed wait handles.
