@@ -424,7 +424,8 @@ Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完�
 
 - [ ] **L2 — 腕マイク・認識文・候補カードをVRへ接続する**（依存: K5、L1）
   - 範囲: `WristLauncherStateMachine` / `WristLauncherTexture`へマイク入口を追加し、認識文直下の2ボタン、5カード×2ページとbody railをWPFと同じsession/actionへ接続。長文/title/検索語のレイアウトを確認する。既存校正/配置保存、SCAN回復を維持する。
-  - [ ] 実装/自動確認: 両ページ全候補/前次/戻る/閉じると認識文の全操作をraw intersection → 同一view逆変換 → logical hit-test → actionで検証。ページ境界、連打、閉じた後/録り直し後の遅延結果・画像・選択を確認する。
+  - [x] 実装/自動確認: 両ページ全候補/前次/戻る/閉じると認識文の全操作をraw intersection → 同一view逆変換 → logical hit-test → actionで検証。ページ境界、連打、閉じた後/録り直し後の遅延結果・画像・選択を確認する。
+  - 2026-10-01実装: 腕メニューへマイクを追加し、録音中はL1の「マイク停止 → 認識」を表示。`VrVoiceSearchController` がWPFと同じ音声/検索flow・不変session・候補actionを利用し、全文認識文の前次と直下2方式、5候補×2ページ、検索語/partial/コピー状態、再試行/録り直し/中止/閉じるをfull 1280×720の共通矩形へ接続する。title/queryはVRでは省略し、全文はWPFに保持。queue優先の表示所有者照合、古い画像/クリック拒否、両flowのawait前失効、閉じたterminal失敗の再表示防止を追加。Linux Release cross-build（0 warnings/errors）、Core365/Infrastructure412、source-linked controller12件と5回反復、変更C#のtargeted formatと独立reviewを確認。全体formatの既存5ファイル違反は残す。Windows [CI97](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36903308079)（PR39 head `3d699067`）で座標/rasterを含むCore365/Infrastructure412/Windows667の全1,444件と別実行cold shutdown3件が成功。初回CI96の長title fixture改行だけを有効な空白へ修正し、候補状態/件数assertionを強化した。productionのmetadata検証やtimeoutは変更しない。下の実機ゲートとL2全体は未完了のまま維持する。
   - [ ] **実機ゲート（未実施）**: 現行Windows Release + SteamVR + Quest 3Sで実マイク開始/再押し/上限/中止/切断、VRChat内ミュート時の取得とOS/物理ミュートの違い、残り秒/長文の可読性を確認。文字起こし/候補はfakeでもよいことを記録し、両ページ全card/rail、頭を動かしたcursor整合、歩行維持、clipboard実書込み/占有回復、閉じる/再開/次SCANのoverlay除外と配置を確認する。実装/自動確認とは別に記録し、実機未確認ならL2全体は完了にしない。
 
 - [ ] **L3 — 全体検証と任意の実サービス評価を記録する**（依存: L2の実装/自動確認。全体の自動検証は実機待ちでも進める）

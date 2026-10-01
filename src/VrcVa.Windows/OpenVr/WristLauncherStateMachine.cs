@@ -19,6 +19,8 @@ internal sealed class WristLauncherStateMachine
 
     public WristLauncherView View { get; private set; } = WristLauncherView.Hidden;
 
+    public bool CanRequestMicrophone => View == WristLauncherView.Menu;
+
     public bool Start()
     {
         if (View != WristLauncherView.Hidden)

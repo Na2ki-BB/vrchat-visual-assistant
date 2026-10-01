@@ -151,7 +151,7 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 ### J3 WPF integration status — 2026-10-01
 
-`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、腕マイク・VR認識文/候補はL2まで追加しない。
+`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、腕マイク・VR認識文/候補はL2で同じflowへ接続した。
 
 成功時は音声を破棄してから全文表示し、失敗時のみJ1の非更新期限内で手動再送する。設定/client交換後もMainWindow所有の音声quotaを共有する。中止・閉じる・録り直し・新SCAN・終了・接続済みSteamVRの喪失は旧音声/文を破棄し、後処理後までgateを保持する。SteamVRが最初から無い状態ではデスクトップ音声を妨げない。native cleanup失敗は型付き停止/終了案内を表示する。fakeマイク/HTTP/時計およびWPF dispatcherの回帰で境界を検証するが、Windows実マイク・有料API・Questの受入は未実施である。
 
@@ -179,6 +179,10 @@ L1のfake/境界testsは画面の寸法と制御契約を検証するだけで�
 - 認識文の直下に、最初から「そのまま検索」「解釈して検索」の2ボタンを並べる。先に「検索」を押してから方法を選ぶ二段階にはしない。ボタンの処理内容は動画検索側で定義する
 - 「録り直し」は新しい入力セッションを開始して認識文を全文置換する。追記やVRキーボードによる編集は行わず、旧文・旧候補の操作を無効にする
 - 正常に文字起こしできた共通の認識文は、検索語整形で上書きしない。用途から戻ってもセッション内では利用でき、終了・録り直しで破棄する
+
+### L2 VR connection — implementation, real-device acceptance pending
+
+WPFと同じ共通音声・検索flowを腕マイクとVR認識文/候補へ接続する。録音開始後は既存L1の残り秒・「マイク停止 → 認識」・中止へ切り替わる。認識文の2方式、全文章の前次、5候補×2ページ、型付きURLコピーとbody railはfull 1280×720を共有する。headerには操作を置かない。旧progress/voiceのhideと遅延ImageLoadedは現在のqueueを優先して所有者照合する。VR専用のprovider/音声sessionは作らず、capture除外・配置校正/保存・priority-zero入力は既存のまま維持する。可読性・歩行・実マイク/clipboard・Quest/実APIは未受入であり、自動検証と別ゲートとする。
 
 ### Speech provider and ownership
 

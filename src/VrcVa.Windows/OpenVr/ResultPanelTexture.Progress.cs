@@ -20,6 +20,7 @@ internal sealed partial class ResultPanelTexture
 
     internal void SetProgress(OperationProgressSnapshot snapshot)
     {
+        VoiceSearch = null;
         Progress = snapshot;
         _title = snapshot.Title;
         _resultPage = 0;
@@ -29,7 +30,7 @@ internal sealed partial class ResultPanelTexture
 
     internal static IReadOnlyList<OperationProgressButton> ProgressControls(OperationProgressSnapshot snapshot) =>
     [
-        new(OperationProgressAction.Stop, StopProgressBounds, "停止 → 文字起こし", snapshot.CanStop),
+        new(OperationProgressAction.Stop, StopProgressBounds, "マイク停止 → 認識", snapshot.CanStop),
         new(OperationProgressAction.Cancel, CancelProgressBounds, "中止", snapshot.CanCancel),
         new(OperationProgressAction.Retry, RetryProgressBounds, snapshot.RetryLabel, snapshot.CanRetry),
         new(OperationProgressAction.Close, CloseProgressBounds, "閉じる", snapshot.CanClose),

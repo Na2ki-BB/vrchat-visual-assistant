@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private readonly VoiceInputFlow _voiceFlow;
     private readonly VoiceInputPanel _voicePanel;
     private readonly OperationProgressController _operationProgress;
+    private readonly VrVoiceSearchController _vrVoiceSearch;
     private readonly System.Windows.Threading.DispatcherTimer _operationProgressTimer;
     private readonly VideoSearchRuntime _videoRuntime;
     private readonly VideoSearchFlow _videoSearch;
@@ -215,6 +216,7 @@ public partial class MainWindow : Window
         VoiceInputHost.Content = _voicePanel;
         _voiceFlow.Changed += VoiceFlow_Changed;
         _operationProgress.AttachVoice(_voiceFlow);
+        _vrVoiceSearch = new(_execution, _voiceFlow, _videoSearch, _steamVrResultPanel);
 
         InitializeModelSelector();
         InitializeResultPanelPlacementControls();
@@ -1287,6 +1289,7 @@ public partial class MainWindow : Window
         // Keep the dispatcher alive while active capture/adapters return their ownership.
         _closed = true;
         _operationProgressTimer.Stop();
+        _vrVoiceSearch.Dispose();
         _operationProgress.Dispose();
         _execution.Stop();
         _windowLifetimeCancellation.Cancel();
@@ -1393,7 +1396,7 @@ public partial class MainWindow : Window
     {
         // Only a previously established connection emits this event. A desktop-only
         // session never requires SteamVR, and can explicitly restart after a loss.
-        await Task.WhenAll(_operationProgress.ConnectionLostAsync(), _videoSearch.CloseAsync());
+        await Task.WhenAll(_operationProgress.ConnectionLostAsync(), _vrVoiceSearch.CloseAsync());
     }
 
     private void VideoSearch_Changed(object? sender, EventArgs eventArgs)

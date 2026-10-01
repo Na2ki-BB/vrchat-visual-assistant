@@ -69,6 +69,7 @@ internal sealed partial class ResultPanelTexture
     public void SetContent(string title, string body)
     {
         Progress = null;
+        VoiceSearch = null;
         _title = title;
         _body = body;
         _resultPage = 0;
@@ -94,7 +95,7 @@ internal sealed partial class ResultPanelTexture
 
     public ResultPanelAction HitTestResult(float x, float y)
     {
-        if (Progress is not null) { return ResultPanelAction.None; }
+        if (Progress is not null || VoiceSearch is not null) { return ResultPanelAction.None; }
         Point point = new(x, y);
         if (CloseButtonBounds.Contains(point))
         {
@@ -157,7 +158,7 @@ internal sealed partial class ResultPanelTexture
     }
 
     public bool IsScrollbar(float x, float y) =>
-        Progress is null && _resultPageCount > 1
+        Progress is null && VoiceSearch is null && _resultPageCount > 1
         && x >= ScrollTrackLeft
         && x <= ScrollTrackRight
         && y >= BodyTop
@@ -227,7 +228,8 @@ internal sealed partial class ResultPanelTexture
         DrawingVisual visual = new();
         using (DrawingContext drawing = visual.RenderOpen())
         {
-            if (Progress is not null) { DrawProgress(drawing); }
+            if (VoiceSearch is not null) { DrawVoiceSearch(drawing); }
+            else if (Progress is not null) { DrawProgress(drawing); }
             else
             {
                 (FormattedText body, double viewportHeight) = PrepareResultLayout();
