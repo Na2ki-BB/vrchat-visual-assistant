@@ -8,6 +8,8 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 
 > 非公式プロジェクトです。VRChat Inc.、Valve Corporation、OpenAIの承認・提携を示すものではありません。
 
+Windows PCへ持ってきて実API・Questで使う手順は、別冊の [ローカル導入・実機確認ガイド](docs/LOCAL-SETUP-AND-TEST.md) にまとめています。
+
 ## 音声・動画検索を始める前に
 
 現行コードの[検証結果と未完了ゲート](TASKS.md#l3-verification-evidence--2026-10-01)を確認してください。実機/API評価の承認前は音声を無効のままにし、キーをチャットやGitHubへ貼らないでください。**通常版にfakeデモ切替はありません。録音の停止・上限到達は実際の有料文字起こしを開始します。**
