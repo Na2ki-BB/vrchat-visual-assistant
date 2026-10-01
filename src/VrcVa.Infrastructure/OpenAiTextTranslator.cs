@@ -28,11 +28,15 @@ public sealed class OpenAiTextTranslator : ITextTranslator
         HttpClient httpClient,
         OpenAiTranslatorOptions options,
         string? apiKey,
-        TranslationRequestQuota requestQuota)
+        TextRequestQuota requestQuota)
         : this(
             new OpenAiResponsesTextModelClient(httpClient, options, apiKey, requestQuota),
             options)
     {
+        if (requestQuota.Purpose != TextRequestPurpose.Translation)
+        {
+            throw new ArgumentException("The translator requires the translation quota.", nameof(requestQuota));
+        }
     }
 
     public OpenAiTextTranslator(
@@ -41,6 +45,12 @@ public sealed class OpenAiTextTranslator : ITextTranslator
     {
         ArgumentNullException.ThrowIfNull(textModelClient);
         ArgumentNullException.ThrowIfNull(options);
+
+        if (textModelClient is OpenAiResponsesTextModelClient client
+            && client.Purpose != TextRequestPurpose.Translation)
+        {
+            throw new ArgumentException("The translator requires the translation quota.", nameof(textModelClient));
+        }
 
         _textModelClient = textModelClient;
         _options = options;

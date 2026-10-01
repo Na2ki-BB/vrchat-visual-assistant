@@ -1,3 +1,4 @@
+using VrcVa.Core;
 using VrcVa.Windows.OpenVr;
 
 namespace VrcVa.Windows.Settings;
@@ -11,6 +12,10 @@ internal sealed record VrcVaSettings(
     VrcVaOnboardingSettings Onboarding,
     WristLauncherPlacement WristLauncher)
 {
+    public VoiceInputOptions VoiceInput { get; init; } = new();
+
+    public FeatureUsageLimits UsageLimits { get; init; } = new();
+
     public VrcVaSettings(
         ResultPanelPlacement resultPanel,
         VrcVaOnboardingSettings onboarding)
@@ -28,8 +33,12 @@ internal sealed record VrcVaSettings(
         ArgumentNullException.ThrowIfNull(ResultPanel);
         ArgumentNullException.ThrowIfNull(Onboarding);
         ArgumentNullException.ThrowIfNull(WristLauncher);
+        ArgumentNullException.ThrowIfNull(VoiceInput);
+        ArgumentNullException.ThrowIfNull(UsageLimits);
         ResultPanel.Validate();
         WristLauncher.Validate();
+        VoiceInput.Validate();
+        UsageLimits.Validate();
     }
 }
 

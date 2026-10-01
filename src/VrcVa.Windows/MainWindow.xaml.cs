@@ -31,7 +31,8 @@ public partial class MainWindow : Window
     private readonly WindowsCredentialStore _openAiCredentialStore = new();
     private readonly VrcVaSettingsStore _settingsStore = new();
     private readonly SteamVrAutoLaunchRegistration _steamVrAutoLaunchRegistration = new();
-    private readonly TranslationRequestQuota _translationRequestQuota = new();
+    private readonly FeatureUsageQuotas _usageQuotas = new();
+    private readonly UsageSettingsSnapshot _usageSettings;
     private readonly ExecutionCoordinator _execution = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
@@ -63,6 +64,7 @@ public partial class MainWindow : Window
     private Task _oscStartupTask = Task.CompletedTask;
     private Guid _displayedResultSessionId;
     private string? _startupWarning;
+    private string? _usageSettingsWarning;
 
     public MainWindow()
     {
@@ -74,10 +76,11 @@ public partial class MainWindow : Window
             "VrcVa",
             "logs");
         _logger = new PrivacySafeFileLogger(logDirectory);
+        _usageSettings = new UsageSettingsSnapshot(_usageQuotas);
 
         try
         {
-            _settings = _settingsStore.Load();
+            _settings = _usageSettings.Reload(_settingsStore);
             _resultPanelPlacement = _settings.ResultPanel;
             _steamVrAutoLaunchStatus = _settings.Onboarding.IsCompleted
                 ? "SteamVR自動起動: 確認待ち"
@@ -89,7 +92,8 @@ public partial class MainWindow : Window
                 or InvalidDataException
                 or System.Text.Json.JsonException)
         {
-            _startupWarning = "保存済み設定を読み込めなかったため、初期設定を使います。設定欄から保存し直せます。";
+            _usageSettingsWarning = "保存済み設定が不正または読み込めないため、SCANを開始しません。設定を修正してもう一度お試しください。";
+            _startupWarning = _usageSettingsWarning;
             _logger.Error(
                 "startup.result_panel_placement_load_failed",
                 Guid.Empty,
@@ -123,7 +127,7 @@ public partial class MainWindow : Window
         _translationRuntimeFactory = new TranslationRuntimeFactory(
             _httpClient,
             ocrEngine,
-            _translationRequestQuota);
+            _usageQuotas.Translation);
         TranslationRuntime initialTranslationRuntime = CreateTranslationRuntime(
             preferredModel: null,
             isStartup: true);
@@ -1112,6 +1116,15 @@ public partial class MainWindow : Window
         try
         {
             operation.ThrowIfNotCurrent();
+            if (!TryReloadUsageSettings(operation))
+            {
+                await _renderer.RenderOutcomeAsync(
+                    ScanOutcome.Failed(request.CorrelationId,
+                        new ScanFailure(ScanFailureCode.TranslationNotConfigured,
+                            ScanStage.Trigger, _usageSettingsWarning!), TimeSpan.Zero),
+                    operation.CancellationToken);
+                return;
+            }
             SetScanControls(isRunning: true);
             _steamVrResultPanel.BeginScan();
             _steamVrResultPanel.Hide();
@@ -1314,6 +1327,47 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool TryReloadUsageSettings(
+        ExecutionOperation operation,
+        bool rebuildRecoveredRuntime = true)
+    {
+        operation.ThrowIfNotCurrent();
+        try
+        {
+            VrcVaSettings loaded = _usageSettings.Reload(_settingsStore);
+            _settings = _settings with
+            {
+                VoiceInput = loaded.VoiceInput,
+                UsageLimits = loaded.UsageLimits,
+            };
+            bool recovered = _usageSettingsWarning is not null;
+            _usageSettingsWarning = null;
+            if (recovered && rebuildRecoveredRuntime)
+            {
+                string? model = TranslationModelComboBox.SelectedItem is TranslationModelChoice choice
+                    ? choice.ModelId
+                    : null;
+                TranslationRuntime runtime = CreateTranslationRuntime(model, isStartup: false);
+                _analyzer.Swap(runtime);
+                UpdateTranslationSettingsUi(runtime, operation);
+                UpdateModelToggleHotKeyRegistration();
+            }
+
+            UpdateTranslationUsageHint();
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException
+                or InvalidDataException or System.Text.Json.JsonException or ArgumentException)
+        {
+            _usageSettingsWarning = "保存済み設定が不正または読み込めないため、SCANを開始しません。設定を修正してもう一度お試しください。";
+            StatusText.Text = _usageSettingsWarning;
+            _logger.Error("settings.usage_reload_failed", operation.OperationId,
+                ScanStage.Trigger, ScanFailureCode.Unexpected, exception);
+            return false;
+        }
+    }
+
     private TranslationRuntime ReloadTranslationRuntime(ExecutionOperation operation)
     {
         if (!_execution.IsActive(operation))
@@ -1325,6 +1379,7 @@ public partial class MainWindow : Window
         string? preferredModel = TranslationModelComboBox.SelectedItem is TranslationModelChoice choice
             ? choice.ModelId
             : null;
+        _ = TryReloadUsageSettings(operation, rebuildRecoveredRuntime: false);
         TranslationRuntime runtime = CreateTranslationRuntime(
             preferredModel,
             isStartup: false);
@@ -1339,6 +1394,14 @@ public partial class MainWindow : Window
         string? preferredModel,
         bool isStartup)
     {
+        if (_usageSettingsWarning is not null)
+        {
+            return _translationRuntimeFactory.CreateConfigurationFailure(
+                hasEnvironmentApiKey: false,
+                hasStoredApiKey: false,
+                _usageSettingsWarning);
+        }
+
         string? storedApiKey = null;
         Exception? credentialReadFailure = null;
         try
@@ -1434,9 +1497,7 @@ public partial class MainWindow : Window
         TranslationModelComboBox.IsEnabled =
             (!_execution.IsRunning || (configuration is not null && _execution.IsActive(configuration)))
             && translator is not null;
-        TranslationModelHintText.Text = translator is null
-            ? "OpenAIを有効にした場合に選択できます"
-            : $"次回のSCANから反映（従量課金・1起動最大{translator.MaxRequestsPerSession}回）";
+        UpdateTranslationUsageHint();
     }
 
     private void UpdateModelToggleHotKeyRegistration()
@@ -1515,10 +1576,16 @@ public partial class MainWindow : Window
         TranslationModelComboBox.ItemsSource = choices;
         TranslationModelComboBox.SelectedItem = selectedChoice;
         TranslationModelComboBox.IsEnabled = translator is not null;
+        UpdateTranslationUsageHint();
+        _modelSelectorInitializing = false;
+    }
+
+    private void UpdateTranslationUsageHint()
+    {
+        OpenAiTextTranslator? translator = _analyzer.Current.OpenAiTranslator;
         TranslationModelHintText.Text = translator is null
             ? "OpenAIを有効にした場合に選択できます"
             : $"次回のSCANから反映（従量課金・1起動最大{translator.MaxRequestsPerSession}回）";
-        _modelSelectorInitializing = false;
     }
 
     private void UpdateEnvironmentDetails() =>

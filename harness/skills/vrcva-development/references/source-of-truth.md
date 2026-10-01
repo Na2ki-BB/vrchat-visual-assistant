@@ -16,7 +16,7 @@ Read only the sections relevant to the requested change.
 | Desktop fallback | `src/VrcVa.Windows/Capture/` | Capture tests and Windows fixture check |
 | Settings persistence | `src/VrcVa.Windows/Settings/VrcVaSettingsStore.cs` and placement classes under `src/VrcVa.Windows/OpenVr/` | Corresponding settings-store tests |
 | AI feature selection and results | `src/VrcVa.Core/Features.cs`, `src/VrcVa.Core/Models.cs`, `src/VrcVa.Core/ScanPipeline.cs` | Feature catalog, analyzer, and presentation tests |
-| Text-model transport and usage policy | `src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs`, `src/VrcVa.Infrastructure/TranslationRequestQuota.cs` | Infrastructure transport tests and official provider documentation |
+| Text-model transport and usage policy | `src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs`, `src/VrcVa.Infrastructure/TextRequestQuota.cs`, `src/VrcVa.Infrastructure/FeatureUsageQuotas.cs` | Infrastructure transport tests and official provider documentation |
 
 For OpenVR, use the exact header matching the interface version requested at runtime. The current overlay contract is checked against Valve OpenVR v1.26.7 and requests `IVROverlay_027`. Existing code intentionally supports published older interface versions; do not replace a version or table slot without proving ABI compatibility.
 

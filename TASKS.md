@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト分岐・不変の認識文session、I3の共通実行/取消世代管理を追加。I4以降は未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。マイク/通信/公開画面/実quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
+Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト分岐・不変の認識文session、I3の共通実行/取消世代管理、I4の独立text quota/version 6設定を追加。J1以降は未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。マイク/音声・検索通信/公開画面/音声quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -353,11 +353,12 @@ Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト�
 - [x] **I3 — 全入口のsingle-flightと世代管理を共通化する**（依存: I2）
   - 範囲: `ScanPipeline._isRunning`と`MainWindow._uiScanRunning`の役割を整理し、アプリ寿命の共通gateへ既存SCAN全入口を接続。録音から文字起こし完了までを1処理、検索/コピーを個別処理とし、認識文/候補の待機中は解放する。session/operation、取消、後処理完了後の解放を共通化する。
   - 確認: fake録音・検索・コピーとdesktop/hotkey/OSC/腕SCANの競合、連打、runtime再構築で二重実行やqueue追加がない。Busy表示で現画面を壊さず、中止中は次を開始せず、閉じる/録り直し後の遅延応答をUI反映直前にも拒否する。既存capture抑制順序と共有OpenVR lifetimeを維持する。
-  - 2026-10-01実装: アプリ寿命の `ExecutionCoordinator` / `ExecutionOperation` を全既存SCAN、画像診断、結果コピーに共有。session/operation世代、非queue admission、一度限りのpipeline実行、取消後のowner回収、dispatcher直前のWPF/OpenVR反映とclipboard検証、runtime/model交換の原子排他、Closingでの回収待ちを追加。fake録音→文字起こし/検索/コピー、cancel中cleanup、再構築、遅延応答、ID再利用、callback異常を検証。音声/検索adapter・公開UI・quotaは未接続。Linux .NET 8.0.422のsolution Release cross-buildは0 warnings/errors、Core155件/Infrastructure28件が通過。変更C#14ファイルのtargeted formatとdiff/secret検査が通過し、全体formatは既存Windows5ファイルの違反とWindows参照読込みwarningを残す。独立レビューの二重lease実行/OSCと資格情報runtime交換/画像dialogと終了の競合を修正し、実際のSTA dispatcher/Window終了を含むWindows全testsはCIで別確認する。実マイク/API/Questの証拠は追加しない。
+  - 2026-10-01実装: アプリ寿命の `ExecutionCoordinator` / `ExecutionOperation` を全既存SCAN、画像診断、結果コピーに共有。session/operation世代、非queue admission、一度限りのpipeline実行、取消後のowner回収、dispatcher直前のWPF/OpenVR反映とclipboard検証、runtime/model交換の原子排他、Closingでの回収待ちを追加。fake録音→文字起こし/検索/コピー、cancel中cleanup、再構築、遅延応答、ID再利用、callback異常を検証。音声/検索adapter・公開UI・quotaは未接続。Linux .NET 8.0.422のsolution Release cross-buildは0 warnings/errors、Core155件/Infrastructure28件が通過。変更C#14ファイルのtargeted formatとdiff/secret検査が通過し、全体formatは既存Windows5ファイルの違反とWindows参照読込みwarningを残す。独立レビューの二重lease実行/OSCと資格情報runtime交換/画像dialogと終了の競合を修正。Windows CI68（PR）/69（main83c106a）はrestore/build/testを通過し、実際のSTA dispatcher/Window終了を含むWindows全testsを確認。実マイク/API/Questの証拠は追加しない。
 
-- [ ] **I4 — 翻訳と検索解釈のquotaを分離する**（依存: I1、I3）
+- [x] **I4 — 翻訳と検索解釈のquotaを分離する**（依存: I1、I3）
   - 範囲: `TranslationRequestQuota`、共通text client、`TranslationRuntimeFactory`とcomposition rootを見直し、翻訳/検索解釈を各10回の独立したプロセス寿命枠にする。設定値は用途別に検証し、同じ用途のclientを作り直しても同じ消費量を使う。音声の秒数/回数枠はJ2で別実装する。
   - 確認: 各上限の直前/一致/超過、片方を使い切っても他方は利用可能、送信開始後の失敗/取消も該当枠のみ消費、再読込/モデル切替/runtime再構築でリセットしないことをfake HTTPで検証。全用途のsingle-flightは維持し、翻訳の既定モデル/切替候補を変えない。
+  - 2026-10-01実装: `FeatureUsageQuotas` が用途付き `TextRequestQuota` を翻訳/検索AI解釈で独立所有し、各初期10回・1〜100回へ個別設定可能。翻訳factory/全client再構築へ同じカウンターを渡す。送信直前予約は未開始時だけ返却し、開始後の認証/通信失敗・timeout/取消と本人の再送は対象枠だけ消費する。version 6へ `VoiceInput` / `UsageLimits` を保存し、旧1〜5は音声無効/初期枠へ移行。全値を厳格検証し、SCAN/資格情報runtime交換は共通gate内で再読込する。上限増減でも消費量不変、不正/読込失敗/観測済み設定の消失は旧snapshotを残してSCANを取得・送信前に拒否する。独立レビューで設定pathのdirectory置換が初期枠へ戻る問題と既存hintの古い上限を修正し、回帰を追加。Linux .NET 8.0.422のsolution Release cross-buildは0 warnings/errors、Core155件/Infrastructure108件の全回帰、変更C#のtargeted formatとdiff/secret検査が通過。全体formatは既存Windows5ファイルの違反を残す。Windows全testsはCIで別確認し、音声quota（J2）/公開解釈adapter・GPT-6 Luna（K3）/マイク・UI・実API・Questの証拠は追加しない。
 
 Exit: 既存翻訳の回帰を通し、fakeのテキスト機能を画像取得なしで安全に実行できる。新しい公開マイク/検索入口や有料送信をまだ有効にしない。
 

@@ -32,16 +32,21 @@ internal sealed class TranslationRuntimeFactory
 
     private readonly HttpClient _httpClient;
     private readonly IOcrEngine _ocrEngine;
-    private readonly TranslationRequestQuota _requestQuota;
+    private readonly TextRequestQuota _requestQuota;
 
     public TranslationRuntimeFactory(
         HttpClient httpClient,
         IOcrEngine ocrEngine,
-        TranslationRequestQuota requestQuota)
+        TextRequestQuota requestQuota)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(ocrEngine);
         ArgumentNullException.ThrowIfNull(requestQuota);
+
+        if (requestQuota.Purpose != TextRequestPurpose.Translation)
+        {
+            throw new ArgumentException("Translation runtime requires the translation quota.", nameof(requestQuota));
+        }
 
         _httpClient = httpClient;
         _ocrEngine = ocrEngine;

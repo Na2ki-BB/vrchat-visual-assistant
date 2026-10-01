@@ -12,7 +12,7 @@ public sealed class TranslationRuntimeTests
     public void Create_WithStoredKey_UsesOfficialEndpointAndSharedQuota()
     {
         using HttpClient client = new(new CountingHandler());
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         TranslationRuntimeFactory factory = CreateFactory(client, quota);
 
         TranslationRuntime runtime = factory.Create(
@@ -35,7 +35,7 @@ public sealed class TranslationRuntimeTests
     {
         CountingHandler handler = new();
         using HttpClient client = new(handler);
-        TranslationRuntimeFactory factory = CreateFactory(client, new TranslationRequestQuota());
+        TranslationRuntimeFactory factory = CreateFactory(client, new TextRequestQuota());
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             factory.Create(
@@ -53,7 +53,7 @@ public sealed class TranslationRuntimeTests
     public void Create_WithEnvironmentKeyAndExplicitProvider_AllowsCustomEndpoint()
     {
         using HttpClient client = new(new CountingHandler());
-        TranslationRuntimeFactory factory = CreateFactory(client, new TranslationRequestQuota());
+        TranslationRuntimeFactory factory = CreateFactory(client, new TextRequestQuota());
 
         TranslationRuntime runtime = factory.Create(
             configuredProvider: "openai",
@@ -72,7 +72,7 @@ public sealed class TranslationRuntimeTests
     public void Create_WithExplicitNone_DoesNotReadOpenAiOptionsOrUseAvailableKeys()
     {
         using HttpClient client = new(new CountingHandler());
-        TranslationRuntimeFactory factory = CreateFactory(client, new TranslationRequestQuota());
+        TranslationRuntimeFactory factory = CreateFactory(client, new TextRequestQuota());
         bool optionsRead = false;
 
         TranslationRuntime runtime = factory.Create(
@@ -96,7 +96,7 @@ public sealed class TranslationRuntimeTests
     public void Create_PreservesPreferredSupportedModelAcrossRuntimeReplacement()
     {
         using HttpClient client = new(new CountingHandler());
-        TranslationRuntimeFactory factory = CreateFactory(client, new TranslationRequestQuota());
+        TranslationRuntimeFactory factory = CreateFactory(client, new TextRequestQuota());
 
         TranslationRuntime runtime = factory.Create(
             configuredProvider: null,
@@ -142,7 +142,7 @@ public sealed class TranslationRuntimeTests
     {
         CountingHandler handler = new();
         using HttpClient client = new(handler);
-        TranslationRuntimeFactory factory = CreateFactory(client, new TranslationRequestQuota());
+        TranslationRuntimeFactory factory = CreateFactory(client, new TextRequestQuota());
         TranslationRuntime runtime = factory.CreateConfigurationFailure(
             hasEnvironmentApiKey: false,
             hasStoredApiKey: true,
@@ -161,9 +161,22 @@ public sealed class TranslationRuntimeTests
         Assert.False(runtime.HasEffectiveApiKey);
     }
 
+    [Fact]
+    public void CreateFactory_RejectsInterpretationQuotaBeforeAnySend()
+    {
+        CountingHandler handler = new();
+        using HttpClient client = new(handler);
+        FeatureUsageQuotas quotas = new();
+        Assert.Throws<ArgumentException>(() => new TranslationRuntimeFactory(
+            client, new FixedOcrEngine(), quotas.SearchInterpretation));
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(10, quotas.Translation.Remaining);
+        Assert.Equal(10, quotas.SearchInterpretation.Remaining);
+    }
+
     private static TranslationRuntimeFactory CreateFactory(
         HttpClient client,
-        TranslationRequestQuota quota) =>
+        TextRequestQuota quota) =>
         new(client, new FixedOcrEngine(), quota);
 
     private static OpenAiTranslatorOptions CreateOptions(Uri? endpoint = null) => new()
