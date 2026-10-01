@@ -3,8 +3,8 @@ using VrcVa.Core;
 namespace VrcVa.Infrastructure;
 
 /// <summary>
-/// Application-owned, independent text counters. Audio counters are a separate
-/// adapter; its configured ceilings are preserved here without reserving audio.
+/// Application-owned, independent audio, translation and interpretation counters.
+/// Runtime/client replacement and settings reload preserve every counter identity.
 /// </summary>
 public sealed class FeatureUsageQuotas
 {
@@ -15,11 +15,14 @@ public sealed class FeatureUsageQuotas
     {
         _limits = limits ?? new FeatureUsageLimits();
         _limits.Validate();
+        Voice = new VoiceRequestQuota(_limits.VoiceSeconds, _limits.VoiceRequests, _sync);
         Translation = new TextRequestQuota(_limits.TranslationRequests,
             TextRequestPurpose.Translation, _sync);
         SearchInterpretation = new TextRequestQuota(_limits.SearchInterpretationRequests,
             TextRequestPurpose.SearchInterpretation, _sync);
     }
+
+    public VoiceRequestQuota Voice { get; }
 
     public TextRequestQuota Translation { get; }
 
@@ -37,6 +40,7 @@ public sealed class FeatureUsageQuotas
         limits.Validate();
         lock (_sync)
         {
+            Voice.UpdateMaximums(limits.VoiceSeconds, limits.VoiceRequests);
             Translation.UpdateMaximum(limits.TranslationRequests);
             SearchInterpretation.UpdateMaximum(limits.SearchInterpretationRequests);
             _limits = limits;
