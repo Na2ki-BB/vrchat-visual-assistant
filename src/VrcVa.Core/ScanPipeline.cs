@@ -8,18 +8,20 @@ public sealed class ScanPipeline
     private readonly FeatureCatalog _featureCatalog;
     private readonly IResultRenderer _renderer;
     private readonly IPrivacySafeLogger _logger;
-    private int _isRunning;
+    private readonly ExecutionCoordinator _execution;
 
     public ScanPipeline(
         ICaptureSource captureSource,
         IAnalyzer analyzer,
         IResultRenderer renderer,
-        IPrivacySafeLogger? logger = null)
+        IPrivacySafeLogger? logger = null,
+        ExecutionCoordinator? execution = null)
         : this(
             captureSource,
             new FeatureCatalog(new FeatureEntry(BuiltInFeatures.Translation, analyzer)),
             renderer,
-            logger)
+            logger,
+            execution)
     {
     }
 
@@ -27,7 +29,8 @@ public sealed class ScanPipeline
         ICaptureSource captureSource,
         FeatureCatalog featureCatalog,
         IResultRenderer renderer,
-        IPrivacySafeLogger? logger = null)
+        IPrivacySafeLogger? logger = null,
+        ExecutionCoordinator? execution = null)
     {
         ArgumentNullException.ThrowIfNull(captureSource);
         ArgumentNullException.ThrowIfNull(featureCatalog);
@@ -37,6 +40,7 @@ public sealed class ScanPipeline
         _featureCatalog = featureCatalog;
         _renderer = renderer;
         _logger = logger ?? NullPrivacySafeLogger.Instance;
+        _execution = execution ?? new ExecutionCoordinator();
     }
 
     public async Task<ScanOutcome> RunAsync(
@@ -45,25 +49,52 @@ public sealed class ScanPipeline
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (Interlocked.CompareExchange(ref _isRunning, 1, 0) != 0)
+        if (!_execution.TryBeginSession(
+            request.CorrelationId,
+            out ExecutionOperation? operation,
+            cancellationToken,
+            request.TextInput?.SessionId))
         {
-            ScanOutcome busy = ScanOutcome.Failed(
+            return ScanOutcome.Failed(
                 request.CorrelationId,
                 new ScanFailure(
-                    ScanFailureCode.Busy,
+                    cancellationToken.IsCancellationRequested ? ScanFailureCode.Cancelled : ScanFailureCode.Busy,
                     ScanStage.Trigger,
-                    "前のSCANを処理中です。完了してからもう一度お試しください。"),
+                    "前の処理を実行中です。完了してからもう一度お試しください。"),
                 TimeSpan.Zero);
-            await _renderer.RenderOutcomeAsync(busy, cancellationToken).ConfigureAwait(false);
-            return busy;
         }
 
+        using (operation)
+        {
+            return await RunAsync(request, operation).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Uses admission already owned by the caller, including pre-capture waits.</summary>
+    public async Task<ScanOutcome> RunAsync(ScanRequest request, ExecutionOperation operation)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(operation);
+        if (!_execution.IsActive(operation) || operation.OperationId != request.CorrelationId
+            || (request.TextInput is not null && operation.SessionId != request.TextInput.SessionId))
+        {
+            throw new ArgumentException("The request must match the active operation of this pipeline.", nameof(operation));
+        }
+
+        if (!operation.TryClaimExecution())
+        {
+            return ScanOutcome.Failed(request.CorrelationId,
+                new ScanFailure(ScanFailureCode.Busy, ScanStage.Trigger,
+                    "この操作は既に実行中、または完了しています。"), TimeSpan.Zero);
+        }
+
+        CancellationToken cancellationToken = operation.CancellationToken;
         Stopwatch total = Stopwatch.StartNew();
         ScanStage stage = ScanStage.Trigger;
 
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            operation.ThrowIfNotCurrent();
             FeatureEntry feature = _featureCatalog.Resolve(request.FeatureId);
             if (feature.Descriptor.InputKind != request.InputKind)
             {
@@ -83,10 +114,12 @@ public sealed class ScanPipeline
                 cancellationToken).ConfigureAwait(false);
 
             InlineProgress<ScanProgress> progress = new(value =>
-                _renderer
-                    .RenderProgressAsync(value, cancellationToken)
-                    .GetAwaiter()
-                    .GetResult());
+            {
+                if (_execution.IsActive(operation) && operation.IsCurrent && value.CorrelationId == operation.OperationId)
+                {
+                    _renderer.RenderProgressAsync(value, cancellationToken).GetAwaiter().GetResult();
+                }
+            });
 
             AnalysisResult result;
             if (request.InputKind == FeatureInputKind.Text)
@@ -99,6 +132,7 @@ public sealed class ScanPipeline
                     total.Elapsed,
                     cancellationToken).ConfigureAwait(false);
 
+                operation.ThrowIfNotCurrent();
                 FeatureResult textResult = await feature.TextHandler!
                     .HandleAsync(request.TextInput!, request, progress, cancellationToken)
                     .ConfigureAwait(false);
@@ -114,10 +148,12 @@ public sealed class ScanPipeline
                     total.Elapsed,
                     cancellationToken).ConfigureAwait(false);
 
+                operation.ThrowIfNotCurrent();
                 Stopwatch captureTimer = Stopwatch.StartNew();
                 using CapturedFrame frame = await _captureSource
                     .CaptureAsync(request, cancellationToken)
                     .ConfigureAwait(false);
+                operation.ThrowIfNotCurrent();
                 captureTimer.Stop();
                 _logger.Info(
                     "capture.completed",
@@ -138,7 +174,7 @@ public sealed class ScanPipeline
                 result = analysisResult with { CaptureSourceKind = frame.SourceKind };
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
+            operation.ThrowIfNotCurrent();
             if (result.FeatureId != feature.Descriptor.Id)
             {
                 throw new InvalidOperationException(
@@ -164,9 +200,10 @@ public sealed class ScanPipeline
 
             stage = ScanStage.Rendering;
             await _renderer.RenderOutcomeAsync(success, cancellationToken).ConfigureAwait(false);
+            operation.ThrowIfNotCurrent();
             return success;
         }
-        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested || !operation.IsCurrent)
         {
             total.Stop();
             ScanOutcome cancelled = ScanOutcome.Failed(
@@ -182,7 +219,7 @@ public sealed class ScanPipeline
                 stage,
                 ScanFailureCode.Cancelled,
                 exception);
-            await _renderer.RenderOutcomeAsync(cancelled, CancellationToken.None).ConfigureAwait(false);
+            // The owner presents cancellation only after cleanup; this generation is invalid.
             return cancelled;
         }
         catch (ScanException exception)
@@ -198,7 +235,10 @@ public sealed class ScanPipeline
                 exception.Stage,
                 exception.FailureCode,
                 exception);
-            await _renderer.RenderOutcomeAsync(failed, CancellationToken.None).ConfigureAwait(false);
+            if (operation.IsCurrent)
+            {
+                await _renderer.RenderOutcomeAsync(failed, CancellationToken.None).ConfigureAwait(false);
+            }
             return failed;
         }
         catch (Exception exception)
@@ -217,12 +257,11 @@ public sealed class ScanPipeline
                 stage,
                 ScanFailureCode.Unexpected,
                 exception);
-            await _renderer.RenderOutcomeAsync(failed, CancellationToken.None).ConfigureAwait(false);
+            if (operation.IsCurrent)
+            {
+                await _renderer.RenderOutcomeAsync(failed, CancellationToken.None).ConfigureAwait(false);
+            }
             return failed;
-        }
-        finally
-        {
-            Volatile.Write(ref _isRunning, 0);
         }
     }
 

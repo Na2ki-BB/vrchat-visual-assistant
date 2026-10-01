@@ -6,29 +6,39 @@ namespace VrcVa.Windows.Rendering;
 internal sealed class WpfResultRenderer(
     Dispatcher dispatcher,
     Action<ScanProgress> progressAction,
-    Action<ScanOutcome> outcomeAction) : IResultRenderer
+    Action<ScanOutcome> outcomeAction,
+    Func<Guid, bool>? canRender = null) : IResultRenderer
 {
     public Task RenderProgressAsync(
         ScanProgress progress,
         CancellationToken cancellationToken) =>
-        InvokeAsync(() => progressAction(progress), cancellationToken);
+        InvokeAsync(progress.CorrelationId, () => progressAction(progress), cancellationToken);
 
     public Task RenderOutcomeAsync(
         ScanOutcome outcome,
         CancellationToken cancellationToken) =>
-        InvokeAsync(() => outcomeAction(outcome), cancellationToken);
+        InvokeAsync(outcome.CorrelationId, () => outcomeAction(outcome), cancellationToken);
 
-    private Task InvokeAsync(Action action, CancellationToken cancellationToken)
+    private Task InvokeAsync(Guid operationId, Action action, CancellationToken cancellationToken)
     {
+        void RenderIfCurrent()
+        {
+            if (cancellationToken.IsCancellationRequested || canRender?.Invoke(operationId) == false)
+            {
+                return;
+            }
+
+            action();
+        }
+
         if (dispatcher.CheckAccess())
         {
-            action();
+            RenderIfCurrent();
             return Task.CompletedTask;
         }
 
         return dispatcher.InvokeAsync(
-            action,
-            DispatcherPriority.Normal,
-            cancellationToken).Task;
+            RenderIfCurrent,
+            DispatcherPriority.Normal).Task;
     }
 }

@@ -228,7 +228,7 @@ public sealed class TextInputPipelineTests
         ScanOutcome outcome = await pipeline.RunAsync(CreateTextRequest(), cancellation.Token);
 
         Assert.Equal(ScanFailureCode.Cancelled, outcome.Failure?.Code);
-        Assert.False(Assert.Single(renderer.Outcomes).IsSuccess);
+        Assert.Empty(renderer.Outcomes);
     }
 
     private static ScanRequest CreateTextRequest() =>

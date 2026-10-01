@@ -66,6 +66,23 @@ public sealed class XsOverlayNotificationRendererTests
         Assert.Equal(XsOverlayNotificationKind.Error, notification.Kind);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RenderOutcomeAsync_InvalidatedFailure_DoesNotNotify(bool cancelToken)
+    {
+        RecordingSink sink = new();
+        using CancellationTokenSource cancellation = new();
+        XsOverlayNotificationRenderer renderer = new(sink, _ => cancelToken);
+        if (cancelToken) { cancellation.Cancel(); }
+        ScanOutcome failure = ScanOutcome.Failed(Guid.NewGuid(),
+            new ScanFailure(ScanFailureCode.Cancelled, ScanStage.Translation, "fake"), TimeSpan.Zero);
+
+        await renderer.RenderOutcomeAsync(failure, cancellation.Token);
+
+        Assert.Empty(sink.Notifications);
+    }
+
     private sealed class RecordingSink : IXsOverlayNotificationSink
     {
         public List<Notification> Notifications { get; } = [];
