@@ -4,7 +4,7 @@ Status: implemented baseline and historical decisions
 
 Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: through 2026-08-15 (Asia/Tokyo).
 
-[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md)
+[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md) · [動画検索機能設計（概要Draft）](DESIGN-VIDEO-SEARCH.md)
 
 ## Purpose and ownership
 
@@ -13,6 +13,8 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 画面の具体的な取得方法、OCR精度、英語から日本語への変換、翻訳費用と実測は[日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md)で管理する。`ICaptureSource` とフレームの所有権は基盤の契約だが、現行のOpenVR/Windows取得方式の詳細は同文書が正本となる。
 
 これは設計書の責務分割であり、新しい共通機構の実装ではない。現在の入力型は `CapturedFrame` のみで、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
+
+音声入力からYouTube候補を選びURLをコピーする機能は、別の[動画検索の概要案](DESIGN-VIDEO-SEARCH.md)として整理する。音声・候補選択を既存のFeatureCatalogへ載せるための具体的な入力・実行・結果契約は未決定であり、現行の画像専用契約だけで対応済みとはみなさない。
 
 ## Reading current behavior and history
 
