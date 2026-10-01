@@ -89,7 +89,7 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 
 `DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。`VideoSearchRequest.Query` は原文そのまま（空白・改行を含む4,000 UTF-8 byte以内）で、AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
 
-`VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。これは選択identityの認可までで、clipboardの取得・gate・STA書込み直前の再照合はK4へ残す。
+`VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。K4のclipboard境界はこの正本をSTA書込み直前に再照合する。公開UIへの接続はK5へ残す。
 
 `FeatureResult.VideoSearch` と既存 `AnalysisResult` の互換projectionは同じtyped snapshotを維持する。Windows composition rootへは未登録で、公開アプリからマイク/yt-dlp/AI/thumbnail/clipboardの新規通信や副作用は発生しない。K2のproviderは後続接続用の実装として存在する。
 
@@ -138,6 +138,18 @@ Windows runtimeには未登録で、公開ボタン・追加認証/課金・実A
 動画IDはYouTube動画IDの形を検証し、コピー先を `https://www.youtube.com/watch?v=<videoId>` に正規化する。返却URLを使ってIDを補う場合もYouTubeの許可したURL形式を解析して同じIDと照合する。任意scheme/hostやモデル生成URLをコピーしない。具体的な許可形式とID検証はadapterのテストで固定する。
 
 サムネイルは任意とし、欠落・取得失敗ならプレースホルダーとタイトルで候補を選べる。画像のHTTPS配信先を検証し、リダイレクト、取得byte数、timeout、デコード寸法を制限する。任意ローカル/内部URLを読まず、未検証の配信先へ資格情報を送らない。初期実装はサムネイル補完のための動画ページの再取得を必須にせず、通信・メモリが無制限に増えないようにする。
+
+### K4 thumbnail and clipboard boundaries — implemented, not connected to public UI
+
+`HttpVideoThumbnailProvider` はmetadataと同じ `VideoMetadata.IsValidThumbnailUrl` を正本とし、許可HTTPS originだけへ専用clientで取得する。cookie・資格情報・proxy・自動redirect/decompressionを無効にし、全3xxと予期しない最終request URIを拒否する。1枚5秒、Content-Lengthと実読込みの両方で512 KiBまでに制限する。`VideoThumbnailHeader` はmagic/構造/静止frameと寸法をdecode前に検査し、`WpfVideoThumbnailDecoder` はOnLoadでメモリdecode、1 frameとheader一致を再確認して1辺1,024 px・合計1,048,576 pixel・BGRA32 4 MiB以内へ変換する。8-bit JPEGと8-bit以下のPNGをWindows内蔵decoderで扱い、16-bit PNG等は高bit-depthの中間rasterを避けるためplaceholderへ戻す。WebPは初期decoderの明示非対応としてplaceholderへ戻す（WebP codec検索や追加依存を行わない）。取得/画像/非対応の失敗は内容を含まない型付き結果で返し、候補snapshot・title・URL・ページは変更しない。URL suffix/Content-Typeは画像の根拠にしない。WICのdecode時に埋込みthumbnailや圧縮metadataが別展開されないよう、JPEG APPnはthumbnailなしの固定JFIF/Adobeだけ、PNGはrasterと固定長の表示chunkだけに制限し、EXIF/ICC/圧縮text/未知metadataはplaceholderにする。WPFのPNG/JPEG wrapperはMicrosoft WIC vendorを優先するが専用CLSIDを強制するAPIではなく、Windows側の登録codecを完全排除する保証はしない。実Windowsのcodec互換性はL2/L3で別確認する。
+
+`VideoCandidateClipboard.CopyAsync` は候補actionと新しいcopy operation IDを受け取り、共通 `ExecutionCoordinator` へ非queue admissionする。`WpfVideoClipboardDispatcher` のSTA callback内でsession → coordinatorの固定lock順により現在のsession・検索operation・候補ID/許可actionを再確認し、正規watch URLの書込みとClose/Cancel/Stopの失効に隙間を作らない。候補actionにURLを持たせず、表示順/titleからURLを推測しない。成功した時だけコピー完了resultを返し、K5は描画直前に `IsFeedbackCurrent` で古いoperation/候補のfeedbackを再確認する。
+
+STA callbackの `Dispatcher.DisableProcessing` はnested dispatcherの再入も防ぐ。取消がOS呼出し開始前なら書き込まず、既に開始したOS書込みは取り消せない。gate admissionのbusy feedbackは同generationのactive ownerが終わると失効し、コピー成功feedbackを遅れて上書きしない。
+
+Windowsの単発writerはUnicode dataを `Clipboard.SetDataObject(copy:true, retryTimes:0, retryDelay:0)` で書き込む。通常のWPF SetTextにある内部retryを避け、占有失敗は短い理由と本人の明示再試行へ戻す。候補/ページの再作成、再検索、文字起こし、clipboard自動retry、OS履歴/同期設定変更、終了時clearはしない。copy:trueにより終了後も貼り付け可能なデータを残す（[Microsoft Clipboard.SetDataObject](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.clipboard.setdataobject?view=windowsdesktop-8.0)）。
+
+K4はadapter/契約/fakeテストまで。新しいthumbnail通信やOS clipboard書込みは公開UIへ接続していない。STA試験も実dispatcher上のfake writerで行い、Windowsの実clipboard占有回復/他アプリへの貼り付け、実YouTube画像互換、Quest表示/操作はK5/L2/L3の未実施ゲートを維持する。
 
 ## Result UI and clipboard
 

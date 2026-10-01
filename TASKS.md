@@ -401,9 +401,11 @@ Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音�
 
   - 2026-10-01実装: 検索専用 `OpenAiSearchInterpretationOptions` / `OpenAiSearchQueryInterpreter` とCoreの `SearchQueryInterpretation` / `InterpretedVideoSearchHandler` を追加。翻訳allowlist/既定/切替を維持し、解釈だけ `gpt-6-luna` / none、固定prompt/endpoint、store:false、原文4,000 UTF-8 byte/出力400 tokens/1行1,000 byteに制限。共有clientの解釈応答は64 KiB以下、完了単一textのみを検証しtool/URL/空/不正/超過で検索0回・暗黙fallback/自動retryなし。アプリ所有解釈quotaだけを消費し、再構築で維持。sessionは確定queryと失敗検索IDを原文/候補と別保持し、同一認識文objectからの明示retryだけ解釈/文字起こしを追加せず再検索する。新検索/直接検索/取消/close/録り直し/終了と遅延応答の失効をfakeで検証。公式モデルID/none/Responses対応を再確認。Linux .NET 8.0.422でJ2統合後のsolution Release cross-build（0 warnings/errors）、新規fake94件を含むCore351件/Infrastructure329件の全回帰、変更C#12ファイルのtargeted format、diff/secret検査、独立レビューが通過。全体formatは既存Windows5ファイルの違反とLinux Windows参照読込みwarningを残す。レビューで固有名詞のコロン/ドットの過剰URL判定、不正Unicode入力の置換送信、独立取消token時のquery保持を修正し、J2 enumの既存序数を維持。Windows全testsはPRの正確なheadでCI確認する。公開UI/資格情報変更/実API/実YouTube検索/Quest評価は追加せずK5/L2/L3へ残す。
 
-- [ ] **K4 — サムネイルとclipboardの副作用境界を作る**（依存: I1、K1）
+- [x] **K4 — サムネイルとclipboardの副作用境界を作る**（依存: I1、K1）
   - 範囲: thumbnailは許可HTTPS先・redirect・byte数・timeout・デコード寸法を制限してメモリ取得する。clipboardはWPF dispatcher/STAへ分離し、書込み直前に現在のsession/候補IDを再確認する。コピーも共通gateを通す。
   - 確認: fake HTTP/clipboardで内部/ローカルURL、未許可redirect、巨大/不正画像を拒否し、資格情報を送らない。欠落/失敗でもplaceholderとtitleで選択可能。世代遅延と連打で誤コピーせず、成功後だけ完了表示。占有失敗時も候補/ページを保持して本人が再試行可能。自動無限retry、再検索、OS履歴/同期変更、終了時のclipboard消去をしない。
+
+  - 2026-10-01実装: 許可originの正本を再利用するcredential/cookie/redirectなしの専用HTTP取得、5秒/512 KiB、magic/静止frame/decode前寸法とdecode後BGRA32上限を追加。型付きplaceholder結果は候補/ページを変更しない。候補コピーは共通gate内の新operationからWPF dispatcher/STAへ渡し、session → coordinatorの固定lock順で直前identity再確認と単発OS書込みをまとめる。正規watch URL以外を渡さず、busy時も候補を保持し明示retryできる。generation付きfeedbackは描画時に再照合する。公開UI接続、実thumbnail取得、OS clipboard実変更、実機/API評価は今回行わない。Linux .NET 8.0.422でJ3最新main統合後のsolution Release cross-build（0 warnings/errors）、新規fake94件を含むCore362件/Infrastructure412件の全回帰、変更C#14ファイルのtargeted format、diff/secret検査、独立レビューが通過。全体formatは既存Windows5ファイルの違反を残す。レビューでSTA再入/gate-busy feedback/再呼出callbackの多重書込み/埋込みthumbnail・圧縮metadataの寸法迂回を修正し、20万parser stress入力でも上限内の結果以外/予期しない例外なしを確認。初期decoderは8-bit JPEG/8-bit以下PNGを扱い、WebP・高bit-depth・EXIF/ICC/圧縮text/未知metadataはplaceholderへ戻す。WPF/WICのvendor優先は専用CLSID強制ではなく、codec互換/実clipboard/Quest確認は別ゲート。Windows全testsはPRの正確なheadでCI確認する。
 
 - [ ] **K5 — 2つの検索ボタンと候補表示をWPFに接続する**（依存: J3、K2、K3、K4）
   - 範囲: runtime catalogとcomposition rootへ検索を登録し、認識文直下へ最初から「そのまま検索」「解釈して検索」を配置。追加確認画面なしで選択経路を実行し、検索語/取得件数、5カード、前/次、入力へ戻る、閉じる、コピー状態を表示する。
