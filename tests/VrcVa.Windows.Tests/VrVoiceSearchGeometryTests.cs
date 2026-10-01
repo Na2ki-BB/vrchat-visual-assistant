@@ -278,7 +278,8 @@ public sealed class VrVoiceSearchGeometryTests
         {
             await using SearchFlowFixture fixture = new();
             fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(string.Concat(Enumerable.Repeat("長文😀 synthetic words\n", 80))));
-            fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(title: string.Concat(Enumerable.Repeat("長い title😀\n", 160))));
+            VideoSearchBatch longTitles = SearchFlowFixture.Batch(title: string.Concat(Enumerable.Repeat("長い title😀 ", 160)));
+            fixture.SearchResponse = (_, _) => Task.FromResult(longTitles);
             VrSearchView view = new();
             using VrVoiceSearchController controller = new(fixture.Voice.Execution, fixture.Voice.Flow, fixture.Flow, view);
             await fixture.Voice.RecordAsync();
@@ -293,8 +294,11 @@ public sealed class VrVoiceSearchGeometryTests
             }
             view.Activate(VrVoiceSearchAction.DirectSearch);
             await fixture.Flow.WhenIdle;
+            Assert.Equal(VideoSearchFlowState.Candidates, view.Current!.State);
+            Assert.Equal(10, view.Current.Result!.Candidates.Count);
             foreach (int page in new[] { 0, 1 })
             {
+                Assert.Equal(5, view.Current.Cards.Count);
                 texture.SetVoiceSearch(view.Current!);
                 Assert.Equal(1280 * 720 * 4, texture.RenderCurrentResultRgba().Length);
                 Assert.Equal(12, ResultPanelTexture.VoiceSearchControls(view.Current!).Count);
