@@ -1,6 +1,6 @@
 # VRChat Visual Assistant — 共通AI基盤設計
 
-Status: implemented baseline / approved voice-input design (not implemented) / historical decisions
+Status: implemented baseline / unexposed Windows recording adapter / approved voice flow (not connected) / historical decisions
 
 Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: through 2026-08-15 (Asia/Tokyo).
 
@@ -14,7 +14,7 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 文書再整理そのものでは実装を変更しなかった。その後のI2で `CapturedFrame` と `TextInputSession` の入力境界を追加したが、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
 
-2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節ではI1/I2の純粋な契約と未実装の接続を区別し、共通音声フロー全体が対応済みとはみなさない。マイク/通信/UIの実装は残す。音声送信上限は下記で合意済みとする。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節ではI1/I2の純粋な契約と未実装の接続を区別し、共通音声フロー全体が対応済みとはみなさない。J1で未公開Windows録音adapterと音声sessionを追加した。通信/UIの接続と実機受入は残す。音声送信上限は下記で合意済みとする。
 
 ## Reading current behavior and history
 
@@ -172,7 +172,7 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 ### I1 adapter and settings decisions — foundation contracts only
 
-2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**マイク、同意画面、音声/検索の通信は未実装**。翻訳モデルallowlistは変更しない。
+2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**J1の未公開録音adapterのみ追加済み。同意画面、音声/検索の通信は未実装**。翻訳モデルallowlistは変更しない。
 
 - **録音（J1）**: Windows標準のWinMM `waveIn` を直接包み、追加ライブラリは導入しない。`WAVE_MAPPER` と `WAVE_MAPPED_DEFAULT_COMMUNICATION_DEVICE` でWindows既定の通信入力デバイスを使う。`WAVE_MAPPER` 単独は別の対応デバイスを選び得るので使わない。録音開始時のデバイス/設定を固定し、途中切替や別マイクへの暗黙fallbackはしない。形式照会、未接続/拒否/非対応/切断を段階別の失敗にする。デバイス選択はWindows側で行い、アプリ内一覧は初期範囲に加えない
 - **形式/容量（J1/J2）**: little-endian PCM16、mono、16,000 Hz（32,000 byte/秒）、44 byte headerのWAVをメモリで作る。録音上限は30秒、変更範囲1〜120秒。現設定秒数×32,000 byteで入力を止め、全体hard capはPCM 3,840,000 byte + WAV header 44 byte。余分なWAV chunk、別形式、途中sample、空データは送信しない。Windows driver内の同一デバイス形式変換の可否はJ1/L2で検証する
@@ -192,6 +192,18 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 音声quotaは実sample数から求め、送信するPCM byte数を32,000で割った秒数を**要求ごとに整数秒へ切上げ**る（例: 32,000 byteは1秒、32,002 byteは2秒）。header/送信準備/壁時計は数えず、失敗音声の再送も同じ全量を新たに予約する。3つの用途の消費カウンターはcomposition rootのプロセス寿命所有とし、client/runtime/設定snapshotの交換とは別に保持する。設定を増減しても既消費量は不変、下げて消費済み量を下回った枠は残り0、再び増やせば新上限から既消費量を引く。進行中の録音/操作は開始時snapshotで完走し、新上限は次の操作から適用する。予約・取消・消費の実処理はI4/J2で検証する。
 
 公式根拠は [Microsoft waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[OpenAI audio transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe)。2026-10-01に文書契約のみ確認し、価格/保持条件の利用前表示、実マイク、実API性能/精度はJ3/L2/L3の確認を残す。
+
+### J1 Windows recording adapter — unexposed implementation
+
+`VoiceInputRecorder` は `VoiceInputOptions.IsEnabled` と専用音声キー利用可否の非秘密snapshotを確認し、共通 `ExecutionCoordinator` の新sessionを受け付けてからマイクを開く。拒否/Busyでは現sessionを変更しない。公開WPF、Credential Manager接続、文字起こしAPI、音声quotaは追加しない。J3は開始時snapshotと明示操作をこの境界へ渡す。
+
+`WinMmMicrophoneFactory` は既定通信deviceの形式を照会し、`CALLBACK_EVENT` と専用workerで3個の100 ms native bufferを循環する。実際のWinMM endpoint IDをCoreAudioへ対応付け、入力endpointの状態と通信既定の変更通知/再確認で喪失を検出する。WinMMの既定streamはOSにより別deviceへrouteされ得るため、変更を検知した録音は失敗とし、新既定へ継続しない。driverから返ったbufferはqueue順で処理し、停止時の最終部分bufferも回収する。reset、unprepare、closeが完了するまで後続処理へ渡さない。
+
+`VoiceRecordingSession` は手動停止と設定時間/PCM容量上限を同じ停止に集約し、取消と区別する。全native回収後にPCM16の空/途中sample/近無音を検証し、44 byte headerのWAVを1つのbounded配列で所有する。無音による早期停止はしない。後続処理は同じoperationを借り、終了/取消の回収までgateを保持する。音声の取消/closeはcoordinator内でowner/session IDを原子的に照合し、古い画面の操作で次SCANを止めない。成功、中止、閉じる、録り直し、VR喪失、終了はbufferをゼロ化する。失敗音声は最初の失敗から単調時計で期限を固定し、期限内に取得したleaseのみ完了まで保持する。再送でも期限は延長しない。
+
+正常driverの停止/解放順序はfakeで確認する。driverが繰返しreset/unprepare/closeを拒否する異常経路では、まだdriverが所有するpointer/eventを解放してuse-after-freeを起こさず、最大1録音分のbounded native allocationをprocess内で隔離する。`MicrophoneCleanupFailed` を返し、native再openを拒否し、共通coordinatorの `Stop()` で全用途の新admissionも拒否する。shutdown待ちは完了できるが、driver所有資源を解放成功とは扱わず保持する。OS資源回収には本人のアプリ再起動が必要となる可能性があり、この経路を正常解放成功と扱わない。
+
+根拠: [waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[waveInReset](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinreset)、[waveInClose](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinclose)、[GetState](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-getstate)、[stream routing](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)。2026-10-01に公式仕様とfakeを確認。実マイク/OS・物理ミュート/SteamVR/QuestはL2、実APIと保持条件はJ3/L3で確認する。
 
 ### Minimal input and result extension
 
@@ -235,7 +247,7 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
-音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、録音/音声送信/音声quotaは未実装。I4の非秘密設定保存と独立text quotaだけは実装済みである。
+音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、J1の未公開録音adapter/sessionとI4の非秘密設定保存/独立text quotaを実装済み。音声送信/音声quota/公開UIは未接続である。
 
 ## Feature extension rules
 

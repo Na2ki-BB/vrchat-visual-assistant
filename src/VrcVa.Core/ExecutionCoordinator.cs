@@ -123,7 +123,18 @@ public sealed class ExecutionCoordinator
 
     public void CancelCurrentOperation() => Invalidate(endSession: false, stop: false);
 
+    /// <summary>Invalidates only the expected owner, so stale adapter actions cannot cancel newer work.</summary>
+    public bool CancelOperation(ExecutionOperation expectedOperation)
+    {
+        ArgumentNullException.ThrowIfNull(expectedOperation);
+        return Invalidate(endSession: false, stop: false, expectedOperation: expectedOperation);
+    }
+
     public void CloseSession() => Invalidate(endSession: true, stop: false);
+
+    /// <summary>Closes only the displayed session; an old Close cannot invalidate its replacement.</summary>
+    public bool CloseSession(Guid expectedSessionId) =>
+        Invalidate(endSession: true, stop: false, expectedSessionId: expectedSessionId);
 
     /// <summary>Rejects all later admissions, while the current owner still drains.</summary>
     public void Stop() => Invalidate(endSession: true, stop: true);
@@ -192,11 +203,21 @@ public sealed class ExecutionCoordinator
         operation.SignalCompletion();
     }
 
-    private void Invalidate(bool endSession, bool stop)
+    private bool Invalidate(
+        bool endSession,
+        bool stop,
+        ExecutionOperation? expectedOperation = null,
+        Guid? expectedSessionId = null)
     {
         ExecutionOperation? operation;
         lock (_sync)
         {
+            if ((expectedOperation is not null && !ReferenceEquals(_active, expectedOperation))
+                || (expectedSessionId is Guid sessionId && (sessionId == Guid.Empty || _sessionId != sessionId)))
+            {
+                return false;
+            }
+
             _invalidatedThroughGeneration = ++_generation;
             _operationId = Guid.Empty;
             if (endSession) { _sessionId = Guid.Empty; }
@@ -206,6 +227,7 @@ public sealed class ExecutionCoordinator
 
         // Adapter callbacks must never run under the coordinator lock.
         operation?.Cancel();
+        return true;
     }
 }
 

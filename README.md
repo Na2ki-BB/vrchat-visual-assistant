@@ -358,10 +358,10 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | `UsageLimits.SearchInterpretationRequests` | 10 | 1〜100送信／起動 | 独立枠を実装。公開解釈機能は未接続 |
 | `UsageLimits.VoiceSeconds` | 300 | 1〜3,600秒／起動 | 設定のみ。音声quotaはJ2 |
 | `UsageLimits.VoiceRequests` | 30 | 1〜300送信／起動 | 設定のみ。音声quotaはJ2 |
-| `VoiceInput.MaximumRecordingSeconds` | 30 | 1〜120秒 | 設定のみ。録音は未接続 |
-| `VoiceInput.FailedAudioRetentionSeconds` | 120 | 15〜300秒 | 設定のみ。音声保持は未接続 |
+| `VoiceInput.MaximumRecordingSeconds` | 30 | 1〜120秒 | 未公開録音adapterで使用。UIはJ3 |
+| `VoiceInput.FailedAudioRetentionSeconds` | 120 | 15〜300秒 | 未公開音声sessionで使用。UIはJ3 |
 
-`VoiceInput.IsEnabled`の初期値は`false`です。この値を編集しても、未実装のマイク/文字起こし/検索を有効にしません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
+`VoiceInput.IsEnabled`の初期値は`false`です。この値を編集しても、未公開録音adapterや未実装の文字起こし/検索を公開しません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
 
 次のSCAN（desktop、hotkey、OSC、腕、明示画像）と既存の資格情報runtime再構築時に、実行gateを保持して設定を再読込します。実行中の設定は固定し、消費量は保存もリセットもしません。上限を既消費量より下げれば残り0になり、増やせば新上限から既消費量を引きます。無効/読込失敗時は最後の有効snapshotとカウンターを残し、そのSCANを取得/送信前に拒否します。ファイル修正後は次のSCANで再開できます。
 
