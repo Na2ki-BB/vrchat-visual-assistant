@@ -35,6 +35,7 @@ internal interface IOperationProgressView
     bool TryShowProgress(OperationProgressSnapshot snapshot);
     void Hide();
     void ReturnToLauncher();
+    void DismissProgress() { Hide(); ReturnToLauncher(); }
 }
 
 internal sealed class OperationProgressActionEventArgs(
@@ -312,7 +313,7 @@ internal sealed class OperationProgressController : IDisposable
 
     private void HideView()
     {
-        try { _view.Hide(); _view.ReturnToLauncher(); }
+        try { _view.DismissProgress(); }
         catch (Exception) { /* Display failure cannot change audio/execution ownership. */ }
     }
 

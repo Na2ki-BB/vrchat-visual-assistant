@@ -5,7 +5,7 @@ using VrcVa.Windows.Rendering;
 
 namespace VrcVa.Windows.OpenVr;
 
-internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IOperationProgressView, IDisposable
+internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IOperationProgressView, IVrVoiceSearchView, IDisposable
 {
     private static readonly TimeSpan LauncherRetryDelay = TimeSpan.FromSeconds(2);
     private readonly ResultPanelTexture _texture = new();
@@ -38,6 +38,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     private string? _queuedResultTitle;
     private string? _queuedResultBody;
     private OperationProgressSnapshot? _queuedProgress;
+    private VrVoiceSearchSnapshot? _queuedVoiceSearch;
     private ResultPanelPlacement _placement;
     private ResultPanelPlacement? _calibrationOriginalPlacement;
     private bool _calibrationActive;
@@ -55,6 +56,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     private bool _resultConnectionAvailable;
 
     public event EventHandler<OperationProgressActionEventArgs>? ProgressActionRequested;
+    public event EventHandler? MicrophoneRequested;
+    public event EventHandler<VrVoiceSearchActionEventArgs>? VoiceSearchActionRequested;
     public event EventHandler? ConnectionLost;
     public event EventHandler? Hidden;
     public event EventHandler? ScanRequested;
@@ -323,6 +326,37 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         return TryShowContent(snapshot.Title, snapshot.Message, snapshot);
     }
 
+    public int MeasureTranscriptPages(string transcript) => _texture.MeasureTranscriptPages(transcript);
+
+    public bool TryShowVoiceSearch(VrVoiceSearchSnapshot snapshot)
+    {
+        PrepareProgressPresentation();
+        return TryShowContent(string.Empty, string.Empty, null, snapshot);
+    }
+
+    public void DismissVoiceSearch(VrVoiceSearchSnapshot snapshot)
+    {
+        if (!ReferenceEquals(_queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch, snapshot))
+        {
+            // The native upload owns its RGBA buffer, not this stale model. Release
+            // old text/images without hiding or discarding a newer queued owner.
+            if (ReferenceEquals(_texture.VoiceSearch, snapshot)) { _texture.SetContent(string.Empty, string.Empty); }
+            return;
+        }
+        Hide();
+        _texture.SetContent(string.Empty, string.Empty);
+        ReturnToLauncher();
+    }
+
+    public void DismissProgress()
+    {
+        // The completion callback may run after another subscriber has already
+        // published the transcript. It must release only its own presentation.
+        if ((_queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch) is not null) { return; }
+        Hide();
+        ReturnToLauncher();
+    }
+
     internal void PrepareProgressPresentation()
     {
         // WPF voice admission can occur during either VR calibration. Revert
@@ -333,7 +367,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         if (_calibrationActive) { FinishPlacementCalibration(save: false); }
     }
 
-    private bool TryShowContent(string title, string body, OperationProgressSnapshot? progress)
+    private bool TryShowContent(string title, string body, OperationProgressSnapshot? progress, VrVoiceSearchSnapshot? voiceSearch = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _ = TryRecoverWristLauncher();
@@ -361,12 +395,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             _visible = false;
             if (_imageUpload.InFlight)
             {
-                QueuePresentation(title, body, progress);
+                QueuePresentation(title, body, progress, voiceSearch);
                 return true;
             }
 
             _texture.SetContent(title, body);
             if (progress is not null) { _texture.SetProgress(progress); }
+            if (voiceSearch is not null) { _texture.SetVoiceSearch(voiceSearch); }
             BeginResultPageUpload();
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = true;
@@ -380,11 +415,12 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
     }
 
-    internal void QueuePresentation(string title, string body, OperationProgressSnapshot? progress)
+    internal void QueuePresentation(string title, string body, OperationProgressSnapshot? progress, VrVoiceSearchSnapshot? voiceSearch = null)
     {
         _queuedResultTitle = title;
         _queuedResultBody = body;
         _queuedProgress = progress;
+        _queuedVoiceSearch = voiceSearch;
         // Never reveal the previously submitted image after a replacement or
         // cancellation. Only the next guarded full-texture upload may be shown.
         _showAfterImageLoad = false;
@@ -396,9 +432,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         if (_queuedResultTitle is null || _queuedResultBody is null) { return false; }
         _texture.SetContent(_queuedResultTitle, _queuedResultBody);
         if (_queuedProgress is not null) { _texture.SetProgress(_queuedProgress); }
+        if (_queuedVoiceSearch is not null) { _texture.SetVoiceSearch(_queuedVoiceSearch); }
         _queuedResultTitle = null;
         _queuedResultBody = null;
         _queuedProgress = null;
+        _queuedVoiceSearch = null;
         return true;
     }
 
@@ -551,6 +589,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             _queuedResultTitle = null;
             _queuedResultBody = null;
             _queuedProgress = null;
+            _queuedVoiceSearch = null;
             if (!_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
@@ -656,6 +695,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
 
         _disposed = true;
+        _texture.SetContent(string.Empty, string.Empty);
+        _queuedVoiceSearch = null;
         _launcherRecoveryEnabled = false;
         _eventTimer.Stop();
         _visible = false;
@@ -889,6 +930,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             WristLauncherAction launcherAction = WristLauncherAction.None;
             ResultPanelAction resultAction = ResultPanelAction.None;
             OperationProgressAction progressAction = OperationProgressAction.None;
+            VrVoiceSearchAction voiceSearchAction = VrVoiceSearchAction.None;
             ResultPanelCalibrationAction calibrationAction = ResultPanelCalibrationAction.None;
             bool scrollbar = false;
             OpenVrIntersection? pointerIntersection = null;
@@ -928,6 +970,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
                         target = calibrationAction == ResultPanelCalibrationAction.None
                             ? 0
                             : 200 + (int)calibrationAction;
+                    }
+                    else if (_texture.VoiceSearch is not null)
+                    {
+                        voiceSearchAction = _texture.HitTestVoiceSearch(local.X, local.Y);
+                        target = voiceSearchAction == VrVoiceSearchAction.None ? 0 : 600 + (int)voiceSearchAction;
                     }
                     else if (_texture.Progress is not null)
                     {
@@ -984,6 +1031,15 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
                 facing);
             if (activated == 0)
             {
+                return false;
+            }
+
+            if (activated >= 600)
+            {
+                if (_texture.VoiceSearch is { } voiceSearch)
+                {
+                    VoiceSearchActionRequested?.Invoke(this, new(voiceSearch, voiceSearchAction));
+                }
                 return false;
             }
 
@@ -1263,6 +1319,9 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
                 ScanRequested?.Invoke(this, EventArgs.Empty);
 
                 break;
+            case WristLauncherAction.Microphone:
+                if (_launcherState.CanRequestMicrophone) { MicrophoneRequested?.Invoke(this, EventArgs.Empty); }
+                break;
             case WristLauncherAction.Calibrate:
                 _ = TryStartWristLauncherCalibration();
                 break;
@@ -1271,7 +1330,14 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
     private void HandleUserResultClose()
     {
-        if (!_calibrationActive && !_launcherCalibrationActive && _texture.Progress is { } progress)
+        VrVoiceSearchSnapshot? currentVoiceSearch = _queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch;
+        OperationProgressSnapshot? currentProgress = _queuedResultTitle is not null ? _queuedProgress : _texture.Progress;
+        if (!_calibrationActive && !_launcherCalibrationActive && currentVoiceSearch is { } voiceSearch)
+        {
+            VoiceSearchActionRequested?.Invoke(this, new(voiceSearch, VrVoiceSearchAction.Close));
+            return;
+        }
+        if (!_calibrationActive && !_launcherCalibrationActive && currentProgress is { } progress)
         {
             OperationProgressAction action = progress.CanCancel
                 ? OperationProgressAction.Cancel : OperationProgressAction.Close;
@@ -1655,11 +1721,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         _visible = false;
         _interactive = false;
         _imageUpload.Reset();
+        _texture.SetContent(string.Empty, string.Empty);
         _showAfterImageLoad = false;
         _enableInteractionAfterImageLoad = false;
         _queuedResultTitle = null;
         _queuedResultBody = null;
         _queuedProgress = null;
+        _queuedVoiceSearch = null;
         _interop?.Dispose();
         _interop = null;
         if (keepLauncherHiddenForActiveScan)

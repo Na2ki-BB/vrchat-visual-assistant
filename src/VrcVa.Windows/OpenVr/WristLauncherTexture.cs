@@ -18,6 +18,7 @@ internal enum WristLauncherAction
     Translate,
     Calibrate,
     CloseMenu,
+    Microphone,
 }
 
 internal sealed class WristLauncherTexture
@@ -30,8 +31,9 @@ internal sealed class WristLauncherTexture
     public const int AtlasPixelHeight = PixelHeight * AtlasRows;
 
     internal static readonly Rect ChipBounds = new(240, 130, 320, 140);
-    internal static readonly Rect TranslationButtonBounds = new(72, 120, 315, 208);
-    internal static readonly Rect CalibrationButtonBounds = new(413, 120, 315, 208);
+    internal static readonly Rect TranslationButtonBounds = new(72, 120, 204, 208);
+    internal static readonly Rect CalibrationButtonBounds = new(524, 120, 204, 208);
+    internal static readonly Rect MicrophoneButtonBounds = new(298, 120, 204, 208);
     internal static readonly Rect CloseMenuButtonBounds = new(686, 24, 78, 68);
 
     private readonly Typeface _typeface = new("Yu Gothic UI");
@@ -47,6 +49,8 @@ internal sealed class WristLauncherTexture
                 WristLauncherAction.Expand,
             WristLauncherView.Menu when TranslationButtonBounds.Contains(point) =>
                 WristLauncherAction.Translate,
+            WristLauncherView.Menu when MicrophoneButtonBounds.Contains(point) =>
+                WristLauncherAction.Microphone,
             WristLauncherView.Menu when CalibrationButtonBounds.Contains(point) =>
                 WristLauncherAction.Calibrate,
             WristLauncherView.Menu when CloseMenuButtonBounds.Contains(point) =>
@@ -65,6 +69,7 @@ internal sealed class WristLauncherTexture
             (WristLauncherView.Menu, WristLauncherAction.Translate) => 4,
             (WristLauncherView.Menu, WristLauncherAction.Calibrate) => 5,
             (WristLauncherView.Menu, WristLauncherAction.CloseMenu) => 6,
+            (WristLauncherView.Menu, WristLauncherAction.Microphone) => 7,
             (WristLauncherView.Menu, _) => 3,
             _ => 0,
         };
@@ -103,7 +108,7 @@ internal sealed class WristLauncherTexture
                         DrawMenu(drawing, WristLauncherAction.CloseMenu);
                         break;
                     case 7:
-                        DrawMenu(drawing, WristLauncherAction.None);
+                        DrawMenu(drawing, WristLauncherAction.Microphone);
                         break;
                 }
 
@@ -176,12 +181,31 @@ internal sealed class WristLauncherTexture
         Color translateFill = hoveredAction == WristLauncherAction.Translate
             ? Color.FromRgb(37, 151, 209)
             : Color.FromRgb(24, 112, 161);
-        DrawButton(drawing, TranslationButtonBounds, translateFill, "翻訳 SCAN", 46);
+        DrawButton(drawing, TranslationButtonBounds, translateFill, "翻訳 SCAN", 32);
+
+        Color microphoneFill = hoveredAction == WristLauncherAction.Microphone
+            ? Color.FromRgb(37, 151, 209) : Color.FromRgb(24, 112, 161);
+        DrawButton(drawing, MicrophoneButtonBounds, microphoneFill, string.Empty, 32);
+        // Vector microphone: no font-dependent emoji glyph or downloaded asset.
+        System.Windows.Media.Pen microphonePen = new(Brushes.White, 7);
+        drawing.DrawRoundedRectangle(null, microphonePen, new Rect(382, 151, 36, 67), 18, 18);
+        StreamGeometry arc = new();
+        using (StreamGeometryContext path = arc.Open())
+        {
+            path.BeginFigure(new Point(368, 191), false, false);
+            path.BezierTo(new Point(368, 246), new Point(432, 246), new Point(432, 191), true, false);
+        }
+        drawing.DrawGeometry(null, microphonePen, arc);
+        drawing.DrawLine(microphonePen, new Point(400, 232), new Point(400, 251));
+        drawing.DrawLine(microphonePen, new Point(380, 251), new Point(420, 251));
+        FormattedText microphoneLabel = CreateText("マイク", 32, FontWeights.SemiBold, Brushes.White, 204);
+        microphoneLabel.TextAlignment = TextAlignment.Center;
+        drawing.DrawText(microphoneLabel, new Point(298, 269));
 
         Color calibrationFill = hoveredAction == WristLauncherAction.Calibrate
             ? Color.FromRgb(61, 139, 177)
             : Color.FromRgb(45, 88, 119);
-        DrawButton(drawing, CalibrationButtonBounds, calibrationFill, "位置調整", 42);
+        DrawButton(drawing, CalibrationButtonBounds, calibrationFill, "位置調整", 32);
 
         Color closeFill = hoveredAction == WristLauncherAction.CloseMenu
             ? Color.FromRgb(124, 83, 91)

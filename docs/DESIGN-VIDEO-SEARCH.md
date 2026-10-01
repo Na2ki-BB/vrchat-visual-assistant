@@ -1,6 +1,6 @@
 # VRChat Visual Assistant — 動画検索機能設計
 
-Status: K1–K5 adapters and WPF flow implemented; real service and VR candidate acceptance pending
+Status: K1–K5 adapters / WPF flow and L2 VR flow implemented; automated verification and separate real-device/service acceptance tracked in TASKS
 
 Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus official provider documentation; no API or device validation.
 
@@ -12,7 +12,7 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**操作仕様に沿うWPFフローをK5で接続済み。実サービス・VR候補操作は未検証**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
 
-録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約、I2/I3の入力・実行境界、I4の独立text quotaとK1の直接検索Core契約を追加した。K2でyt-dlpのmetadata検索adapterを追加した。K3で検索語解釈adapterと成功済みqueryの明示再検索を追加した。音声adapterはJ3、公開WPF検索画面はK5で接続した。実サービス評価とVR候補画面はL2/L3へ残す。
+録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約、I2/I3の入力・実行境界、I4の独立text quotaとK1の直接検索Core契約を追加した。K2でyt-dlpのmetadata検索adapterを追加した。K3で検索語解釈adapterと成功済みqueryの明示再検索を追加した。音声adapterはJ3、公開WPF検索画面はK5で接続した。L2で同じsession/actionを使うVR候補画面へ接続し、実サービス評価と新しい画面の実機受入はL2/L3へ残す。
 
 ## Problem and accepted flow
 
@@ -45,6 +45,14 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 候補は10件のsnapshotを5件ずつ表示し、title/queryは折り返して全文を保持する。サムネイルはbounded providerからメモリだけへ取得し、表示直前のsession/result/view再照合で遅い画像を拒否する。入力へ戻る・新検索・録り直し・閉じるで画像要求を取消し、終了は所有中のcleanupを待つ。clipboardはK4の候補identity/STA直前照合を通し、UIでも現在ページの選択とcopy feedbackの世代を検査する。正常0件とtyped失敗を分け、検索失敗の再試行だけは成功済みのqueryを再利用する。`VideoSearchCleanupFailed` はgate停止によるsession無効化後も内容なしで再起動理由を表示する。
 
 公開画面で音声/OpenAI text/YouTube/thumbnail送信先・有料枠・clipboard上書きを説明する。この接続は実API・yt-dlpサービス互換性・実マイク/clipboard・Questの受入を合格とするものではない。
+
+## L2 VR presentation and acceptance boundary
+
+`VrVoiceSearchController` はWPF所有の `VoiceInputFlow` / `VideoSearchFlow` を表示し、独自のsession、provider、clipboard ownerを作らない。腕マイクから録音を受け付け、共通進捗パネルの「マイク停止 → 認識」で停止する。L1の完了hideは表示の所有者を確認し、新しい認識文を消さない。遅延ImageLoadedのqueueも最新の型付きsnapshotだけを採用する。
+
+full 1280×720を再利用し、headerは表示専用、操作矩形を描画とhit-testで共有する。認識文は行単位の前次表示で全文を保持し、その直下に2方式を同時表示する。候補は各ページ5枚、titleは2行、検索語は2行までの省略表示とし、全文はWPFに残す。ページ/状態/現在候補identityをaction直前に再検査し、コピーは `CreateSelectionAction()` だけを渡す。新録音/閉じる/切断は両flowをawait前に失効させ、古い後処理が次の録音を止めない。terminal失敗はWPFで再起動理由を保ち、閉じたVR画面を周期refreshで再表示しない。
+
+native intersectionから同一view逆変換、logical control、actionまでfake/自動確認する。priority-zero、左joystick非登録、native交点上のcursor、captureのhide/boundary/discard/adopt、校正/保存は既存経路を使う。これは実マイク、実API、実clipboardや新レイアウトのQuest受入の代替ではない。
 
 ## Interaction and states
 
