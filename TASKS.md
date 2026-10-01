@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト分岐・不変の認識文session、I3の共通実行/取消世代管理、I4の独立text quota/version 6設定、J1の未公開Windows録音adapter/音声session、K1の動画検索Core契約、J2の未公開音声HTTP/quota、K2の未公開metadata検索adapterを追加。公開UIは後続タスク**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。録音adapterはfakeで検証済み。音声/検索adapterは公開画面へ未接続で、既存Milestoneの完了状態や実機証拠は変更しない。
+Updated: 2026-10-01. **I1〜I4の共通入力/実行/設定/独立quota、J1〜J3の録音/文字起こし/同意・専用資格情報、K1〜K5の直接/解釈検索・候補/コピー、L1/L2の共通進捗・腕マイク・WPF/VR操作まで接続済み**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--implemented-acceptance-pending)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。自動確認の証拠と全体formatの残件は[下記L3記録](#l3-verification-evidence--2026-10-01)を参照。実機/実サービスは未受入で、既存Milestoneの実機証拠を新機能へ流用しない。各項目の「2026-10-01実装」はそのPR時点の履歴であり、当時の「未接続」は現在状態を示さない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -342,7 +342,7 @@ Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト�
 - [x] **I1 — 未決定のadapterと設定境界を具体化する**（依存: なし）
   - 範囲: マイク選択/録音方式、音声形式・容量・無音判定・失敗音声の保持期限、GPT Transcribeの具体設定、設定場所/許容範囲/秒数丸め、解釈prompt/出力形式/入出力上限を決める。録音30秒、音声300秒・30送信、翻訳10回・解釈10回の独立初期値を維持し、個別変更と再読込時の消費量維持を定義する。
   - 範囲: yt-dlpの固定版・信頼できる配置・配布/更新方法・利用条件、process timeout/出力上限、許可URL/thumbnail配信先と画像制限を決める。公式仕様は実装時に再確認し、依存追加が必要ならそのPRで明示する。インストールや実API呼び出し自体はこのタスクの条件にしない。
-  - 確認: 設計の「Remaining implementation decisions」の各項目が後続タスクへ対応する。既決定の操作を選び直さず、画面寸法の最終調整と性能/精度はL2/L3へ残す。
+  - 確認: 設計の「Accepted implementation boundaries and remaining gates」（当初は「Remaining implementation decisions」）の各項目が後続タスクへ対応する。既決定の操作を選び直さず、画面寸法の最終調整と性能/精度はL2/L3へ残す。
   - 2026-10-01実装: `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` の初期値・個別値域・PCM容量・要求ごとの秒数切上げを追加。基盤/動画検索設計へadapter判断と後続タスクを対応付けた。設定保存・既存翻訳hard cap変更・消費カウンター・録音/外部通信/UIの接続はこの変更に含めない。Linux .NET 8.0.422でsolution Release cross-build、Core 96件/Infrastructure 24件の回帰が通過。独立レビューでblocking指摘なし。Windows testsはLinuxにWindowsDesktop runtimeがないためCIで別確認し、実マイク/API/Questの受入は未実施。全体formatには既存Windowsファイル5件の違反があり、この変更のC#4ファイルのtargeted formatは通過。
 
 - [x] **I2 — 画像とテキストの入力経路を分ける**（依存: I1）
@@ -426,11 +426,49 @@ Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完�
   - 範囲: `WristLauncherStateMachine` / `WristLauncherTexture`へマイク入口を追加し、認識文直下の2ボタン、5カード×2ページとbody railをWPFと同じsession/actionへ接続。長文/title/検索語のレイアウトを確認する。既存校正/配置保存、SCAN回復を維持する。
   - [x] 実装/自動確認: 両ページ全候補/前次/戻る/閉じると認識文の全操作をraw intersection → 同一view逆変換 → logical hit-test → actionで検証。ページ境界、連打、閉じた後/録り直し後の遅延結果・画像・選択を確認する。
   - 2026-10-01実装: 腕メニューへマイクを追加し、録音中はL1の「マイク停止 → 認識」を表示。`VrVoiceSearchController` がWPFと同じ音声/検索flow・不変session・候補actionを利用し、全文認識文の前次と直下2方式、5候補×2ページ、検索語/partial/コピー状態、再試行/録り直し/中止/閉じるをfull 1280×720の共通矩形へ接続する。title/queryはVRでは省略し、全文はWPFに保持。queue優先の表示所有者照合、古い画像/クリック拒否、両flowのawait前失効、閉じたterminal失敗の再表示防止を追加。Linux Release cross-build（0 warnings/errors）、Core365/Infrastructure412、source-linked controller12件と5回反復、変更C#のtargeted formatと独立reviewを確認。全体formatの既存5ファイル違反は残す。Windows [CI97](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36903308079)（PR39 head `3d699067`）で座標/rasterを含むCore365/Infrastructure412/Windows667の全1,444件と別実行cold shutdown3件が成功。初回CI96の長title fixture改行だけを有効な空白へ修正し、候補状態/件数assertionを強化した。productionのmetadata検証やtimeoutは変更しない。下の実機ゲートとL2全体は未完了のまま維持する。
-  - [ ] **実機ゲート（未実施）**: 現行Windows Release + SteamVR + Quest 3Sで実マイク開始/再押し/上限/中止/切断、VRChat内ミュート時の取得とOS/物理ミュートの違い、残り秒/長文の可読性を確認。文字起こし/候補はfakeでもよいことを記録し、両ページ全card/rail、頭を動かしたcursor整合、歩行維持、clipboard実書込み/占有回復、閉じる/再開/次SCANのoverlay除外と配置を確認する。実装/自動確認とは別に記録し、実機未確認ならL2全体は完了にしない。
+  - [ ] **実機ゲート（未実施）**: 現行Windows Release + SteamVR + Quest 3Sで以下を本人が確認し、commit・実施日時・Windows/SteamVR/接続方式と実/fakeの範囲を記録する。自動テスト用fakeは存在するが、通常版へ切り替える公開fakeデモはない。録音停止・上限到達は有料APIへ進むため、実マイクの開始前にL3の対象provider/自作サンプル/試行数/予算を合意する。未確認ならL2全体は完了にしない。
+    - [ ] 音声無効/専用キーなしでは開始しない。初回画面の同意・送信先・費用・3枠の上限・既定通信マイクを確認
+    - [ ] 承認後に腕マイク開始、パネルの「マイク停止 → 認識」、上限到達、残り秒、中止、入力device切断を確認。VRChat内ミュートとOS/物理マイクミュートを区別し、周囲の声を含めない
+    - [ ] 認識文の全文前次・直下2方式、5枚×両ページの全カード、前/次/入力へ戻る/録り直し/中止/やり直し/閉じるを確認。無効状態・連打・押しっぱなしでも別操作が発火しない
+    - [ ] 頭を動かしてもcursorと対象が一致し、読んでいる間も左joystickで歩ける。長文/残り秒を読める。VRで省略するtitle/queryの全文はWPFで確認できる
+    - [ ] 全カードが対応する正規URLをclipboardへコピーし、成功後だけ完了表示する。占有失敗後は候補を保持して手動再試行できる。貼り付け/再生は本人が行う
+    - [ ] 閉じる・録り直し・切断/再接続で古い画像/候補/コピーを採用せず、新しい録音/SCANを妨げない。WPFからも中止できる
+    - [ ] 次SCANで音声/検索/進捗overlayが混入しない。既存の配置調整/保存と左手追従、終了時の資源回収を確認
 
 - [ ] **L3 — 全体検証と任意の実サービス評価を記録する**（依存: L2の実装/自動確認。全体の自動検証は実機待ちでも進める）
-  - [ ] 自動/静的確認: Windows restore → Release build → 全tests → format、`git diff --check`、公開差分のsecret確認と独立レビューを行う。偽の音声/本文/URL/例外/stdout/stderrを用い、ログ・設定・一時ファイルへ内容が残らないことを確認。OCR-only 0通信、翻訳・独立quota・capture順序・runtime解放の回帰を含める。CI通過とformat/実機の結果を混同しない。
+  - [ ] 自動/静的確認全体: 下記証拠のWindows restore/Release build/全testsとLinux再検証は通過。全体formatは既存5ファイルの違反を残し、Windowsでのformatは未実行。公開差分のsecret確認と独立レビューを含め、通過・失敗・未実施を別記する。fakeの内容非保存、OCR-only外部API 0回、翻訳・独立quota・capture順序・runtime解放の回帰を含める。CI通過をformat/実機の合格と混同しない。
   - [ ] **実サービスゲート（未実施・別途許可後）**: 最新の価格/保持条件を確認し、対象API・試行回数・予算・送信する自作サンプルを明示して承認を得てからGPT Transcribe/GPT-6 Lunaを評価する。固定版yt-dlpの実検索、metadata/thumbnail互換とファイル非生成も確認する。失敗を含む回数・音声秒数、段階別遅延/負荷、認識と補足指示の精度を内容を残さず記録し、未実施なら評価済みとしない。
-  - [ ] 引渡し: 実装済み範囲に合わせREADME/設計/このチェックリストを更新し、固定yt-dlpの導入/更新手順、音声opt-in、3枠の上限、失敗時の回復と手動貼り付けを説明する。許可待ちの実API評価や残る実機不具合は未完了のまま明示する。
+  - [ ] 引渡し: READMEにRelease/ZIP起動から音声・動画検索までの短い手順、固定yt-dlpの導入/hash確認/更新、音声opt-inと別資格情報、3枠、失敗回復、手動貼り付けを整備。設計/SECURITYの現状も整合。最終差分の独立レビューとPRのexact-head CI確認後に引き渡す。許可待ちの実API評価、未実施の実機ゲートとformatの残件は未完了のまま明示する。
 
 Exit: 新しい画面/マイクの実機証拠と有料APIの評価を、それぞれ現在のビルド・実施条件付きで記録する。過去の翻訳の成功やfakeテストだけで新機能の実用性を確認済みにしない。新しいアカウント/課金設定、常時録音、動画ダウンロード、VRキーボード、動的plugin、任意tool、自動貼り付け/再生は追加しない。
+
+
+### L3 verification evidence — 2026-10-01
+
+実装の確認基準は [`560f4a09c11ddb6632939d363933c696d3848456`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/560f4a09c11ddb6632939d363933c696d3848456)（[PR41](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/41) merge、tree `4bb33911`）。production実装はPR39の `9df98ed3` から変えず、PR41は下記のtest同期修正だけを追加した。この引渡し変更は文書のみで、実行コード/テスト/CI workflowを変更しない。文書PR自身のexact-head CIと独立差分レビューはPRへ別記する。
+
+| 確認 | 結果と限界 |
+| --- | --- |
+| PR39後のWindows CI99（修正前） | [run 36904204575](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36904204575) のmain `9df98ed3` でrestore、Release build、Core365 / Infrastructure412 / Windows667 = **全1,444件成功**。別実行のcold shutdown **3件成功**。実機・API・yt-dlp実検索は呼ばない |
+| PR41 Windows CI101 | [run 36907389172](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36907389172) のhead `940ab9eb`（上記mainとtree一致）でrestore、Release build **0 warnings/errors**、Core365 / Infrastructure412 / Windows668 = **全1,445件成功、failed/skipped 0**、cold shutdown **3件成功** |
+| PR41 merge後main Windows CI102 | [run 36907832881](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36907832881) の `560f4a09` でもrestore、Release build **0 warnings/errors**、**全1,445件 + cold shutdown3件成功、failed/skipped 0** |
+| CI100で見つけたtest同期 | [PR40初回run](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36906118929)はcontrollerの `CanNext` assertionで1件失敗（1,443成功）。旧fixtureはTaskSchedulerだけを設定し、`Progress<T>`がThreadPoolで並行実行された。同じassertionとcallbackのowner不一致をportableで再現。PR41で専用SynchronizationContextへ揃え、新規owner回帰と影響した解釈flow **500回連続成功**を確認。既存assertion/timeout/productionは変更しない。元の失敗はrerunで隠さず保持 |
+| 独立Linux再検証 | .NET SDK 8.0.422。single-node restore、solution Release cross-build **0 warnings/errors**、Core365 / Infrastructure412 **777件成功、failed/skipped 0**。source-linked音声/検索/controllerの**79件成功**（新規owner回帰・一時probe2件を含む）。WindowsDesktop実行はLinuxで行わず上記CIへ分離 |
+| 全体format | `dotnet format VRChatVisualAssistant.sln --verify-no-changes --no-restore` はLinuxでexit 2。既存Windows5ファイルの違反とWindows参照読込みwarningを再現。**format合格とはしない**。Windows CIはformatを実行しないためWindowsでの結果は未取得。今回C#変更なし |
+| 公開差分 | `git diff --check`、変更文書全体と未追跡ファイルの確認。実キー・録音・ユーザー由来本文・キャプチャ・ログ・生成物は含めない。公開前の独立レビューはPRに記録 |
+| 配布 | CI workflowは失敗時TRXだけをartifact化する。成功runにアプリZIP/installerはない。Windowsで既存 `scripts\build.ps1` / `scripts\publish-beta.ps1` を使う。今回release公開・ZIP添付・yt-dlp同梱は行わない |
+| 公式資料 | 2026-10-01に[yt-dlp asset digest](https://api.github.com/repos/yt-dlp/yt-dlp/releases/assets/521488854)と固定hash、[音声モデル](https://developers.openai.com/api/docs/models/gpt-transcribe)、[解釈モデル/none](https://developers.openai.com/api/docs/models/gpt-6-luna)、[料金](https://developers.openai.com/api/docs/pricing)、[保持条件](https://developers.openai.com/api/docs/guides/your-data)をread-only再確認。実通信評価の代替ではない |
+
+全体formatの既存残件は `src/VrcVa.Windows/Diagnostics/OpenVrEyeMirrorDiagnosticRunner.cs:53` のindent、`Capture/WindowsGraphicsCapture.cs`、`Diagnostics/OscTriggerDiagnosticRunner.cs`、`Osc/OscTriggerService.cs`（後3つも `src/VrcVa.Windows/` 配下）、`tests/VrcVa.Windows.Tests/OscQueryResponseTests.cs` のimport順。今回無関係な整形は行わない。
+
+自動/静的の根拠（すべて自作データ・fake、実キーなし）:
+
+- [音声flow](tests/VrcVa.Windows.Tests/VoiceInputFlowTests.cs) / [音声保持](tests/VrcVa.Windows.Tests/VoiceAudioSessionTests.cs): 未同意ならキーread/マイク/HTTP 0回、成功/中止/期限切れのzero化、失敗音声の非更新期限、送信後取消と手動再送計数、設定の音声/本文/キー非保存
+- [privacy log](tests/VrcVa.Infrastructure.Tests/TextInputPrivacyTests.cs) / [音声HTTP](tests/VrcVa.Infrastructure.Tests/OpenAiVoiceTranscriberTests.cs) / [yt-dlp](tests/VrcVa.Infrastructure.Tests/YtDlpVideoSearchProviderTests.cs): fake本文/例外/stdout/stderrをログ・表示へ漏らさず、子processの秘密非継承、終了未確認時のadmission停止。Voice/Video flowはファイル/log writerを所有せず、設定storeは非秘密値だけをserializeする
+- [WPF全経路](tests/VrcVa.Windows.Tests/VideoSearchFlowTests.cs) / [VR全経路](tests/VrcVa.Windows.Tests/VrVoiceSearchControllerTests.cs): 音声→両検索方式→全候補/コピー、認識文不変、ページ送り・検索retryで成功済み有料段階を再送しない、古い画像/選択/queued clipboardを拒否、WPF/VRは同一owner
+- [text入力](tests/VrcVa.Core.Tests/TextInputPipelineTests.cs) / [翻訳runtime](tests/VrcVa.Windows.Tests/TranslationRuntimeTests.cs) / [独立text quota](tests/VrcVa.Infrastructure.Tests/IndependentTextQuotaTests.cs) / [音声quota](tests/VrcVa.Infrastructure.Tests/VoiceRequestQuotaTests.cs): テキスト経路capture/OCR 0回、OCR-onlyは外部AIへ送らず、翻訳allowlist/切替と3枠の独立性・設定再読込後の消費量を維持
+- [capture順序](tests/VrcVa.Windows.Tests/OpenVrOverlayCaptureSequenceTests.cs) / [VR座標](tests/VrcVa.Windows.Tests/VrVoiceSearchGeometryTests.cs) / [shutdown](tests/VrcVa.Windows.Tests/WindowShutdownTests.cs): overlay hide/boundary/discard/adopt、全view/controlの座標とdisabled/held操作、取消回収と終了。以前のSTA 10秒timeoutはPR37で非並列/pump-ready/checkpointを追加したが、元の遅延原因を断定していない。CI99成功はその実機再現解決の証明ではない
+
+この確認はアプリが内容ファイルを作らない境界をsource/fakeで確かめたもので、実Windowsのpagefile/dumpや実yt-dlp起動後の一時領域を観測した証拠ではない。公式one-fileの実行用一時展開、実YouTubeのmetadata/thumbnail互換と内容ファイル非生成、実マイク/API/clipboard/Quest受入は上の別ゲートへ残す。
+
+実サービス評価前の合意欄（未承認・未実施）: 対象provider/model、外部へ送る自作音声/文と検索語、各段階の最大試行数（失敗・再送込み）/音声秒数、総予算と通貨、実施者/実施buildを確定する。OpenAI、YouTube、画像配信先とclipboard上書きを区別し、新しいアカウント/課金/資格情報設定をこの確認から自動承認しない。評価時は内容を保存せず、段階別成否・遅延・回数・秒数・費用のみ記録する。
