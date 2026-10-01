@@ -22,7 +22,7 @@ internal readonly record struct WristLauncherCalibrationButton(
     Rect Bounds,
     string Label);
 
-internal sealed class ResultPanelTexture
+internal sealed partial class ResultPanelTexture
 {
     public const int PixelWidth = 1280;
     public const int PixelHeight = 720;
@@ -68,6 +68,7 @@ internal sealed class ResultPanelTexture
 
     public void SetContent(string title, string body)
     {
+        Progress = null;
         _title = title;
         _body = body;
         _resultPage = 0;
@@ -93,6 +94,7 @@ internal sealed class ResultPanelTexture
 
     public ResultPanelAction HitTestResult(float x, float y)
     {
+        if (Progress is not null) { return ResultPanelAction.None; }
         Point point = new(x, y);
         if (CloseButtonBounds.Contains(point))
         {
@@ -155,7 +157,7 @@ internal sealed class ResultPanelTexture
     }
 
     public bool IsScrollbar(float x, float y) =>
-        _resultPageCount > 1
+        Progress is null && _resultPageCount > 1
         && x >= ScrollTrackLeft
         && x <= ScrollTrackRight
         && y >= BodyTop
@@ -225,8 +227,12 @@ internal sealed class ResultPanelTexture
         DrawingVisual visual = new();
         using (DrawingContext drawing = visual.RenderOpen())
         {
-            (FormattedText body, double viewportHeight) = PrepareResultLayout();
-            DrawResultPage(drawing, body, _resultPage, viewportHeight);
+            if (Progress is not null) { DrawProgress(drawing); }
+            else
+            {
+                (FormattedText body, double viewportHeight) = PrepareResultLayout();
+                DrawResultPage(drawing, body, _resultPage, viewportHeight);
+            }
         }
 
         return RenderVisualRgba(visual, PixelWidth, PixelHeight);

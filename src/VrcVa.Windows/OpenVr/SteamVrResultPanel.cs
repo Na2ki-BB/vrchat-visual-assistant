@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Windows.Threading;
 using VrcVa.Core;
+using VrcVa.Windows.Rendering;
 
 namespace VrcVa.Windows.OpenVr;
 
-internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IDisposable
+internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IOperationProgressView, IDisposable
 {
     private static readonly TimeSpan LauncherRetryDelay = TimeSpan.FromSeconds(2);
     private readonly ResultPanelTexture _texture = new();
@@ -36,6 +37,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
     private int _pendingCell;
     private string? _queuedResultTitle;
     private string? _queuedResultBody;
+    private OperationProgressSnapshot? _queuedProgress;
     private ResultPanelPlacement _placement;
     private ResultPanelPlacement? _calibrationOriginalPlacement;
     private bool _calibrationActive;
@@ -52,6 +54,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
     private bool _launcherConnectionAvailable;
     private bool _resultConnectionAvailable;
 
+    public event EventHandler<OperationProgressActionEventArgs>? ProgressActionRequested;
     public event EventHandler? ConnectionLost;
     public event EventHandler? Hidden;
     public event EventHandler? ScanRequested;
@@ -312,7 +315,25 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         }
     }
 
-    public bool TryShow(string title, string body)
+    public bool TryShow(string title, string body) => TryShowContent(title, body, null);
+
+    public bool TryShowProgress(OperationProgressSnapshot snapshot)
+    {
+        PrepareProgressPresentation();
+        return TryShowContent(snapshot.Title, snapshot.Message, snapshot);
+    }
+
+    internal void PrepareProgressPresentation()
+    {
+        // WPF voice admission can occur during either VR calibration. Revert
+        // unsaved placement before the progress texture owns this same surface.
+        // Keep an in-flight calibration upload owned until ImageLoaded; the
+        // normal queued full-texture path then replaces it without mixing views.
+        if (_launcherCalibrationActive) { FinishWristLauncherCalibration(save: false, returnToLauncher: false); }
+        if (_calibrationActive) { FinishPlacementCalibration(save: false); }
+    }
+
+    private bool TryShowContent(string title, string body, OperationProgressSnapshot? progress)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _ = TryRecoverWristLauncher();
@@ -334,19 +355,18 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             _resultDesired = true;
             _launcherState.ShowResult();
             _launcherInterop?.Hide();
+            _activationGate.Reset();
             SetPointerEnabled(false);
             _interop!.Hide();
             _visible = false;
             if (_imageUpload.InFlight)
             {
-                _queuedResultTitle = title;
-                _queuedResultBody = body;
-                _showAfterImageLoad = false;
-                _enableInteractionAfterImageLoad = false;
+                QueuePresentation(title, body, progress);
                 return true;
             }
 
             _texture.SetContent(title, body);
+            if (progress is not null) { _texture.SetProgress(progress); }
             BeginResultPageUpload();
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = true;
@@ -358,6 +378,28 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             Disconnect();
             throw;
         }
+    }
+
+    internal void QueuePresentation(string title, string body, OperationProgressSnapshot? progress)
+    {
+        _queuedResultTitle = title;
+        _queuedResultBody = body;
+        _queuedProgress = progress;
+        // Never reveal the previously submitted image after a replacement or
+        // cancellation. Only the next guarded full-texture upload may be shown.
+        _showAfterImageLoad = false;
+        _enableInteractionAfterImageLoad = false;
+    }
+
+    internal bool TryApplyQueuedPresentation()
+    {
+        if (_queuedResultTitle is null || _queuedResultBody is null) { return false; }
+        _texture.SetContent(_queuedResultTitle, _queuedResultBody);
+        if (_queuedProgress is not null) { _texture.SetProgress(_queuedProgress); }
+        _queuedResultTitle = null;
+        _queuedResultBody = null;
+        _queuedProgress = null;
+        return true;
     }
 
     public bool PreloadStatusAtlas()
@@ -508,6 +550,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             _enableInteractionAfterImageLoad = false;
             _queuedResultTitle = null;
             _queuedResultBody = null;
+            _queuedProgress = null;
             if (!_imageUpload.InFlight)
             {
                 _eventTimer.Stop();
@@ -667,13 +710,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                         return;
                     case OpenVrEvent.ImageLoaded when _imageUpload.InFlight:
                         ResultPanelImageUploadKind completedUpload = _imageUpload.Complete();
-                        if (_queuedResultTitle is not null && _queuedResultBody is not null)
+                        if (TryApplyQueuedPresentation())
                         {
-                            string title = _queuedResultTitle;
-                            string body = _queuedResultBody;
-                            _queuedResultTitle = null;
-                            _queuedResultBody = null;
-                            _texture.SetContent(title, body);
                             BeginResultPageUpload(drainEvents: false);
                             _showAfterImageLoad = true;
                             _enableInteractionAfterImageLoad = true;
@@ -850,6 +888,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             OverlayLocalPoint raw = default;
             WristLauncherAction launcherAction = WristLauncherAction.None;
             ResultPanelAction resultAction = ResultPanelAction.None;
+            OperationProgressAction progressAction = OperationProgressAction.None;
             ResultPanelCalibrationAction calibrationAction = ResultPanelCalibrationAction.None;
             bool scrollbar = false;
             OpenVrIntersection? pointerIntersection = null;
@@ -889,6 +928,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                         target = calibrationAction == ResultPanelCalibrationAction.None
                             ? 0
                             : 200 + (int)calibrationAction;
+                    }
+                    else if (_texture.Progress is not null)
+                    {
+                        progressAction = _texture.HitTestProgress(local.X, local.Y);
+                        target = progressAction == OperationProgressAction.None ? 0 : 500 + (int)progressAction;
                     }
                     else
                     {
@@ -940,6 +984,15 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                 facing);
             if (activated == 0)
             {
+                return false;
+            }
+
+            if (activated >= 500)
+            {
+                if (_texture.Progress is { } progress)
+                {
+                    ProgressActionRequested?.Invoke(this, new(progress, progressAction));
+                }
                 return false;
             }
 
@@ -1218,6 +1271,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
     private void HandleUserResultClose()
     {
+        if (!_calibrationActive && !_launcherCalibrationActive && _texture.Progress is { } progress)
+        {
+            OperationProgressAction action = progress.CanCancel
+                ? OperationProgressAction.Cancel : OperationProgressAction.Close;
+            if (progress.Allows(action)) { ProgressActionRequested?.Invoke(this, new(progress, action)); }
+            return;
+        }
         UserResultClosed?.Invoke(this, EventArgs.Empty);
         Hide();
         ReturnToLauncher();
@@ -1599,6 +1659,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         _enableInteractionAfterImageLoad = false;
         _queuedResultTitle = null;
         _queuedResultBody = null;
+        _queuedProgress = null;
         _interop?.Dispose();
         _interop = null;
         if (keepLauncherHiddenForActiveScan)
