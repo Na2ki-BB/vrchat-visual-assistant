@@ -34,16 +34,22 @@ public readonly record struct FeatureId
 public enum FeatureInputKind
 {
     CapturedFrame,
+    Text,
 }
 
 /// <summary>
-/// The widest data boundary a feature can use. A concrete provider may remain more restrictive.
+/// Transmission categories a feature can use. Metadata describes a boundary;
+/// it does not enable a provider or grant consent to transmit data.
 /// </summary>
+[Flags]
 public enum FeatureDataBoundary
 {
-    LocalOnly,
-    ExtractedTextMayLeaveDevice,
-    CapturedImageMayLeaveDevice,
+    LocalOnly = 0,
+    ExtractedTextMayLeaveDevice = 1,
+    CapturedImageMayLeaveDevice = 2,
+    VoiceAudioToOpenAi = 4,
+    InputTextToOpenAi = 8,
+    SearchTextToYouTube = 16,
 }
 
 public sealed record FeatureDescriptor
@@ -60,6 +66,21 @@ public sealed record FeatureDescriptor
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        if (!Enum.IsDefined(inputKind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(inputKind));
+        }
+
+        const FeatureDataBoundary supportedBoundaries =
+            FeatureDataBoundary.ExtractedTextMayLeaveDevice
+            | FeatureDataBoundary.CapturedImageMayLeaveDevice
+            | FeatureDataBoundary.VoiceAudioToOpenAi
+            | FeatureDataBoundary.InputTextToOpenAi
+            | FeatureDataBoundary.SearchTextToYouTube;
+        if ((dataBoundary & ~supportedBoundaries) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(dataBoundary));
+        }
 
         Id = id;
         DisplayName = displayName;
@@ -82,14 +103,37 @@ public sealed record FeatureEntry
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(analyzer);
+        ValidateInputKind(descriptor, FeatureInputKind.CapturedFrame);
 
         Descriptor = descriptor;
         Analyzer = analyzer;
     }
 
+    public FeatureEntry(FeatureDescriptor descriptor, ITextFeatureHandler textHandler)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(textHandler);
+        ValidateInputKind(descriptor, FeatureInputKind.Text);
+
+        Descriptor = descriptor;
+        TextHandler = textHandler;
+    }
+
     public FeatureDescriptor Descriptor { get; }
 
-    public IAnalyzer Analyzer { get; }
+    public IAnalyzer? Analyzer { get; }
+
+    public ITextFeatureHandler? TextHandler { get; }
+
+    private static void ValidateInputKind(FeatureDescriptor descriptor, FeatureInputKind expected)
+    {
+        if (descriptor.InputKind != expected)
+        {
+            throw new ArgumentException(
+                "The feature descriptor input kind must match its handler.",
+                nameof(descriptor));
+        }
+    }
 }
 
 public static class FeatureIds
@@ -115,7 +159,7 @@ public static class BuiltInFeatures
 }
 
 /// <summary>
-/// The compile-time registry for available features and their analyzers.
+/// The compile-time registry for available features and their typed handlers.
 /// </summary>
 public sealed class FeatureCatalog
 {

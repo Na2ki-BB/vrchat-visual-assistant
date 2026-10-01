@@ -12,9 +12,9 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 画面の具体的な取得方法、OCR精度、英語から日本語への変換、翻訳費用と実測は[日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md)で管理する。`ICaptureSource` とフレームの所有権は基盤の契約だが、現行のOpenVR/Windows取得方式の詳細は同文書が正本となる。
 
-これは設計書の責務分割であり、新しい共通機構の実装ではない。現在の入力型は `CapturedFrame` のみで、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
+文書再整理そのものでは実装を変更しなかった。その後のI2で `CapturedFrame` と `TextInputSession` の入力境界を追加したが、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
 
-2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名等の実装判断は残す。音声送信上限は下記で合意済みとする。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節ではI1/I2の純粋な契約と未実装の接続を区別し、共通音声フロー全体が対応済みとはみなさない。マイク/通信/UIの実装は残す。音声送信上限は下記で合意済みとする。
 
 ## Reading current behavior and history
 
@@ -120,25 +120,26 @@ The project count is deliberately small. OpenVR remains a Windows adapter behind
 - The SteamVR wrist launcher, desktop button/hotkey, OVRAS recovery, and opt-in OSC adapters converge on the WPF composition root, which creates a `ScanRequest`; there is no separate trigger contract in Core.
 - `ICaptureSource`: returns one `CapturedFrame`; implementations own platform APIs.
 - `IAnalyzer`: turns one frame and request context into an `AnalysisResult`.
+- `ITextFeatureHandler`: turns one completed `TextInputSession` and request context into a `FeatureResult`, without capture/OCR.
 - `IResultRenderer`: renders progress, success, or failure.
 - `ScanPipeline`: enforces stage order, cancellation, correlation ID, timings, and error classification.
 
-- `FeatureCatalog` resolves a `FeatureId` to a typed `FeatureDescriptor` and `IAnalyzer` before capture. An unknown ID fails at the trigger stage without capturing.
+- `FeatureCatalog` resolves a `FeatureId` to a typed `FeatureDescriptor` and matching image analyzer/text handler before processing. Registration rejects a descriptor/handler kind mismatch. Unknown IDs and request-kind mismatches fail at the trigger stage before capture/OCR/handler work.
 - `FeatureResult` contains ordered, uniquely identified sections and exactly one primary section. `AnalysisResult` remains the compatibility adapter for existing translation consumers.
 - `ITextModelClient` is the shared text-model boundary. Feature code owns instructions and result mapping; the infrastructure adapter owns HTTP, authentication, parsing, and bounded usage policy.
 
-The current foundation is still frame-based: `FeatureInputKind` only defines `CapturedFrame`, and `ScanPipeline` always captures before invoking the analyzer. Existing stage names and compatibility metadata retain OCR/translation terminology. This is not a generic audio/text/tool execution pipeline.
+The I2 foundation distinguishes `FeatureInputKind.CapturedFrame` and `Text`. `ScanRequest.CreateText` carries an immutable, in-memory `TextInputSession` with a nonempty session ID and the original transcript (up to 4,000 UTF-8 bytes, without trimming/truncation). The text route uses `ScanStage.TextHandling` and sets capture source to `none`; the image route and translation compatibility remain unchanged. No text feature is registered by the Windows composition root yet. Audio, search, application-wide gate/session invalidation, and UI wiring remain later tasks.
 
 Source: [Features.cs](../src/VrcVa.Core/Features.cs), [Models.cs](../src/VrcVa.Core/Models.cs), [ScanPipeline.cs](../src/VrcVa.Core/ScanPipeline.cs), and [OpenAiResponsesTextModelClient.cs](../src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs).
 
 ## Shared execution lifecycle — current implementation
 
 1. The composition root turns a supported explicit trigger into a `ScanRequest` containing the selected feature ID, correlation ID, and timestamp.
-2. `ScanPipeline` enforces single-flight execution and resolves the registered feature before acquiring a frame.
-3. The capture adapter returns one owned in-memory frame. Owned overlays must remain suppressed during acquisition; the exact current eye-mirror sequence is defined in the translation design.
-4. The selected analyzer receives the frame, request, progress sink, and cancellation token, and returns an `AnalysisResult` exposing the feature-neutral result. Its feature ID must match the selected descriptor.
+2. `ScanPipeline` enforces its existing per-instance single-flight and resolves the registered feature/input kind before processing.
+3. For an image request, the capture adapter returns one owned in-memory frame. Owned overlays must remain suppressed during acquisition; the exact current eye-mirror sequence is defined in the translation design. A text request instead passes its original completed session directly to the typed text handler, with no capture/OCR.
+4. The selected image analyzer or text handler receives its typed input, request, progress sink, and cancellation token. The returned feature ID must match the selected descriptor. `FeatureResult` from a text handler passes through the existing `AnalysisResult` compatibility adapter. Cancellation is checked again before accepting the result.
 5. Shared renderers consume progress/outcome and the primary result. Closing, hiding, failure, controller/runtime loss, and disposal release VRCVA interaction without taking VRChat's scene input.
-6. The frame is disposed on leaving its pipeline scope; logs retain only bounded metadata and sanitized failures.
+6. The image frame is disposed after analysis; the text session stays owned by the caller for reuse. Logs retain only bounded metadata and sanitized failures. The application-wide gate and close/re-record generation invalidation are still I3 work.
 
 The full current capture → OCR → optional Japanese translation lifecycle, including trigger-specific timing and stable failure concepts, is in [the feature design](DESIGN-JAPANESE-TRANSLATION.md#data-flow-and-lifecycle).
 
@@ -194,9 +195,9 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 ### Minimal input and result extension
 
-現行の `FeatureInputKind.CapturedFrame`、`FeatureEntry(IAnalyzer)`、`IAnalyzer.AnalyzeAsync(CapturedFrame, ...)` と `ScanPipeline` は画像専用である。共通音声入力が返すテキストを受ける入力型とhandler登録を必要な範囲だけ追加し、入力種別を検証して画像経路と分岐する。音声や文章を偽の `CapturedFrame` に包まず、テキスト機能のためにcapture/OCRを呼ばない。既存翻訳は現行analyzerと互換結果を維持する。具体型・クラス名の確定や全pipelineの一般化は本設計の条件にしない。
+I2で `FeatureInputKind.Text`、`TextInputSession`、`FeatureEntry(ITextFeatureHandler)` と `ScanRequest.CreateText` を追加し、`ScanPipeline` は入力種別を実処理前に検証して画像/テキスト経路へ分岐する。音声や文章を偽の `CapturedFrame` に包まず、テキスト機能のためにcapture/OCRを呼ばない。既存翻訳は現行analyzerと互換結果を維持する。具体型・クラス名の確定や全pipelineの一般化は本設計の条件にしない。
 
-`FeatureDataBoundary` の現行3値だけでは音声送信と検索先へのテキスト送信を正しく説明できない。共通音声入力の送信先と、用途ごとの後段の送信先を分けて表現する最小の拡張を行う。「抽出テキストのみ」の表示で音声を送らない。認識文はsession ID、用途処理はoperation IDを伴い、古い応答や操作を拒否する。
+I2で `FeatureDataBoundary` をflagsへ拡張し、既存のlocal/抽出text/imageの値を維持したまま `VoiceAudioToOpenAi`、`InputTextToOpenAi`、`SearchTextToYouTube` を区別する。解釈検索は後者2つを組み合わせられ、音声の送信境界とは独立する。metadataはprovider有効化や送信同意ではなく、実通信は未接続である。「抽出テキストのみ」の表示で音声を送らない。認識文は不変のsession IDと本文を持ち、用途の検索語は共通sessionへ保存/上書きしない。用途処理のoperation IDと古い応答/操作の拒否はI3で接続する。
 
 テキストセクションだけの `FeatureResult` に、動画候補の型付きデータと選択actionを追加する。タイトルや任意URL文字列をコマンドとして扱わず、現在の候補IDを照合して許可済みのコピーだけを実行する。翻訳のprimary section・互換表示は壊さない。候補の詳細は動画検索設計を正本とする。
 

@@ -51,6 +51,19 @@ public interface IAnalyzer
         CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Receives a completed in-memory transcript without acquiring a frame or running OCR.
+/// The handler owns its feature-specific query and result, never the shared transcript.
+/// </summary>
+public interface ITextFeatureHandler
+{
+    Task<FeatureResult> HandleAsync(
+        TextInputSession input,
+        ScanRequest request,
+        IProgress<ScanProgress>? progress,
+        CancellationToken cancellationToken);
+}
+
 public interface IResultRenderer
 {
     Task RenderProgressAsync(ScanProgress progress, CancellationToken cancellationToken);

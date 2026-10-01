@@ -63,39 +63,24 @@ public sealed class ScanPipeline
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             FeatureEntry feature = _featureCatalog.Resolve(request.FeatureId);
+            if (feature.Descriptor.InputKind != request.InputKind)
+            {
+                throw new ScanException(
+                    ScanFailureCode.InputKindMismatch,
+                    ScanStage.Trigger,
+                    "この機能では指定された入力を使えません。入力に対応する機能を選び直してください。");
+            }
 
             await RenderProgressAsync(
                 request,
                 ScanStage.Trigger,
-                "SCANを開始しました。",
+                request.InputKind == FeatureInputKind.CapturedFrame
+                    ? "SCANを開始しました。"
+                    : "テキスト処理を開始しました。",
                 total.Elapsed,
                 cancellationToken).ConfigureAwait(false);
-
-            stage = ScanStage.Capture;
-            await RenderProgressAsync(
-                request,
-                stage,
-                "VRChatの表示を1回だけ取得しています…",
-                total.Elapsed,
-                cancellationToken).ConfigureAwait(false);
-
-            Stopwatch captureTimer = Stopwatch.StartNew();
-            using CapturedFrame frame = await _captureSource
-                .CaptureAsync(request, cancellationToken)
-                .ConfigureAwait(false);
-            captureTimer.Stop();
-            _logger.Info(
-                "capture.completed",
-                request.CorrelationId,
-                ScanStage.Capture,
-                captureTimer.Elapsed,
-                new Dictionary<string, long>
-                {
-                    ["width"] = frame.Width,
-                    ["height"] = frame.Height,
-                    ["encodedBytes"] = frame.EncodedImage.Length,
-                });
 
             InlineProgress<ScanProgress> progress = new(value =>
                 _renderer
@@ -103,20 +88,62 @@ public sealed class ScanPipeline
                     .GetAwaiter()
                     .GetResult());
 
-            stage = ScanStage.Ocr;
-            AnalysisResult analysisResult = await feature.Analyzer
-                .AnalyzeAsync(frame, request, progress, cancellationToken)
-                .ConfigureAwait(false);
-            if (analysisResult.FeatureId != feature.Descriptor.Id)
+            AnalysisResult result;
+            if (request.InputKind == FeatureInputKind.Text)
             {
-                throw new InvalidOperationException(
-                    "The analyzer returned a result for a different feature ID.");
+                stage = ScanStage.TextHandling;
+                await RenderProgressAsync(
+                    request,
+                    stage,
+                    "認識したテキストを処理しています…",
+                    total.Elapsed,
+                    cancellationToken).ConfigureAwait(false);
+
+                FeatureResult textResult = await feature.TextHandler!
+                    .HandleAsync(request.TextInput!, request, progress, cancellationToken)
+                    .ConfigureAwait(false);
+                result = new AnalysisResult(textResult with { CaptureSourceKind = "none" });
+            }
+            else
+            {
+                stage = ScanStage.Capture;
+                await RenderProgressAsync(
+                    request,
+                    stage,
+                    "VRChatの表示を1回だけ取得しています…",
+                    total.Elapsed,
+                    cancellationToken).ConfigureAwait(false);
+
+                Stopwatch captureTimer = Stopwatch.StartNew();
+                using CapturedFrame frame = await _captureSource
+                    .CaptureAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
+                captureTimer.Stop();
+                _logger.Info(
+                    "capture.completed",
+                    request.CorrelationId,
+                    ScanStage.Capture,
+                    captureTimer.Elapsed,
+                    new Dictionary<string, long>
+                    {
+                        ["width"] = frame.Width,
+                        ["height"] = frame.Height,
+                        ["encodedBytes"] = frame.EncodedImage.Length,
+                    });
+
+                stage = ScanStage.Ocr;
+                AnalysisResult analysisResult = await feature.Analyzer!
+                    .AnalyzeAsync(frame, request, progress, cancellationToken)
+                    .ConfigureAwait(false);
+                result = analysisResult with { CaptureSourceKind = frame.SourceKind };
             }
 
-            AnalysisResult result = analysisResult with
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.FeatureId != feature.Descriptor.Id)
             {
-                CaptureSourceKind = frame.SourceKind,
-            };
+                throw new InvalidOperationException(
+                    "The handler returned a result for a different feature ID.");
+            }
 
             total.Stop();
             ScanOutcome success = ScanOutcome.Succeeded(
