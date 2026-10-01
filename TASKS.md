@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Added: 2026-10-01. **計画のみ・全項目未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。既存Milestoneの完了状態や実機証拠は変更しない。
+Added: 2026-10-01. **I1のadapter/設定境界を具体化し、純粋な設定/音声形式契約を追加。I2以降は未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。マイク/通信/公開画面/実quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -339,10 +339,11 @@ Added: 2026-10-01. **計画のみ・全項目未着手**。正本は[共通音�
 
 ## Post-MVP Milestone I — text input and shared execution foundation
 
-- [ ] **I1 — 未決定のadapterと設定境界を具体化する**（依存: なし）
+- [x] **I1 — 未決定のadapterと設定境界を具体化する**（依存: なし）
   - 範囲: マイク選択/録音方式、音声形式・容量・無音判定・失敗音声の保持期限、GPT Transcribeの具体設定、設定場所/許容範囲/秒数丸め、解釈prompt/出力形式/入出力上限を決める。録音30秒、音声300秒・30送信、翻訳10回・解釈10回の独立初期値を維持し、個別変更と再読込時の消費量維持を定義する。
   - 範囲: yt-dlpの固定版・信頼できる配置・配布/更新方法・利用条件、process timeout/出力上限、許可URL/thumbnail配信先と画像制限を決める。公式仕様は実装時に再確認し、依存追加が必要ならそのPRで明示する。インストールや実API呼び出し自体はこのタスクの条件にしない。
   - 確認: 設計の「Remaining implementation decisions」の各項目が後続タスクへ対応する。既決定の操作を選び直さず、画面寸法の最終調整と性能/精度はL2/L3へ残す。
+  - 2026-10-01実装: `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` の初期値・個別値域・PCM容量・要求ごとの秒数切上げを追加。基盤/動画検索設計へadapter判断と後続タスクを対応付けた。設定保存・既存翻訳hard cap変更・消費カウンター・録音/外部通信/UIの接続はこの変更に含めない。Linux .NET 8.0.422でsolution Release cross-build、Core 96件/Infrastructure 24件の回帰が通過。独立レビューでblocking指摘なし。Windows testsはLinuxにWindowsDesktop runtimeがないためCIで別確認し、実マイク/API/Questの受入は未実施。全体formatには既存Windowsファイル5件の違反があり、この変更のC#4ファイルのtargeted formatは通過。
 
 - [ ] **I2 — 画像とテキストの入力経路を分ける**（依存: I1）
   - 範囲: `Features.cs` / `Contracts.cs` / `Models.cs` / `ScanPipeline`に最小のtext handler境界を追加。認識文は共通sessionに保持し、用途の検索語とは分離する。音声/検索テキストの送信先を説明できるdata boundaryを加える。候補型/選択actionはK1で追加する。
