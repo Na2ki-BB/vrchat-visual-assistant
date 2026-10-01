@@ -203,7 +203,10 @@ public sealed class ScanPipeline
             operation.ThrowIfNotCurrent();
             return success;
         }
-        catch (Exception exception) when (cancellationToken.IsCancellationRequested || !operation.IsCurrent)
+        // A terminal cleanup failure stops admissions and invalidates this operation by design.
+        // Preserve its restart-required code; ordinary stale/cancelled failures remain cancellation.
+        catch (Exception exception) when ((cancellationToken.IsCancellationRequested || !operation.IsCurrent)
+            && exception is not ScanException { FailureCode: ScanFailureCode.VideoSearchCleanupFailed })
         {
             total.Stop();
             ScanOutcome cancelled = ScanOutcome.Failed(

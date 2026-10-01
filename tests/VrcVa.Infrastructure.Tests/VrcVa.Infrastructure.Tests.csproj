@@ -18,4 +18,14 @@
     <ProjectReference Include="..\..\src\VrcVa.Core\VrcVa.Core.csproj" />
     <ProjectReference Include="..\..\src\VrcVa.Infrastructure\VrcVa.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\tools\VrcVa.ProcessFixture\VrcVa.ProcessFixture.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyProcessFixture" AfterTargets="Build">
+    <ItemGroup>
+      <ProcessFixture Include="$(MSBuildProjectDirectory)/../../tools/VrcVa.ProcessFixture/bin/$(Configuration)/net8.0/VrcVa.ProcessFixture.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ProcessFixture)" DestinationFolder="$(OutDir)ProcessFixture" />
+  </Target>
 </Project>

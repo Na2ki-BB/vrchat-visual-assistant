@@ -386,9 +386,11 @@ Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音�
   - 確認: fake検索でAI/capture/OCRが0回、認識文不変、未知action/古いsession拒否。0/1/5/6/10件、5件ずつ最大2ページ、ページ送りで追加検索0回を検証。新検索/録り直しでは旧候補を選べない。
   - 2026-10-01実装: `IVideoSearchProvider` / `VideoSearchRequest` / `VideoSearchBatch` と `DirectVideoSearchHandler` を追加。認識文は空白・改行込みでそのまま1回のmetadata検索へ渡し、原文・検索語・候補を別の不変snapshotとして保持する。10件上限/5件ページ、session・検索operation・候補ID、コピーだけの選択actionと正規watch URLを型付きにし、`FeatureResult` の互換projection/等価性でも検索identityを維持する。Coreの `VideoSearchSession` は共通gateのactive leaseを借用し、取消・閉じる・録り直し・新検索後の遅延候補/古い選択を拒否。ASCII動画ID、4,000 UTF-8 byte title、HTTPS許可URL/ID対応、parser正規化回避と任意thumbnail originを検証する。Linux .NET 8.0.422の新規fake139件、Core294件/Infrastructure108件の全回帰、solution Release cross-build（0 warnings/errors）が通過。変更C#10ファイルのtargeted formatとdiff/secret検査が通過し、全体formatは既存Windows5ファイルの違反を残す。Windows全testsはCIで別確認する。yt-dlp実行（K2）・AI解釈（K3）・thumbnail取得/clipboard書込み（K4）・公開UI（K5）・実サービス/Quest評価は追加しない。
 
-- [ ] **K2 — yt-dlpのmetadata検索adapterを作る**（依存: I1、K1）
+- [x] **K2 — yt-dlpのmetadata検索adapterを作る**（依存: I1、K1）
   - 範囲: 固定実行パスと引数配列で`ytsearch10:`を1引数として渡す。設定/plugin/cookie取込みとshell連結を禁止し、simulate/skip-download/no-cache等の合意済み隔離を実装。stdout/stderrの並行・上限付き読取り、timeout、取消時の子プロセス終了/回収を行う。
   - 確認: fake processと自作JSONで引用符/改行/オプション風入力の安全な引数化、未導入/異常終了/不正JSON/出力超過/timeoutを検証。正常0件と全件不正を区別し、無効/重複entryは除外して部分取得を表示。YouTube ID/許可URLを照合してwatch URLを正規化し、任意host/schemeを拒否する。動画/音声保存、自動更新や依存インストールを検索の副作用にしない。
+
+  - 2026-10-01実装: Infrastructureに固定path/hash/version検証と `ArgumentList` による1検索引数、設定/plugin/cookie/JS/remote componentの隔離、親の秘密を継承しないprocess環境、並行stdout/stderr上限と30秒deadlineを追加。取消/timeout/超過でtree kill・親終了/pipe回収を確認し、後処理5秒で未確認ならprocess/handleを隔離して全新admissionを停止、再起動が必要なtyped failureをpipelineまで維持する。strict UTF-8/JSON/ID/title/許可URLを検証し、0件と全件不正を区別、無効/重複除外とstderr警告を `IsPartial` の不変snapshotへ渡す。fake・自作JSON・networkなしの自作process fixtureで引数/同時pipe/tree kill/reap/取消非協調/終了未確認/privacyを検証。Linux .NET 8.0.422でCore298件/Infrastructure182件の全回帰とsolution Release cross-build（0 warnings/errors）が通過。変更C#13ファイルのtargeted formatを確認し、全体formatは既存Windows5ファイルの違反を残す。Windows全testsはPRの正確なheadでCI確認する。公開UI・AI解釈・thumbnail取得・clipboardへの接続、yt-dlp導入や実YouTube検索は行わず、L2/L3は未実施のまま。
 
 - [ ] **K3 — GPT-6 Lunaの検索語解釈を追加する**（依存: I4、K1）
   - 範囲: `ITextModelClient`と共通通信へ`gpt-6-luna`/`reasoning.effort=none`を明示対応。用途固有promptと上限付き出力検証、検索専用model設定/allowlistを追加し、認識文と確定検索語を別保持する。
