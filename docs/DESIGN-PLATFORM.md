@@ -14,7 +14,7 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 これは設計書の責務分割であり、新しい共通機構の実装ではない。現在の入力型は `CapturedFrame` のみで、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
 
-2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名、費用上限の未決事項も残す。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名等の実装判断は残す。音声送信上限は下記で合意済みとする。
 
 ## Reading current behavior and history
 
@@ -196,8 +196,10 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 - 既存のWindows Credential Managerを活用し、公式OpenAI endpoint以外へ保存キーを送らない。翻訳用キーがあるだけでマイク取得・音声送信を有効にせず、音声機能の明示有効化と送信先・費用の表示を設ける
 - 音声用のAPIは既存Responsesテキスト通信と分ける。既存の `store: false`、入力4,000バイト、10回quota等が音声にもそのまま適用されるとは説明しない
-- 1回30秒と、プロセス/セッション全体の音声秒数・送信回数上限は別。失敗したネットワーク送信も回数に含め、設定再読込で上限を迂回させない方針とする。後者の数値・予約/解放の計数詳細、音声要求のサイズ・timeoutは未決定であり、実装時の利用開始前に決める
-- テキスト解釈が `ITextModelClient` を使う場合は翻訳と共通のquotaを使い、機能ごとに新しいquotaを作って上限を迂回しない。新モデルや料金は未確定
+- 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutは実装時に確定する
+- 音声quotaはHTTP送信直前に、その要求に含む音声の全秒数と1回を一括予約する。予約で上限を超える場合は送信しない。送信開始後の失敗・中止・timeoutは返却せず、本人による再送も新たに秒数と回数を消費する。録音中の中止など送信前に終了したものは消費しない（予約後でも送信未開始を確認できれば返却する）。自動再送はしない
+- 音声quotaはアプリのプロセス寿命で共有し、画面を閉じる、録り直す、設定再読込、runtime再構築では消費量をリセットしない。アプリ再起動でリセットされるため、月額支出上限やアカウント全体の予算保証ではない
+- 音声quotaは既存テキスト共通の10回制限と別。解釈は `ITextModelClient` と翻訳共通のquotaを使い、機能別quotaの新設で10回上限を迂回しない。したがって音声30送信が解釈30回を保証するわけではない。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
@@ -236,6 +238,8 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 | Stored-key destination | Official OpenAI endpoint only; no silent forwarding to a custom endpoint |
 | Local-first behavior | No key/provider selection means local OCR; no generic `OPENAI_API_KEY` fallback |
 | Tests and logs | Fake HTTP handlers and placeholder keys; no content, credential, or HTTP-body logging |
+
+動画検索で採用した `gpt-6-luna` は現行allowlistに含まれない。実装時に共通通信へ明示的に対応を追加し、翻訳の既定モデル・切替候補は変えない。設定で任意モデルを素通ししたり、利用できない時に別モデルへ暗黙fallbackしたりしない。
 
 設定の優先順位・モデル切替と翻訳への適用は[翻訳機能のOpenAI仕様](DESIGN-JAPANESE-TRANSLATION.md#translation)を参照。料金と過去の費用見積もりも機能側に置き、この共通制限をアカウント全体の支出保証とみなさない。
 

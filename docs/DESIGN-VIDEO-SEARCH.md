@@ -10,7 +10,7 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 共通の音声入力で得た文章からYouTube動画を検索し、小さなサムネイルとタイトルで候補を選び、URLをWindowsクリップボードへコピーする。ワールドの動画プレイヤーへの貼り付けは本人が行う。
 
-2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。具体adapter、解釈用モデル、音声quotaの数値等は未決定であり、APIの精度・速度やWindows/Questの動作を確認済みとは扱わない。
+2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。具体adapter等は実装判断として残り、APIの精度・速度やWindows/Questの動作を確認済みとは扱わない。
 
 録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持し、今回の変更では実装コードや実装タスクを追加しない。
 
@@ -77,7 +77,8 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 - 固定指示は検索語の整形だけを許可し、結果は空でない長さ上限内の検索語として検証する。具体prompt、出力形式、文字数/バイト上限は実装前に決める
 - モデルはURLや動画候補を生成せず、知らない固有名詞・条件を作り足さない。音声の内容を設定変更、任意ツール実行、ファイル/資格情報へのアクセスを許す命令として扱わない
 - 不正/空のAI出力は解釈失敗として表示する。直接検索への暗黙切替はせず、本人は認識文へ戻って「そのまま検索」を選べる
-- **解釈用モデルは未決定**。既存翻訳モデル、料金、性能をそのまま採用済みとは書かない。`ITextModelClient` を利用する場合は共通quotaと認証・キャンセル・fake通信を再利用する
+- **解釈用モデルはGPT-6 Luna（`gpt-6-luna`）、`reasoning.effort=none` を採用**する。検索語の短い整形を低費用で行う初期選定であり、実際の固有名詞・補足指示への精度は未評価。モデル選択は設定とadapter境界で差替可能にし、無断fallbackや自動再試行はしない
+- `ITextModelClient` の認証・キャンセル・fake通信と翻訳共通の10回quotaを再利用する。現行allowlistは `gpt-5.6-luna` / `gpt-5.4-nano` のみなので、`gpt-6-luna` 対応の追加が必要。翻訳の既定モデルと切替は今回変更しない
 - 追加確認画面は不要。検索に実際に使った語を結果画面へ表示する案を維持し、具体レイアウトは候補カードと合わせて確かめる
 
 ## Search provider — yt-dlp
@@ -138,7 +139,7 @@ flowchart LR
     M[共通マイク入力] --> T[GPT Transcribe]
     T --> X[共通認識文]
     X --> D[そのまま検索]
-    X --> I[解釈して検索<br/>モデル未決定]
+    X --> I[解釈して検索<br/>GPT-6 Luna / none]
     D --> Y[yt-dlp<br/>最大10件のmetadata]
     I --> Y
     Y --> R[5件ずつ最大2ページ]
@@ -148,7 +149,7 @@ flowchart LR
 | データ/処理 | 境界 |
 | --- | --- |
 | マイク音声 | 共通入力から公式OpenAI音声APIへ送信。明示有効化・録音操作が前提 |
-| 認識文 | 通常はセッション内のメモリ。直接検索では検索語としてYouTubeへ、解釈検索では選定するテキストAIへ送る |
+| 認識文 | 通常はセッション内のメモリ。直接検索では検索語としてYouTubeへ、解釈検索ではOpenAI GPT-6 Lunaへ送る |
 | 解釈後の検索語 | 共通認識文とは別に保持し、yt-dlp経由でYouTubeへ送る |
 | 候補metadata/サムネイル | yt-dlp/YouTubeと検証した画像配信先から取得。動画本体は取得しない |
 | 選択URL | Windows共有clipboardへ書き込む。他アプリやOS履歴/同期から参照される可能性がある |
@@ -157,11 +158,13 @@ flowchart LR
 
 ## Costs and limits
 
-- 音声認識はGPT Transcribe採用だが、価格・課金単位・最新の保持条件の確認、利用前の費用表示は必要。**実APIを呼び出した評価や費用計測はしていない**
+- 音声認識はGPT Transcribe採用。2026-10-01確認の公式目安は **US$0.0045/分**。利用前には最新価格・課金単位・保持条件を再確認し、費用を表示する。**実APIを呼び出した評価や費用計測はしていない**
 - OpenAI音声送信のキーは共通のWindows Credential Manager運用を使う。キーがあるだけで音声機能を有効化せず、未設定/未同意時は録音・送信しない
-- 直接検索は追加の解釈AIを呼ばない。解釈検索はテキストAIの通信・費用が増えるが、モデルと価格は未決定
-- 1回の録音上限は初期30秒、検索取得は最大10件、表示は5件×最大2ページ。要求byte数・timeout、音声のセッション合計秒数/回数、解釈の入出力上限は実装前に定める
-- 音声quotaは未実装。既存翻訳の10回制限や費用見積もりが音声にも適用済み、またはアカウント全体の支出保証とは扱わない。失敗した送信も計数し、設定再読込で上限を迂回しない方針を具体化する
+- 直接検索は追加の解釈AIを呼ばない。解釈検索はGPT-6 Lunaの通信・費用が増える。2026-10-01確認の標準単価は入力 **US$0.10/100万token**、出力 **US$0.50/100万token**
+- 1回の録音上限は初期30秒、音声送信は1起動につき累積300秒または30送信で停止（上限値は変更可能）。検索取得は最大10件、表示は5件×最大2ページ。要求byte数・timeout、解釈の入出力上限は実装前に定める
+- 音声quotaは未実装で、計数の正本は[共通音声の費用policy](DESIGN-PLATFORM.md#voice-opt-in-cost-policy-and-privacy)。送信前に秒数と1回を予約し、送信開始後の失敗・中止も計数する。検索だけのやり直しは認識文/確定済み検索語を再利用して再文字起こししない。設定再読込で消費量は戻らず、アプリ再起動で戻る
+- 例として月300回、各回10秒の音声なら50分×US$0.0045 = **US$0.225**。全300回で解釈を使い、固定指示込みの総入力500token・出力50token/回と仮定すると **US$0.0225**、合計 **US$0.2475**。これは複数起動にまたがる利用例で、実測・上限額ではない。長さ・再送・価格改定・税等で変わる
+- 既存テキスト共通10回制限は維持し、音声30送信とは独立して数える。起動ごとの制限は月額予算を止める仕組みではない。必要ならprovider側の月額hard limitを別途確認・設定する選択肢があるが、本設計の採用はproject作成・キー登録・課金設定変更の承認を含まない
 - yt-dlpを選んだことを「将来も無料で無制限に使える」保証にしない。版・依存・利用条件とYouTube側の制限を確認する。アカウント/cookiesを取り込む回避策は初期仕様に含めない
 - 今回はキー登録、外部APIテスト、課金設定変更、依存インストールを行わない
 
@@ -170,8 +173,8 @@ flowchart LR
 承認済みの操作を再び未決定に戻さず、次だけを具体化する。
 
 - マイクの選択、Windows録音adapter/ライブラリ、音声形式、無音判定、容量/timeout、失敗時音声の保持期限
-- GPT Transcribeの具体設定と差替方法、音声の累積秒数/送信回数quotaと計数policy、最新費用・保持条件の表示
-- 解釈用テキストモデル、固定prompt、出力形式と入出力上限、既存共通通信との接続
+- GPT Transcribeの具体設定と差替方法、合意済みquotaの秒数計測/丸め・設定の許容範囲、最新費用・保持条件の表示
+- GPT-6 Lunaの固定prompt、出力形式と入出力上限、モデル選択設定と既存共通通信への明示対応
 - yt-dlpの採用版・配布/更新方法・実行パス、process timeout/output上限、metadata/URL検証の具体adapter
 - 共通text handler、typed候補/action、session/gateの具体型と現行composition rootへの最小接続
 - 各状態の最終レイアウト、長い文/タイトルの表示、サムネイル配信先の制約と描画、WPF/VRの同一状態反映
@@ -189,7 +192,7 @@ flowchart LR
 | yt-dlp | 引数配列・設定/plugin隔離、動画DL無し、正常0件/異常終了/不正JSONの区別、timeout、output上限、子プロセス回収 |
 | metadata | 0/1/5/6/10件、重複/無効entry、thumbnail欠落/失敗、URL正規化、ページ送りで追加通信無し、上限を全体終端と誤表示しない |
 | clipboard | 成功後の表示、STA境界、失敗から再試行、候補保持、古い候補/連打で誤コピーしない |
-| privacy/費用 | 未設定で送信しない、録音/検索内容の保存無し、例外/stdout/stderrを含むログの内容漏れ無し、quota計数、runtime再構築で上限を迂回しない |
+| privacy/費用 | 未設定で送信しない、録音/検索内容の保存無し、例外/stdout/stderrを含むログの内容漏れ無し、300秒/30送信の直前・一致・超過、秒数と回数の一括予約、送信前中止と送信後失敗の計数、設定再読込/runtime再構築で消費量維持・再起動のみリセット、既存テキスト10回との独立性 |
 | 回帰 | 翻訳/OCR-only、capture抑制順序、既存表示・配置、shared runtime解放、入力非干渉、既存quota維持 |
 
 APIキーや実通信はfakeテストに不要。実装後にWindows build/test/formatと、新しい全interactive controlの統合hit-testを行う。さらに現行ビルドのWindows + SteamVR + Questで、録音、中止、再操作、両ページの全候補とbody rail、歩行、コピーを確認する。過去の翻訳の実機証拠や文書レビューは、この受入確認の代わりにならない。
@@ -208,14 +211,16 @@ APIキーや実通信はfakeテストに不要。実装後にWindows build/test/
 | 2026-10-01 | 選択した候補の正規watch URLをコピーし完了 | ワールドへの貼り付けは本人が行う |
 | 2026-10-01 | 0件や目的と違う場合は本人が言葉を変えるか終了 | 特殊救済を作らず、取得不具合は正常0件と区別する |
 | 2026-10-01 | 翻訳を含め一度に1処理、中止と短い失敗理由/やり直し | 共通gate・sessionと新しい操作可能画面が必要 |
-| 2026-10-01 | 解釈モデル、音声quota、具体adapter等は未決定として残す | サービス採用を実装・性能・価格の実証と混同しない |
+| 2026-10-01 | 追加確認でGPT-6 Luna / none、音声1起動300秒・30送信を採用 | 低費用な検索語整形と起動中の使い過ぎ防止。数値は変更可能、月額支出保証ではない |
+| 2026-10-01 | 具体adapter・prompt・上限検証等は実装時に詰める | サービス採用を実装・性能・価格の実証と混同しない |
 
 ## Sources and verification status
 
 要件合意とリポジトリ読み取りに加え、次の公式資料を2026-10-01に確認した。API呼び出し、yt-dlp実行、音声精度/処理時間測定、価格/規約の全面再確認、Windows/Quest実機確認はしていない。
 
 - [OpenAI speech-to-text guide](https://developers.openai.com/api/docs/guides/speech-to-text): 完了した音声ファイルを `POST /v1/audio/transcriptions` へ送る経路と `gpt-transcribe` を確認。初期案はこの経路で、live文字起こしを前提にしない
-- [GPT Transcribe model](https://developers.openai.com/api/docs/models/gpt-transcribe): 採用モデルの公式識別子は `gpt-transcribe`。検索意図の解釈モデルとは分ける
+- [GPT Transcribe model](https://developers.openai.com/api/docs/models/gpt-transcribe): 採用モデルの公式識別子は `gpt-transcribe`。US$0.0045/分の料金目安を確認。検索意図の解釈モデルとは分ける
+- [GPT-6 Luna model](https://developers.openai.com/api/docs/models/gpt-6-luna): `gpt-6-luna`、`reasoning.effort=none` 対応、入力US$0.10・出力US$0.50/100万tokenを確認。モデル採用と概算の根拠であり、精度実証ではない
 - [Audio transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create): 音声file入力等の契約を確認。具体形式・アプリ側上限・応答解析はadapter実装前に再確認する
 - [yt-dlp README](https://github.com/yt-dlp/yt-dlp/blob/master/README.md): flat extraction、JSON、simulate、設定/plugin/cacheの制御。flatではmetadataが欠け得るためthumbnail等を任意として扱う
 - [YouTube search extractor](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/youtube/_search.py) と [search base implementation](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/common.py): `ytsearch` の件数指定は取得上限であり、YouTube全体の終端保証ではない
