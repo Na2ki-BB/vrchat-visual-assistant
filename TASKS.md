@@ -2,7 +2,7 @@
 
 Status legend: `[x]` complete, `[>]` in progress, `[ ]` pending, `[-]` deliberately deferred.
 
-Design entry point: [DESIGN.md](DESIGN.md). Shared UI/input, feature registration, transport, privacy, and development rules belong to [the foundation design](docs/DESIGN-PLATFORM.md); capture, OCR, Japanese translation, feature costs, and measurement history belong to [the translation design](docs/DESIGN-JAPANESE-TRANSLATION.md). This split does not change the completion or device-validation status below.
+Design entry point: [DESIGN.md](DESIGN.md). Shared UI/input, feature registration, transport, privacy, and development rules belong to [the foundation design](docs/DESIGN-PLATFORM.md); capture, OCR, Japanese translation, feature costs, and measurement history belong to [the translation design](docs/DESIGN-JAPANESE-TRANSLATION.md). Voice input and video search follow [the approved video-search design](docs/DESIGN-VIDEO-SEARCH.md) and the new [implementation sequence](#voice-input-and-video-search--implementation-sequence) below. This split does not change the completion or device-validation status below.
 
 ## Milestone 0 — Research and decisions
 
@@ -328,3 +328,90 @@ Implementation status and headset acceptance are intentionally separate. An auto
 - [x] Validate the Skill package and forward-test it with an independent agent after implementation stabilizes. The final runbook path covers restore, focused/full verification, untracked files, baseline format failures, secret inspection, and device-evidence boundaries without installing the Skill.
 
 Phase 3 completion requires Windows Release build/tests/format, `git diff --check`, a tracked-file secret scan, independent correctness review, and the Quest 3S acceptance gates above. Missing hardware evidence must remain explicitly unchecked rather than being inferred from unit tests.
+
+## Voice input and video search — implementation sequence
+
+Added: 2026-10-01. **計画のみ・全項目未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。既存Milestoneの完了状態や実機証拠は変更しない。
+
+翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
+
+推奨順: **I1 → I2 → I3 → I4 → J1 → J2 → J3 → K1 → K2 → K3 → K4 → K5 → L1 → L2 → L3**。依存を満たせばadapter作業は並行可能だが、`MainWindow` / `SteamVrResultPanel`の接続変更は直列にする。I1の判断は該当設計へ短く追記し、別の手続書は増やさない。
+
+## Post-MVP Milestone I — text input and shared execution foundation
+
+- [ ] **I1 — 未決定のadapterと設定境界を具体化する**（依存: なし）
+  - 範囲: マイク選択/録音方式、音声形式・容量・無音判定・失敗音声の保持期限、GPT Transcribeの具体設定、設定場所/許容範囲/秒数丸め、解釈prompt/出力形式/入出力上限を決める。録音30秒、音声300秒・30送信、翻訳10回・解釈10回の独立初期値を維持し、個別変更と再読込時の消費量維持を定義する。
+  - 範囲: yt-dlpの固定版・信頼できる配置・配布/更新方法・利用条件、process timeout/出力上限、許可URL/thumbnail配信先と画像制限を決める。公式仕様は実装時に再確認し、依存追加が必要ならそのPRで明示する。インストールや実API呼び出し自体はこのタスクの条件にしない。
+  - 確認: 設計の「Remaining implementation decisions」の各項目が後続タスクへ対応する。既決定の操作を選び直さず、画面寸法の最終調整と性能/精度はL2/L3へ残す。
+
+- [ ] **I2 — 画像とテキストの入力経路を分ける**（依存: I1）
+  - 範囲: `Features.cs` / `Contracts.cs` / `Models.cs` / `ScanPipeline`に最小のtext handler境界を追加。認識文は共通sessionに保持し、用途の検索語とは分離する。音声/検索テキストの送信先を説明できるdata boundaryを加える。候補型/選択actionはK1で追加する。
+  - 確認: fakeテキスト機能はcapture/OCRを0回、画像翻訳は従来経路を1回通る。入力種別不一致・未知IDを実処理前に拒否。翻訳primary section/互換表示、OCR-onlyの外部通信0回、未登録要約を維持する。
+
+- [ ] **I3 — 全入口のsingle-flightと世代管理を共通化する**（依存: I2）
+  - 範囲: `ScanPipeline._isRunning`と`MainWindow._uiScanRunning`の役割を整理し、アプリ寿命の共通gateへ既存SCAN全入口を接続。録音から文字起こし完了までを1処理、検索/コピーを個別処理とし、認識文/候補の待機中は解放する。session/operation、取消、後処理完了後の解放を共通化する。
+  - 確認: fake録音・検索・コピーとdesktop/hotkey/OSC/腕SCANの競合、連打、runtime再構築で二重実行やqueue追加がない。Busy表示で現画面を壊さず、中止中は次を開始せず、閉じる/録り直し後の遅延応答をUI反映直前にも拒否する。既存capture抑制順序と共有OpenVR lifetimeを維持する。
+
+- [ ] **I4 — 翻訳と検索解釈のquotaを分離する**（依存: I1、I3）
+  - 範囲: `TranslationRequestQuota`、共通text client、`TranslationRuntimeFactory`とcomposition rootを見直し、翻訳/検索解釈を各10回の独立したプロセス寿命枠にする。設定値は用途別に検証し、同じ用途のclientを作り直しても同じ消費量を使う。音声の秒数/回数枠はJ2で別実装する。
+  - 確認: 各上限の直前/一致/超過、片方を使い切っても他方は利用可能、送信開始後の失敗/取消も該当枠のみ消費、再読込/モデル切替/runtime再構築でリセットしないことをfake HTTPで検証。全用途のsingle-flightは維持し、翻訳の既定モデル/切替候補を変えない。
+
+Exit: 既存翻訳の回帰を通し、fakeのテキスト機能を画像取得なしで安全に実行できる。新しい公開マイク/検索入口や有料送信をまだ有効にしない。
+
+## Post-MVP Milestone J — shared microphone and transcription adapters
+
+- [ ] **J1 — Windows録音adapterと音声sessionを作る**（依存: I1、I3）
+  - 範囲: Windows側で明示開始、再押し停止、設定からの残り秒/初期30秒自動停止を実装。音声は容量制限付きメモリだけに保持する。音声opt-in/キー利用可否を確認してからマイクを開く。録り直しは全文置換し、旧文/検索語/候補を失効させる。
+  - 確認: fakeマイク/時計で手動停止と上限到達が競合しても完了は1回。中止は文字起こしを開始しない。空/無音では検索へ進まず、無音による早期自動停止は加えない。デバイス喪失、閉じる、終了、SteamVR喪失時に停止・解放し、失敗音声も期限/サイズ上限を守る。正常認識後の解放はJ3で確認する。
+
+- [ ] **J2 — GPT Transcribe通信と音声quotaを作る**（依存: I1、I4）
+  - 範囲: Infrastructureに音声専用adapterを追加し、公式endpoint、専用Credential Manager運用、timeout/サイズ上限と応答検証を適用する。音声300秒・30送信の双方を送信前に一括予約し、翻訳/解釈とは別のプロセス寿命枠で保持する。
+  - 確認: fake HTTPでrequest形式、キー無し/未同意の0送信、空/不正応答、認証/上限/timeout/取消を検証。300秒と30回それぞれの直前/一致/超過、秒数丸め、予約後の送信未開始時だけ返却、開始後の失敗/取消/本人再送の計数、再構築で消費量維持を確認。自動再送なし。音声にResponsesの`store: false`が適用されるとは表示しない。
+
+- [ ] **J3 — 共通音声フローをWPFでつなぐ**（依存: J1、J2）
+  - 範囲: `MainWindow`、設定/資格情報境界へ音声opt-inと送信先/費用/周囲の声への注意を追加。録音→文字起こし→全文表示、録り直し/閉じる、処理中の中止、段階別失敗を同じsessionへ接続する。用途actionの接続口を用意し、検索の公開ボタンはK5で実処理と同時に接続する。
+  - 確認: fakeの全経路で成功後に音声を解放し、失敗の明示再試行だけ期限内音声を利用する。録り直し/閉じる/期限切れで破棄し、音声・本文・キーを設定やファイルに保存しない。キー保存済みでも音声未同意なら録音/送信0回。VRがなくてもWPFで中止・回復できる。
+
+Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音声枠とバッファ寿命を証明できる。Windows実マイク・実API精度は未確認のままL2/L3に残す。
+
+## Post-MVP Milestone K — bounded video search and desktop flow
+
+- [ ] **K1 — 型付き候補と直接検索の契約を作る**（依存: I2、I3）
+  - 範囲: text handler、検索provider境界、session/operation/候補ID/動画ID/title/任意thumbnail/正規watch URLの対応と許可された選択actionを定義する。「そのまま検索」は認識文を変更せず渡し、空白のみ/長さ超過は送信前に拒否する。
+  - 確認: fake検索でAI/capture/OCRが0回、認識文不変、未知action/古いsession拒否。0/1/5/6/10件、5件ずつ最大2ページ、ページ送りで追加検索0回を検証。新検索/録り直しでは旧候補を選べない。
+
+- [ ] **K2 — yt-dlpのmetadata検索adapterを作る**（依存: I1、K1）
+  - 範囲: 固定実行パスと引数配列で`ytsearch10:`を1引数として渡す。設定/plugin/cookie取込みとshell連結を禁止し、simulate/skip-download/no-cache等の合意済み隔離を実装。stdout/stderrの並行・上限付き読取り、timeout、取消時の子プロセス終了/回収を行う。
+  - 確認: fake processと自作JSONで引用符/改行/オプション風入力の安全な引数化、未導入/異常終了/不正JSON/出力超過/timeoutを検証。正常0件と全件不正を区別し、無効/重複entryは除外して部分取得を表示。YouTube ID/許可URLを照合してwatch URLを正規化し、任意host/schemeを拒否する。動画/音声保存、自動更新や依存インストールを検索の副作用にしない。
+
+- [ ] **K3 — GPT-6 Lunaの検索語解釈を追加する**（依存: I4、K1）
+  - 範囲: `ITextModelClient`と共通通信へ`gpt-6-luna`/`reasoning.effort=none`を明示対応。用途固有promptと上限付き出力検証、検索専用model設定/allowlistを追加し、認識文と確定検索語を別保持する。
+  - 確認: fake HTTPで解釈1回・検索1回、共通文不変、検索解釈枠だけ消費。空/不正/超過出力は失敗とし、直接検索や別モデルへ暗黙fallbackしない。モデル生成URL/候補や任意toolを採用しない。検索だけ失敗した後の明示再試行は確定語を再利用し、追加解釈/文字起こし0回。翻訳モデル選択の回帰を確認する。
+
+- [ ] **K4 — サムネイルとclipboardの副作用境界を作る**（依存: I1、K1）
+  - 範囲: thumbnailは許可HTTPS先・redirect・byte数・timeout・デコード寸法を制限してメモリ取得する。clipboardはWPF dispatcher/STAへ分離し、書込み直前に現在のsession/候補IDを再確認する。コピーも共通gateを通す。
+  - 確認: fake HTTP/clipboardで内部/ローカルURL、未許可redirect、巨大/不正画像を拒否し、資格情報を送らない。欠落/失敗でもplaceholderとtitleで選択可能。世代遅延と連打で誤コピーせず、成功後だけ完了表示。占有失敗時も候補/ページを保持して本人が再試行可能。自動無限retry、再検索、OS履歴/同期変更、終了時のclipboard消去をしない。
+
+- [ ] **K5 — 2つの検索ボタンと候補表示をWPFに接続する**（依存: J3、K2、K3、K4）
+  - 範囲: runtime catalogとcomposition rootへ検索を登録し、認識文直下へ最初から「そのまま検索」「解釈して検索」を配置。追加確認画面なしで選択経路を実行し、検索語/取得件数、5カード、前/次、入力へ戻る、閉じる、コピー状態を表示する。
+  - 確認: fake end-to-endで両経路、長い認識文/title、0件/目的外候補、中止中/失敗/再試行を確認。最終ページは「取得した候補はここまで」とし、YouTube全体の終端を断定しない。コピー後も候補を保持し、入力へ戻っても原文不変。音声/解釈/YouTube/thumbnailの送信範囲とclipboard上書きが操作時に分かる。
+
+Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完了し、ページ移動や検索の再試行で成功済み有料段階を反復しない。VRChatへの貼り付け/再生操作は本人に残す。
+
+## Post-MVP Milestone L — VR integration and separate acceptance gates
+
+- [ ] **L1 — 共通の操作可能な進捗・失敗画面をVRへ追加する**（依存: I3、J3）
+  - 範囲: `SteamVrResultPanel`とrendererへ録音残り秒/停止/中止、文字起こし等の進捗、取消回収中、段階別失敗/やり直しを追加。現行の非操作status atlasと失敗時の腕戻りだけに依存せず、翻訳も同じ共通制御へ接続する。
+  - 確認: full 1280x720、body rail操作、表示専用header、描画/hit-test共通矩形、priority-zero入力とnative intersection上のcursorを維持。各状態の全controlを中心/端/角/±1px・有効/無効・押しっぱなしhoverで統合hit-testする。新overlayも翻訳captureのhide/boundary/discard/adopt対象とし、非表示中のWPF中止、切断/終了時の解放を回帰検証する。
+
+- [ ] **L2 — 腕マイク・認識文・候補カードをVRへ接続する**（依存: K5、L1）
+  - 範囲: `WristLauncherStateMachine` / `WristLauncherTexture`へマイク入口を追加し、認識文直下の2ボタン、5カード×2ページとbody railをWPFと同じsession/actionへ接続。長文/title/検索語のレイアウトを確認する。既存校正/配置保存、SCAN回復を維持する。
+  - [ ] 実装/自動確認: 両ページ全候補/前次/戻る/閉じると認識文の全操作をraw intersection → 同一view逆変換 → logical hit-test → actionで検証。ページ境界、連打、閉じた後/録り直し後の遅延結果・画像・選択を確認する。
+  - [ ] **実機ゲート（未実施）**: 現行Windows Release + SteamVR + Quest 3Sで実マイク開始/再押し/上限/中止/切断、VRChat内ミュート時の取得とOS/物理ミュートの違い、残り秒/長文の可読性を確認。文字起こし/候補はfakeでもよいことを記録し、両ページ全card/rail、頭を動かしたcursor整合、歩行維持、clipboard実書込み/占有回復、閉じる/再開/次SCANのoverlay除外と配置を確認する。実装/自動確認とは別に記録し、実機未確認ならL2全体は完了にしない。
+
+- [ ] **L3 — 全体検証と任意の実サービス評価を記録する**（依存: L2の実装/自動確認。全体の自動検証は実機待ちでも進める）
+  - [ ] 自動/静的確認: Windows restore → Release build → 全tests → format、`git diff --check`、公開差分のsecret確認と独立レビューを行う。偽の音声/本文/URL/例外/stdout/stderrを用い、ログ・設定・一時ファイルへ内容が残らないことを確認。OCR-only 0通信、翻訳・独立quota・capture順序・runtime解放の回帰を含める。CI通過とformat/実機の結果を混同しない。
+  - [ ] **実サービスゲート（未実施・別途許可後）**: 最新の価格/保持条件を確認し、対象API・試行回数・予算・送信する自作サンプルを明示して承認を得てからGPT Transcribe/GPT-6 Lunaを評価する。固定版yt-dlpの実検索、metadata/thumbnail互換とファイル非生成も確認する。失敗を含む回数・音声秒数、段階別遅延/負荷、認識と補足指示の精度を内容を残さず記録し、未実施なら評価済みとしない。
+  - [ ] 引渡し: 実装済み範囲に合わせREADME/設計/このチェックリストを更新し、固定yt-dlpの導入/更新手順、音声opt-in、3枠の上限、失敗時の回復と手動貼り付けを説明する。許可待ちの実API評価や残る実機不具合は未完了のまま明示する。
+
+Exit: 新しい画面/マイクの実機証拠と有料APIの評価を、それぞれ現在のビルド・実施条件付きで記録する。過去の翻訳の成功やfakeテストだけで新機能の実用性を確認済みにしない。新しいアカウント/課金設定、常時録音、動画ダウンロード、VRキーボード、動的plugin、任意tool、自動貼り付け/再生は追加しない。

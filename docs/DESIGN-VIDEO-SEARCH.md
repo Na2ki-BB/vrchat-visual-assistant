@@ -12,7 +12,7 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。具体adapter等は実装判断として残り、APIの精度・速度やWindows/Questの動作を確認済みとは扱わない。
 
-録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持し、今回の変更では実装コードや実装タスクを追加しない。
+録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。設計合意後の実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、コードは未実装のままとする。
 
 ## Problem and accepted flow
 
@@ -180,7 +180,7 @@ flowchart LR
 - 各状態の最終レイアウト、長い文/タイトルの表示、サムネイル配信先の制約と描画、WPF/VRの同一状態反映
 - Windows + SteamVR + QuestでのVRChatミュート時録音、歩行維持、カード操作、clipboard、遅延と負荷の確認
 
-個人利用に必要な範囲へ絞る。動的plugin、汎用tool実行、エージェントloop、追加の手続書や実装タスクリストは、この設計更新には含めない。
+個人利用に必要な範囲へ絞る。動的plugin、汎用tool実行、エージェントloop、追加の手続書は含めない。実装タスクは既存の [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) で管理し、別の一覧は増やさない。
 
 ## Validation plan — implementation is not yet tested
 
