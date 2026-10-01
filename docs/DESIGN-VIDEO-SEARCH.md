@@ -1,6 +1,6 @@
 # VRChat Visual Assistant — 動画検索機能設計
 
-Status: approved interaction and provider design / K1 core contracts, K2 yt-dlp adapter and K3 query interpretation implemented; public flow pending
+Status: K1–K5 adapters and WPF flow implemented; real service and VR candidate acceptance pending
 
 Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus official provider documentation; no API or device validation.
 
@@ -10,9 +10,9 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 共通の音声入力で得た文章からYouTube動画を検索し、小さなサムネイルとタイトルで候補を選び、URLをWindowsクリップボードへコピーする。ワールドの動画プレイヤーへの貼り付けは本人が行う。
 
-2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**操作仕様は設計合意であり、公開フローは未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
+2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**操作仕様に沿うWPFフローをK5で接続済み。実サービス・VR候補操作は未検証**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
 
-録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約、I2/I3の入力・実行境界、I4の独立text quotaとK1の直接検索Core契約を追加した。K2でyt-dlpのmetadata検索adapterを追加した。K3で検索語解釈adapterと成功済みqueryの明示再検索を追加した。音声adapter/公開検索画面の接続と実サービス評価は後続のままである。
+録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約、I2/I3の入力・実行境界、I4の独立text quotaとK1の直接検索Core契約を追加した。K2でyt-dlpのmetadata検索adapterを追加した。K3で検索語解釈adapterと成功済みqueryの明示再検索を追加した。音声adapterはJ3、公開WPF検索画面はK5で接続した。実サービス評価とVR候補画面はL2/L3へ残す。
 
 ## Problem and accepted flow
 
@@ -35,6 +35,16 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 | 実行時の機能は `Translation` のみ | 音声入力・検索を使える状態になったとは説明しない |
 
 根拠: [Features.cs](../src/VrcVa.Core/Features.cs)、[Contracts.cs](../src/VrcVa.Core/Contracts.cs)、[Models.cs](../src/VrcVa.Core/Models.cs)、[ScanPipeline.cs](../src/VrcVa.Core/ScanPipeline.cs)、[MainWindow.xaml.cs](../src/VrcVa.Windows/MainWindow.xaml.cs)、[SteamVrResultPanel.cs](../src/VrcVa.Windows/OpenVr/SteamVrResultPanel.cs)。
+
+## K5 WPF composition and lifecycle
+
+`VideoSearchRuntime` は翻訳・直接検索・解釈検索のcatalogと検索sessionをアプリ寿命で所有する。WPFの `VideoSearchFlow` / `VideoSearchPanel` は共通音声sessionの同じ不変入力を利用し、認識文直下の2ボタンから既存handlerを直接実行する。SCAN側も同じcatalogを参照し、既存翻訳と未登録要約は維持する。画像取得・OCRを検索経路に持ち込まない。
+
+新しい解釈だけが固定のWindows資格情報マネージャーtext target `VrcVa/OpenAIApiKey` を読む。音声専用target/環境キー/任意endpointを流用せず、既存資格情報設定による変更は次の解釈に反映する。公式endpoint専用、redirect/cookie/既定資格情報なしのHttpClientと既存の検索用quotaを共有する。実行直前に共通gate内で設定を再読込し、取得失敗なら送信を止める。確定語を使う検索retryはキーを再読込せず、有料段階を呼ばない。
+
+候補は10件のsnapshotを5件ずつ表示し、title/queryは折り返して全文を保持する。サムネイルはbounded providerからメモリだけへ取得し、表示直前のsession/result/view再照合で遅い画像を拒否する。入力へ戻る・新検索・録り直し・閉じるで画像要求を取消し、終了は所有中のcleanupを待つ。clipboardはK4の候補identity/STA直前照合を通し、UIでも現在ページの選択とcopy feedbackの世代を検査する。正常0件とtyped失敗を分け、検索失敗の再試行だけは成功済みのqueryを再利用する。`VideoSearchCleanupFailed` はgate停止によるsession無効化後も内容なしで再起動理由を表示する。
+
+公開画面で音声/OpenAI text/YouTube/thumbnail送信先・有料枠・clipboard上書きを説明する。この接続は実API・yt-dlpサービス互換性・実マイク/clipboard・Questの受入を合格とするものではない。
 
 ## Interaction and states
 
@@ -91,7 +101,7 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 
 `VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。K4のclipboard境界はこの正本をSTA書込み直前に再照合する。公開UIへの接続はK5へ残す。
 
-`FeatureResult.VideoSearch` と既存 `AnalysisResult` の互換projectionは同じtyped snapshotを維持する。Windows composition rootへは未登録で、公開アプリからマイク/yt-dlp/AI/thumbnail/clipboardの新規通信や副作用は発生しない。K2のproviderは後続接続用の実装として存在する。
+`FeatureResult.VideoSearch` と既存 `AnalysisResult` の互換projectionは同じtyped snapshotを維持する。K1時点ではWindows composition rootへ未登録で新規の通信や副作用はなかった。K5で本人の明示操作からWPFへ接続した。K2のproviderは後続接続用の実装として存在する。
 
 ### K2 metadata adapter — implemented, no live YouTube evaluation
 

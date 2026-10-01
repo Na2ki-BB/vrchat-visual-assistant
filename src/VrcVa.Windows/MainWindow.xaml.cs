@@ -15,6 +15,7 @@ using VrcVa.Windows.Security;
 using VrcVa.Windows.Settings;
 using VrcVa.Windows.Startup;
 using VrcVa.Windows.Translation;
+using VrcVa.Windows.Video;
 using VrcVa.Windows.Voice;
 using VrcVa.Windows.Win32;
 
@@ -39,6 +40,8 @@ public partial class MainWindow : Window
     private readonly VoiceInputPanel _voicePanel;
     private readonly OperationProgressController _operationProgress;
     private readonly System.Windows.Threading.DispatcherTimer _operationProgressTimer;
+    private readonly VideoSearchRuntime _videoRuntime;
+    private readonly VideoSearchFlow _videoSearch;
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
     private readonly ReloadableAnalyzer _analyzer;
@@ -185,11 +188,12 @@ public partial class MainWindow : Window
                 _execution,
                 _operationProgress),
             new XsOverlayNotificationRenderer(_xsOverlayNotificationSink, _execution.IsCurrent));
+        _videoRuntime = new(_execution, _analyzer, _usageQuotas, _openAiCredentialStore.Read);
         _vrChatPipeline = new ScanPipeline(
             new FallbackCaptureSource(
                 new OpenVrEyeCaptureSource(Dispatcher, _steamVrResultPanel, eyeOptions),
                 new VrChatWindowCaptureSource()),
-            _analyzer,
+            _videoRuntime.Catalog,
             _renderer,
             _logger,
             _execution);
@@ -202,6 +206,12 @@ public partial class MainWindow : Window
         _voiceFlow = new VoiceInputFlow(_execution, new WinMmMicrophoneFactory(), voiceConfiguration.CreateRuntime);
         _voicePanel = new VoiceInputPanel(_voiceFlow, _execution, voiceConfiguration,
             _usageQuotas.Voice, () => _usageSettings.VoiceInput);
+        VideoCandidateClipboard videoClipboard = new(_execution, _videoRuntime.Session,
+            new WpfVideoClipboardDispatcher(Dispatcher), new WindowsVideoClipboardTextWriter());
+        _videoSearch = new(_execution, _videoRuntime.Session, _videoRuntime.Catalog,
+            () => _voiceFlow.CurrentInput, () => LoadVoiceSettings(), _videoRuntime.Thumbnails, videoClipboard);
+        _voicePanel.AttachSearch(_videoSearch, _usageQuotas.SearchInterpretation);
+        _videoSearch.Changed += VideoSearch_Changed;
         VoiceInputHost.Content = _voicePanel;
         _voiceFlow.Changed += VoiceFlow_Changed;
         _operationProgress.AttachVoice(_voiceFlow);
@@ -540,7 +550,8 @@ public partial class MainWindow : Window
 
     private void CancelButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (!_operationProgress.CancelActive()) { _execution.CancelCurrentOperation(); }
+        if (_videoSearch.CanCancel) { _videoSearch.Cancel(); }
+        else if (!_operationProgress.CancelActive()) { _execution.CancelCurrentOperation(); }
         StatusText.Text = "中止中です。処理とリソースの回収を待っています。";
         CancelButton.IsEnabled = false;
     }
@@ -1279,9 +1290,10 @@ public partial class MainWindow : Window
         _operationProgress.Dispose();
         _execution.Stop();
         _windowLifetimeCancellation.Cancel();
+        Task searchCleanup = _videoSearch.DisposeAsync().AsTask();
         Task voiceCleanup = _voiceFlow.DisposeAsync().AsTask();
         await WindowShutdown.DrainAndPostCloseAsync(Dispatcher, _execution.WhenIdle,
-            Task.WhenAll(_oscStartupTask, voiceCleanup), () =>
+            Task.WhenAll(_oscStartupTask, voiceCleanup, searchCleanup), () =>
         {
             _shutdownDrained = true;
             Close();
@@ -1292,6 +1304,8 @@ public partial class MainWindow : Window
     {
         _voiceFlow.Changed -= VoiceFlow_Changed;
         _voicePanel.Detach();
+        _videoSearch.Changed -= VideoSearch_Changed;
+        _videoRuntime.Dispose();
         _globalHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
         if (_oscTriggerService is not null)
@@ -1379,7 +1393,18 @@ public partial class MainWindow : Window
     {
         // Only a previously established connection emits this event. A desktop-only
         // session never requires SteamVR, and can explicitly restart after a loss.
-        await _operationProgress.ConnectionLostAsync();
+        await Task.WhenAll(_operationProgress.ConnectionLostAsync(), _videoSearch.CloseAsync());
+    }
+
+    private void VideoSearch_Changed(object? sender, EventArgs eventArgs)
+    {
+        if (_closed) { return; }
+        SetScanControls(_execution.IsRunning || _voiceFlow.RequiresRestart || _videoSearch.RequiresRestart);
+        if (_videoSearch.RequiresRestart)
+        {
+            CancelButton.IsEnabled = false;
+            StatusText.Text = _videoSearch.Message;
+        }
     }
 
     private void VoiceFlow_Changed(object? sender, EventArgs eventArgs)
@@ -1391,11 +1416,11 @@ public partial class MainWindow : Window
             SourceTextBox.Clear();
             TranslationTextBox.Clear();
         }
-        SetScanControls(_execution.IsRunning || _voiceFlow.RequiresRestart);
-        if (_voiceFlow.RequiresRestart)
+        SetScanControls(_execution.IsRunning || _voiceFlow.RequiresRestart || _videoSearch.RequiresRestart);
+        if (_voiceFlow.RequiresRestart || _videoSearch.RequiresRestart)
         {
             CancelButton.IsEnabled = false;
-            StatusText.Text = _voiceFlow.Message;
+            StatusText.Text = _videoSearch.RequiresRestart ? _videoSearch.Message : _voiceFlow.Message;
         }
     }
 

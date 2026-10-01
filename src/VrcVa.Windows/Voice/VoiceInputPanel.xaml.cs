@@ -5,6 +5,7 @@ using System.Windows.Navigation;
 using System.Windows.Threading;
 using VrcVa.Core;
 using VrcVa.Infrastructure;
+using VrcVa.Windows.Video;
 
 namespace VrcVa.Windows.Voice;
 
@@ -16,6 +17,8 @@ public partial class VoiceInputPanel : System.Windows.Controls.UserControl
     private readonly VoiceRequestQuota _quota;
     private readonly Func<VoiceInputOptions> _options;
     private readonly DispatcherTimer _timer;
+    private VideoSearchFlow? _search;
+    private VideoSearchPanel? _searchPanel;
 
     internal VoiceInputPanel(VoiceInputFlow flow, ExecutionCoordinator execution,
         VoiceInputConfiguration configuration, VoiceRequestQuota quota, Func<VoiceInputOptions> options)
@@ -35,16 +38,33 @@ public partial class VoiceInputPanel : System.Windows.Controls.UserControl
         Refresh();
     }
 
-    // K5 can populate a feature-specific action view here, using CurrentInput and the same gate.
-    // No search buttons or feature registration are exposed until their actual handlers are connected.
+    // The feature action view shares the transcript session and app-wide gate.
     internal ContentControl ResultActions => ResultActionsHost;
     internal TextInputSession? CurrentInput => _flow.CurrentInput;
+
+    internal void AttachSearch(VideoSearchFlow search, TextRequestQuota quota)
+    {
+        _search = search;
+        _searchPanel = new(search, quota, CloseInputAsync);
+        ResultActionsHost.Content = _searchPanel;
+        search.Changed += Search_Changed;
+        Refresh();
+    }
+
+    private void Search_Changed(object? sender, EventArgs args) => Refresh();
+
+    private async Task CloseInputAsync()
+    {
+        // Invalidate both owners before waiting: a slow thumbnail cleanup must not close a newer recording.
+        await Task.WhenAll(_search?.CloseAsync() ?? Task.CompletedTask, _flow.CloseAsync());
+    }
 
     private void Flow_Changed(object? sender, EventArgs eventArgs)
     {
         // This flow and all its public operations are dispatcher-owned. Recheck the live
         // session here rather than posting a captured transcript that could arrive late.
         Dispatcher.VerifyAccess();
+        _search?.Refresh();
         Refresh();
     }
 
@@ -57,14 +77,16 @@ public partial class VoiceInputPanel : System.Windows.Controls.UserControl
         VoiceKeyBox.IsEnabled = !busy;
         SaveKeyButton.IsEnabled = !busy;
         DeleteKeyButton.IsEnabled = !busy;
-        RecordButton.IsEnabled = _flow.CanStop || (!busy && options.IsEnabled && !_flow.RequiresRestart);
+        RecordButton.IsEnabled = _flow.CanStop || (!busy && options.IsEnabled && !_flow.RequiresRestart && _search?.RequiresRestart != true);
         RecordButton.Content = _flow.CanStop ? "停止して文字起こし" : _flow.CurrentInput is null ? "録音開始 / 録り直し" : "録り直し（全文置換）";
-        CancelVoiceButton.IsEnabled = busy && _flow.IsCurrent && _flow.State != VoiceFlowState.Cancelling;
+        CancelVoiceButton.IsEnabled = _search?.CanCancel == true || (busy && _flow.IsCurrent
+            && _flow.State is VoiceFlowState.Recording or VoiceFlowState.Transcribing);
         RetryButton.IsEnabled = options.IsEnabled && _flow.CanRetry;
         CloseVoiceButton.IsEnabled = _flow.SessionId != Guid.Empty;
         TranscriptBox.Text = _flow.CurrentInput?.Transcript ?? string.Empty;
-        ResultActionsHost.IsEnabled = !busy && _flow.CurrentInput is not null;
-        ResultActionsHost.Visibility = _flow.CurrentInput is null ? Visibility.Collapsed : Visibility.Visible;
+        ResultActionsHost.IsEnabled = true; // feature cancellation and close remain reachable while the gate is held
+        ResultActionsHost.Visibility = _flow.CurrentInput is not null || _search?.RequiresRestart == true
+            ? Visibility.Visible : Visibility.Collapsed;
         FlowStatusText.Text = _flow.Message;
         FlowDetailText.Text = _flow.CanStop
             ? $"録音中 / 残り {_flow.RemainingSeconds} 秒（最大 {options.MaximumRecordingSeconds} 秒）"
@@ -80,9 +102,13 @@ public partial class VoiceInputPanel : System.Windows.Controls.UserControl
         Refresh();
     }
 
-    private void CancelVoiceButton_Click(object sender, RoutedEventArgs eventArgs) => _flow.Cancel();
+    private void CancelVoiceButton_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        if (_search?.CanCancel == true) { _search.Cancel(); }
+        else { _flow.Cancel(); }
+    }
     private void RetryButton_Click(object sender, RoutedEventArgs eventArgs) { _flow.TryRetry(); Refresh(); }
-    private async void CloseVoiceButton_Click(object sender, RoutedEventArgs eventArgs) => await _flow.CloseAsync();
+    private async void CloseVoiceButton_Click(object sender, RoutedEventArgs eventArgs) => await CloseInputAsync();
 
     private void ConsentCheckBox_Click(object sender, RoutedEventArgs eventArgs)
     {
@@ -133,6 +159,8 @@ public partial class VoiceInputPanel : System.Windows.Controls.UserControl
     {
         _timer.Stop();
         _flow.Changed -= Flow_Changed;
+        if (_search is not null) { _search.Changed -= Search_Changed; }
+        _searchPanel?.Detach();
         TranscriptBox.Clear();
         VoiceKeyBox.Clear();
         ResultActionsHost.Content = null;

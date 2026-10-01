@@ -1,0 +1,56 @@
+<UserControl x:Class="VrcVa.Windows.Video.VideoSearchPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#111318" Foreground="#F2F4F8">
+  <StackPanel>
+    <WrapPanel x:Name="SearchButtons">
+      <Button x:Name="DirectSearchButton" Content="そのまま検索" Padding="16,10" Margin="0,0,8,8" Click="DirectSearchButton_Click" />
+      <Button x:Name="InterpretedSearchButton" Content="解釈して検索" Padding="16,10" Margin="0,0,8,8" Click="InterpretedSearchButton_Click" />
+    </WrapPanel>
+    <TextBlock TextWrapping="Wrap" Foreground="#AAB2C0"
+      Text="そのまま検索: 認識文を変更せずYouTubeへ送ります。解釈して検索: 認識文をOpenAI（api.openai.com / GPT-6 Luna）へ送り、整えた検索語をYouTubeへ送ります。録音音声は文字起こし時だけOpenAIへ送信済みです。検索で音声・画面画像を送りません。" />
+    <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#AAB2C0"
+      Text="解釈は有料で、既存のテキスト用OpenAIキー（Windows資格情報マネージャー VrcVa/OpenAIApiKey）を使います。翻訳の資格情報設定から保存でき、音声専用キー・環境変数のキーは使いません。参考単価: 入力US$0.10・出力US$0.50 / 100万token（2026-10-01確認）。実サービスの精度・互換性は未評価です。" />
+    <TextBlock x:Name="InterpretationQuotaText" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#AAB2C0" />
+    <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#AAB2C0"
+      Text="候補情報は固定版yt-dlpで最大10件取得します。サムネイルはi.ytimg.com / img.youtube.comから取得し、音声・認識文・検索語・画面画像は画像配信先へ送りません。動画本体は取得せず、候補と画像はメモリだけで保持します。" />
+    <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#FFCE82"
+      Text="候補を選ぶとWindows共有クリップボードをその動画URLで上書きします。他アプリやOSの履歴・同期から参照される可能性があります。ワールドへの貼り付け・再生は本人が行ってください。" />
+    <TextBlock x:Name="SearchStatusText" Margin="0,14,0,0" TextWrapping="Wrap" Foreground="#61D0FF" FontSize="16" AutomationProperties.LiveSetting="Polite" />
+    <TextBlock x:Name="FailureStageText" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#FFCE82" />
+    <WrapPanel Margin="0,10,0,0">
+      <Button x:Name="CancelSearchButton" Content="検索・コピーを中止" Padding="12,8" Margin="0,0,8,8" Click="CancelSearchButton_Click" />
+      <Button x:Name="RetrySearchButton" Content="やり直す" Padding="12,8" Margin="0,0,8,8" Click="RetrySearchButton_Click" />
+      <Button x:Name="BackToInputButton" Content="入力へ戻る" Padding="12,8" Margin="0,0,8,8" Click="BackToInputButton_Click" />
+      <Button x:Name="CloseSearchButton" Content="閉じる・内容を破棄" Padding="12,8" Margin="0,0,8,8" Click="CloseSearchButton_Click" />
+    </WrapPanel>
+    <TextBlock x:Name="QueryText" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#F2F4F8" />
+    <TextBlock x:Name="CandidateCountText" Margin="0,6,0,6" TextWrapping="Wrap" Foreground="#AAB2C0" />
+    <ItemsControl x:Name="CandidateCards">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Button Margin="0,0,0,8" Padding="10" HorizontalContentAlignment="Stretch" Click="Candidate_Click"
+                  Tag="{Binding Action}" IsEnabled="{Binding CanSelect}" Background="#1B2533" Foreground="#F2F4F8"
+                  AutomationProperties.Name="{Binding AccessibleName}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="104" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <Grid Grid.Column="0" Width="96" Height="64" Background="#303B4C">
+                <TextBlock Text="画像なし" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#AAB2C0" />
+                <Image Source="{Binding Image}" Stretch="Uniform" />
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontSize="15" />
+                <TextBlock Text="この動画のURLをコピー" Margin="0,6,0,0" Foreground="#61D0FF" />
+              </StackPanel>
+            </Grid>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <WrapPanel x:Name="Pagination" Margin="0,6,0,0">
+      <Button x:Name="PreviousPageButton" Content="前の候補" Padding="12,8" Margin="0,0,8,8" Click="PreviousPageButton_Click" />
+      <Button x:Name="NextPageButton" Content="次の候補" Padding="12,8" Margin="0,0,8,8" Click="NextPageButton_Click" />
+    </WrapPanel>
+    <TextBlock x:Name="BatchEndText" Text="取得した候補はここまで" TextWrapping="Wrap" Foreground="#AAB2C0" />
+  </StackPanel>
+</UserControl>

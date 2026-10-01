@@ -149,7 +149,7 @@ public static class FeatureIds
 
 public static class BuiltInFeatures
 {
-    // Contract only: the Windows runtime does not register search until K5.
+    // The Windows catalog exposes both text searches beside the shared transcript.
     public static FeatureDescriptor DirectVideoSearch { get; } = new(
         FeatureIds.DirectVideoSearch,
         "そのまま検索",

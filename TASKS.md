@@ -407,9 +407,10 @@ Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音�
 
   - 2026-10-01実装: 許可originの正本を再利用するcredential/cookie/redirectなしの専用HTTP取得、5秒/512 KiB、magic/静止frame/decode前寸法とdecode後BGRA32上限を追加。型付きplaceholder結果は候補/ページを変更しない。候補コピーは共通gate内の新operationからWPF dispatcher/STAへ渡し、session → coordinatorの固定lock順で直前identity再確認と単発OS書込みをまとめる。正規watch URL以外を渡さず、busy時も候補を保持し明示retryできる。generation付きfeedbackは描画時に再照合する。公開UI接続、実thumbnail取得、OS clipboard実変更、実機/API評価は今回行わない。Linux .NET 8.0.422でJ3最新main統合後のsolution Release cross-build（0 warnings/errors）、新規fake94件を含むCore362件/Infrastructure412件の全回帰、変更C#14ファイルのtargeted format、diff/secret検査、独立レビューが通過。全体formatは既存Windows5ファイルの違反を残す。レビューでSTA再入/gate-busy feedback/再呼出callbackの多重書込み/埋込みthumbnail・圧縮metadataの寸法迂回を修正し、20万parser stress入力でも上限内の結果以外/予期しない例外なしを確認。初期decoderは8-bit JPEG/8-bit以下PNGを扱い、WebP・高bit-depth・EXIF/ICC/圧縮text/未知metadataはplaceholderへ戻す。WPF/WICのvendor優先は専用CLSID強制ではなく、codec互換/実clipboard/Quest確認は別ゲート。Windows全testsはPRの正確なheadでCI確認する。
 
-- [ ] **K5 — 2つの検索ボタンと候補表示をWPFに接続する**（依存: J3、K2、K3、K4）
+- [x] **K5 — 2つの検索ボタンと候補表示をWPFに接続する**（依存: J3、K2、K3、K4）
   - 範囲: runtime catalogとcomposition rootへ検索を登録し、認識文直下へ最初から「そのまま検索」「解釈して検索」を配置。追加確認画面なしで選択経路を実行し、検索語/取得件数、5カード、前/次、入力へ戻る、閉じる、コピー状態を表示する。
   - 確認: fake end-to-endで両経路、長い認識文/title、0件/目的外候補、中止中/失敗/再試行を確認。最終ページは「取得した候補はここまで」とし、YouTube全体の終端を断定しない。コピー後も候補を保持し、入力へ戻っても原文不変。音声/解釈/YouTube/thumbnailの送信範囲とclipboard上書きが操作時に分かる。
+  - 2026-10-01実装: 共有catalogと既存handler/provider/quotaをWPFへ接続。認識文直下の2ボタン、5件カード/ページ、長文の折返し、検索語/件数/partial/0件、前次/入力/close/copy状態、段階別の明示retryを追加。検索失敗のretryは成功済みqueryを再利用し、音声/解釈を反復しない。既存固定text資格情報storeだけを利用し、送信範囲とclipboard上書きを説明。fakeの両経路、cancel cleanup/late images/old selection/terminal restart/長文layoutを追加。独立レビューで閉じる後の新録音取消競合、破棄待ちのsession内容保持、周期refreshによるカード再生成、全体中止ボタンの再有効化を修正。保持内容のGC検証と安定したカード/focusの回帰も追加。Linux Release cross-buildは0 warnings/errors、Core365/Infrastructure412と変更C#のtargeted formatを確認。全体formatは既存Windows5ファイルの違反を残す。Windows全testsはexact-head CIで確認し、実機/実APIはL2/L3へ残す。
 
 Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完了し、ページ移動や検索の再試行で成功済み有料段階を反復しない。VRChatへの貼り付け/再生操作は本人に残す。
 
