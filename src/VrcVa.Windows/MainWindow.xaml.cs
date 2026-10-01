@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private readonly ExecutionCoordinator _execution = new();
     private readonly VoiceInputFlow _voiceFlow;
     private readonly VoiceInputPanel _voicePanel;
+    private readonly OperationProgressController _operationProgress;
+    private readonly System.Windows.Threading.DispatcherTimer _operationProgressTimer;
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
     private readonly ReloadableAnalyzer _analyzer;
@@ -164,6 +166,10 @@ public partial class MainWindow : Window
         _captureConfiguration = eyeOptions.Eye == OpenVrEye.Left
             ? "キャプチャ: SteamVR左眼を優先 / ウィンドウ自動フォールバック"
             : "キャプチャ: SteamVR右眼を優先 / ウィンドウ自動フォールバック";
+        _operationProgress = new OperationProgressController(_execution, _steamVrResultPanel);
+        _operationProgressTimer = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(200), System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => _operationProgress.Refresh(), Dispatcher);
         _renderer = new CompositeResultRenderer(
             new WpfResultRenderer(
                 Dispatcher,
@@ -176,7 +182,8 @@ public partial class MainWindow : Window
                 _xsOverlayNotificationSink,
                 _logger,
                 _execution.IsCurrent,
-                _execution),
+                _execution,
+                _operationProgress),
             new XsOverlayNotificationRenderer(_xsOverlayNotificationSink, _execution.IsCurrent));
         _vrChatPipeline = new ScanPipeline(
             new FallbackCaptureSource(
@@ -197,6 +204,7 @@ public partial class MainWindow : Window
             _usageQuotas.Voice, () => _usageSettings.VoiceInput);
         VoiceInputHost.Content = _voicePanel;
         _voiceFlow.Changed += VoiceFlow_Changed;
+        _operationProgress.AttachVoice(_voiceFlow);
 
         InitializeModelSelector();
         InitializeResultPanelPlacementControls();
@@ -532,8 +540,7 @@ public partial class MainWindow : Window
 
     private void CancelButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (_voiceFlow.IsCurrent) { _voiceFlow.Cancel(); }
-        else { _execution.CancelCurrentOperation(); }
+        if (!_operationProgress.CancelActive()) { _execution.CancelCurrentOperation(); }
         StatusText.Text = "中止中です。処理とリソースの回収を待っています。";
         CancelButton.IsEnabled = false;
     }
@@ -1134,6 +1141,8 @@ public partial class MainWindow : Window
             operation.ThrowIfNotCurrent();
             await _voiceFlow.CloseAsync();
             operation.ThrowIfNotCurrent();
+            _operationProgress.BeginScan(operation,
+                () => RunPipelineAsync(pipeline, request.TriggerName, preCaptureDelay));
             if (!TryReloadUsageSettings(operation))
             {
                 await _renderer.RenderOutcomeAsync(
@@ -1149,13 +1158,13 @@ public partial class MainWindow : Window
 
             if (preCaptureDelay > TimeSpan.Zero)
             {
-                _ = _steamVrResultPanel.TryShowStatus(ResultPanelTexture.WaitingCell);
+                _operationProgress.ShowScanNotice("SCANを受け付けました。Action Menuを閉じてください。");
                 StatusText.Text = "SCANを受け付けました。Action Menuを閉じてください。";
                 DetailText.Text = "段階: Trigger / OSCメニュー消去待ち";
                 await Task.Delay(preCaptureDelay, operation.CancellationToken);
                 operation.ThrowIfNotCurrent();
 
-                _steamVrResultPanel.ShowStatus(ResultPanelTexture.CapturingCell);
+                _operationProgress.ShowScanNotice("撮影を開始します。表示を消して画面を取得します。");
                 StatusText.Text = "撮影を開始します。";
                 DetailText.Text = "段階: Capture / 撮影開始";
                 await Task.Delay(CaptureNoticeDuration, operation.CancellationToken);
@@ -1177,8 +1186,6 @@ public partial class MainWindow : Window
                 {
                     if (!operation.IsCurrent)
                     {
-                        _steamVrResultPanel.Hide();
-                        _steamVrResultPanel.ReturnToLauncher();
                         StatusText.Text = "SCANをキャンセルしました。";
                     }
 
@@ -1195,6 +1202,7 @@ public partial class MainWindow : Window
 
                 // Release last, after adapter/frame cleanup and UI restoration.
                 operation.Dispose();
+                if (!_closed) { _operationProgress.CompleteScan(operation); }
             }
         }
     }
@@ -1267,6 +1275,8 @@ public partial class MainWindow : Window
 
         // Keep the dispatcher alive while active capture/adapters return their ownership.
         _closed = true;
+        _operationProgressTimer.Stop();
+        _operationProgress.Dispose();
         _execution.Stop();
         _windowLifetimeCancellation.Cancel();
         Task voiceCleanup = _voiceFlow.DisposeAsync().AsTask();
@@ -1369,7 +1379,7 @@ public partial class MainWindow : Window
     {
         // Only a previously established connection emits this event. A desktop-only
         // session never requires SteamVR, and can explicitly restart after a loss.
-        await _voiceFlow.CloseAsync();
+        await _operationProgress.ConnectionLostAsync();
     }
 
     private void VoiceFlow_Changed(object? sender, EventArgs eventArgs)

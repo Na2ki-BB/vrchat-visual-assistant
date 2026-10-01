@@ -151,11 +151,21 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 ### J3 WPF integration status — 2026-10-01
 
-`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、VR UIはL1/L2まで追加しない。
+`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、腕マイク・VR認識文/候補はL2まで追加しない。
 
 成功時は音声を破棄してから全文表示し、失敗時のみJ1の非更新期限内で手動再送する。設定/client交換後もMainWindow所有の音声quotaを共有する。中止・閉じる・録り直し・新SCAN・終了・接続済みSteamVRの喪失は旧音声/文を破棄し、後処理後までgateを保持する。SteamVRが最初から無い状態ではデスクトップ音声を妨げない。native cleanup失敗は型付き停止/終了案内を表示する。fakeマイク/HTTP/時計およびWPF dispatcherの回帰で境界を検証するが、Windows実マイク・有料API・Questの受入は未実施である。
 
 以下のapproved-design節の未実装表現は段階導入時点の記録であり、WPF接続の現在状態はこの節とTASKSを優先する。
+
+### L1 shared interactive progress integration — 2026-10-01
+
+`OperationProgressController`が同じ`VoiceInputFlow`と`ExecutionCoordinator`を参照し、録音残り秒/停止/中止、文字起こし、取消回収中、型付き失敗と明示再試行を既存`SteamVrResultPanel`へ表示する。翻訳rendererもこの共通制御へ接続する。失敗音声の再送はJ3のlease/期限/quotaを使い、録音失敗の録り直しは同意/資格情報を再検証して新sessionを開始する。翻訳の「再SCAN」は取得から再実行することを画面で説明し、認証/上限/設定/解放不能には無効な再試行を示す。自動再試行・別providerへのfallbackは追加しない。
+
+進捗/失敗画面は別overlayを増やさず、既存結果overlayのfull 1280×720 upload/`ImageLoaded`/full-view/hit-testを使う。表示とhit-testは同じ4つのbody rail矩形を列挙し、disabled領域を明示する。headerは表示専用。uploadをまたぐ押しっぱなしはactivation gateをresetして拒否する。priority-zero/全surface mask/native intersection位置のcursor/歩行の非干渉とruntime lease所有は変更しない。
+
+capture中はcontrollerのVR表示更新を抑制し、既存overlay gateのhide/boundary/discard/adopt順序に従う。WPF中止は残し、owner回収後にのみ操作を再開する。各actionは描画snapshotと現在のsession/operation/stateを再照合し、旧失敗のretry/closeで新操作を変更しない。接続済みSteamVRの喪失は音声/SCANを取り消し、再接続を同期的に誘発せず回収する。終了はtimer/表示callbackを停止してから既存の回収待ちへ渡す。
+
+L1のfake/境界testsは画面の寸法と制御契約を検証するだけで、新画面のQuest実機可読性・歩行・実マイク/APIの成功を示さない。腕マイク/認識文/候補カードはL2、現在buildの実機/実サービス受入はL2/L3に未完了で残す。
 
 ### Responsibility and entry point
 

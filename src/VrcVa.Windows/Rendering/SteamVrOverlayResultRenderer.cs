@@ -17,6 +17,7 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     private Guid _displayedOperationId;
     private Guid _displayedSessionId;
     private readonly ExecutionCoordinator? _execution;
+    private readonly OperationProgressController? _progress;
 
     public SteamVrOverlayResultRenderer(
         Dispatcher dispatcher,
@@ -24,7 +25,8 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
         IXsOverlayNotificationSink fallbackNotificationSink,
         IPrivacySafeLogger logger,
         Func<Guid, bool>? canRender = null,
-        ExecutionCoordinator? execution = null)
+        ExecutionCoordinator? execution = null,
+        OperationProgressController? progress = null)
     {
         _dispatcher = dispatcher;
         _panel = panel;
@@ -32,6 +34,7 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
         _logger = logger;
         _canRender = canRender;
         _execution = execution;
+        _progress = progress;
         _panel.DisplayFailed += Panel_DisplayFailed;
     }
 
@@ -39,6 +42,14 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
         ScanProgress progress,
         CancellationToken cancellationToken)
     {
+        if (_progress is not null)
+        {
+            await InvokeAsync(() =>
+            {
+                if (CanRender(progress.CorrelationId, cancellationToken)) { _progress.RenderProgress(progress); }
+            }, DispatcherPriority.Normal);
+            return;
+        }
         if (progress.Stage == ScanStage.Trigger || progress.Stage == ScanStage.Capture)
         {
             await InvokeAsync(() =>
@@ -66,6 +77,14 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
         ScanOutcome outcome,
         CancellationToken cancellationToken)
     {
+        if (_progress is not null)
+        {
+            await InvokeAsync(() =>
+            {
+                if (CanRender(outcome.CorrelationId, cancellationToken)) { _progress.RenderOutcome(outcome); }
+            }, DispatcherPriority.Normal);
+            if (!outcome.IsSuccess || outcome.Result is null) { return; }
+        }
         if (!outcome.IsSuccess || outcome.Result is null)
         {
             await InvokeAsync(
