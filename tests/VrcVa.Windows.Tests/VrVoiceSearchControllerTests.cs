@@ -7,6 +7,29 @@ namespace VrcVa.Windows.Tests;
 
 public sealed class VrVoiceSearchControllerTests
 {
+    [Fact]
+    public async Task FixtureProgressCallbacksAndContinuations_UseTheSameSerializedOwner()
+    {
+        await VrFlowTestThread.RunAsync(async () =>
+        {
+            SynchronizationContext? ownerContext = SynchronizationContext.Current;
+            TaskScheduler ownerScheduler = TaskScheduler.Current;
+            TaskCompletionSource<(SynchronizationContext? Context, TaskScheduler Scheduler)> called =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+            IProgress<int> progress = new Progress<int>(_ =>
+                called.SetResult((SynchronizationContext.Current, TaskScheduler.Current)));
+            progress.Report(1);
+            Assert.False(called.Task.IsCompleted); // Post must queue, never run inline or concurrently.
+            var callback = await called.Task;
+            Assert.NotNull(ownerContext);
+            Assert.Same(ownerContext, callback.Context);
+            Assert.Same(ownerScheduler, callback.Scheduler);
+            await Task.Yield();
+            Assert.Same(ownerContext, SynchronizationContext.Current);
+            Assert.Same(ownerScheduler, TaskScheduler.Current);
+        });
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -307,16 +330,40 @@ internal sealed class VrSearchView : IVrVoiceSearchView, IOperationProgressView
 
 internal static class VrFlowTestThread
 {
-    // These presentation flows are dispatcher-owned. Serialize all test continuations
-    // like that dispatcher, without opening a Window or depending on a Windows UI loop.
+    // These presentation flows are dispatcher-owned. TaskScheduler alone does not
+    // capture Progress<T>: it needs a SynchronizationContext or posts to ThreadPool.
+    // Route both progress and await continuations through the same serialized owner.
     public static async Task RunAsync(Func<Task> body)
     {
         ConcurrentExclusiveSchedulerPair scheduler = new(TaskScheduler.Default, maxConcurrencyLevel: 1);
         try
         {
-            await Task.Factory.StartNew(body, CancellationToken.None, TaskCreationOptions.None,
-                scheduler.ExclusiveScheduler).Unwrap();
+            await Task.Factory.StartNew(async () =>
+            {
+                SynchronizationContext? previous = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(new FlowSynchronizationContext(scheduler.ExclusiveScheduler));
+                try { await body(); }
+                finally { SynchronizationContext.SetSynchronizationContext(previous); }
+            }, CancellationToken.None, TaskCreationOptions.None, scheduler.ExclusiveScheduler).Unwrap();
         }
-        finally { scheduler.Complete(); }
+        finally
+        {
+            scheduler.Complete();
+            await scheduler.Completion;
+        }
+    }
+
+    private sealed class FlowSynchronizationContext(TaskScheduler scheduler) : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            _ = Task.Factory.StartNew(() =>
+            {
+                SynchronizationContext? previous = Current;
+                SetSynchronizationContext(this);
+                try { callback(state); }
+                finally { SetSynchronizationContext(previous); }
+            }, CancellationToken.None, TaskCreationOptions.None, scheduler);
+        }
     }
 }
