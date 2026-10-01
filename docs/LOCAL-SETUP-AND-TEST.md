@@ -154,9 +154,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -
 
 ## 確認済みと未確認
 
-**2026-10-01時点の実装基準:** [`f8c5da1babcef2b547dd778ab807d31d72147f23`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/f8c5da1babcef2b547dd778ab807d31d72147f23)。[mainのWindows CI104](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36908642593) でRelease buildはwarnings/errors 0、単体テスト1,445件と独立cold shutdownチェック3件が成功しました。クラウドでのソース準備・自動検証であり、本人のPCへ導入済みという意味ではありません。詳しい証拠と過去の実機履歴は [TASKSの検証記録](../TASKS.md#l3-verification-evidence--2026-10-01) を残しています。
+**2026-10-01時点の実装基準:** [`f8c5da1babcef2b547dd778ab807d31d72147f23`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/f8c5da1babcef2b547dd778ab807d31d72147f23)。[mainのWindows CI104](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36908642593) でRelease buildはwarnings/errors 0、単体テスト1,445件と独立cold shutdownチェック3件が成功しました。これはクラウドでのソース準備・自動検証の範囲です。詳しい証拠と過去の実機履歴は [TASKSの検証記録](../TASKS.md#l3-verification-evidence--2026-10-01) を残しています。
 
-**現行版で未確認:** ローカルPCへの取得・Windowsビルド/publish、実マイク、実OpenAI API、固定yt-dlpでの実YouTube検索・サムネイル・実clipboard、Quest 3Sの新しい音声/候補パネル操作とワールドでの手動貼り付け・再生。過去の翻訳用ビルドの実機成功を、これらの成功として流用しません。
+**ローカルPCで確認済み（2026-10-02 JST / 2026-10-01 UTC）:** 同commitで次を確認しました。
+
+- ソース取得、Windows Release build（warnings/errors 0）、単体テスト1,445件の全成功
+- `scripts\publish-beta.ps1` による自己完結ZIPの作成、自己完結版exeの最小化起動と準備完了
+- SteamVRへの接続とパネル初期化、`en-US` OCR認識器が利用可能であること。ヘッドセット内の可読性・クリックや実看板のOCR精度は別確認
+- 固定yt-dlp **2026.08.19** の配置、公式asset digest・公式SHA一覧・実ファイルSHA256の一致、実行ファイルのversion一致。検索はまだ行っていない
+- 旧ソースを残し、既存設定のhashを維持したまま復元用backupを作成
+
+準備中に実録音・実API送信は行っていません。起動・初期化の成功を実サービスやヘッドセット内操作の受入成功へ広げません。
+
+**現行版で未確認:** 実マイク・実OpenAI API、固定yt-dlpでの実YouTube検索・サムネイル・実clipboard、Quest 3Sの新しい音声/候補パネルの可読性・操作・歩行維持、ワールドでの手動貼り付け・再生。過去の翻訳用ビルドの実機成功を、これらの成功として流用しません。
 
 実機確認後は、内容を保存せず次だけ追記します。
 
