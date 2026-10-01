@@ -39,7 +39,7 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - VRChatへのDLL注入、ファイル改変、メモリ読み取り、非公開API利用は行いません。
 - OSCトリガーを有効にすると、Windows DNS-SDの制約により動的ポートはネットワークインターフェース上へ登録されますが、VRCVAはこのPC自身のアドレスから来たOSC/OSCQueryだけを処理し、他端末からの接続は応答前に拒否します。OSCの送信先としてVRChatへ返す値も`127.0.0.1`です。自動検出用DNS-SD広告はサービス名とポートをLAN内へ通知しますが、画像、OCR本文、アバターIDは含めません。
 
-詳細は [DESIGN.md](DESIGN.md) の「Security, privacy, and public-repository policy」を参照してください。
+詳細は [共通AI基盤設計のプライバシー規則](docs/DESIGN-PLATFORM.md#security-privacy-and-public-repository-policy)と[日本語翻訳機能の外部送信・利用制限](docs/DESIGN-JAPANESE-TRANSLATION.md#translation)を参照してください。
 
 ## 費用
 
@@ -470,7 +470,9 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 ## 設計とロードマップ
 
-- [DESIGN.md](DESIGN.md): 課題、方式比較、アーキテクチャ、プライバシー、将来拡張
+- [DESIGN.md](DESIGN.md): 設計の入口と、変更内容に応じた参照先
+- [共通AI基盤設計](docs/DESIGN-PLATFORM.md): 腕メニュー、入力・結果表示、機能追加、共通通信、プライバシー、検証履歴
+- [日本語翻訳機能設計](docs/DESIGN-JAPANESE-TRANSLATION.md): 画面取得、OCR、任意の日本語翻訳、費用・制約、実測値
 - [TASKS.md](TASKS.md): 実装順、成功条件、実機テスト、OSC/OpenVR以降のタスク
 - [AI開発ハーネス設定](docs/AI-HARNESS-SETUP.md): リポジトリ内に準備したSkillを、必要な場合だけ手動で設定する方法。自動導入は行いません
 

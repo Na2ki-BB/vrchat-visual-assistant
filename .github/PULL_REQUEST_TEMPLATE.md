@@ -9,7 +9,7 @@ Describe the user-visible outcome and the smallest vertical slice changed.
 - [ ] Relevant manual/fixture test was run
 - [ ] No API keys, `.env`, captures, logs, dumps, or user/world identifiers are included
 - [ ] Logs still omit OCR and translation contents
-- [ ] `DESIGN.md`, `TASKS.md`, or `README.md` was updated if behavior/decisions changed
+- [ ] The relevant design (`docs/DESIGN-PLATFORM.md` or `docs/DESIGN-JAPANESE-TRANSLATION.md`), `TASKS.md`, or `README.md` was updated if behavior/decisions changed; `DESIGN.md` navigation remains consistent
 
 ## Data boundary
 

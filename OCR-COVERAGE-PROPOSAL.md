@@ -93,7 +93,7 @@ EnhancementThreshold = 80   // 行 7
 
 ## 4. コスト分析
 
-以下の時間と画素数は提案作成時の旧実装を1920×1080で見積もった記録です。現行のOpenVRアイミラーと適応スケールの実測値は`DESIGN.md`を正とします。
+以下の時間と画素数は提案作成時の旧実装を1920×1080で見積もった記録です。現行のOpenVRアイミラーと適応スケールの実測値は[日本語翻訳機能設計のStage 2記録](docs/DESIGN-JAPANESE-TRANSLATION.md#stage-2-capture-backend-and-adaptive-ocr-scaling-2026-08-12)を正とします。
 
 ### 4.1 処理コスト（1920×1080 想定・見積もり）
 
@@ -236,11 +236,11 @@ EnhancementThreshold = 80   // 行 7
 
 ## 9. 制約事項
 
-`CONTRIBUTING.md` と `DESIGN.md` の既存ルールに従ってください。特に:
+[CONTRIBUTING.md](CONTRIBUTING.md)、[共通AI基盤設計](docs/DESIGN-PLATFORM.md)、[日本語翻訳機能設計](docs/DESIGN-JAPANESE-TRANSLATION.md)の既存ルールに従ってください。特に:
 
-- **WSL / Linux では検証不可。** WinRT OCR・Windows Graphics Capture・WPF・グローバルホットキーは Windows 実機での実行が必須です（`DESIGN.md:33-36`）。`scripts\build.ps1` および `scripts\test-capture.ps1` を Windows で実行してください
+- **WSL / Linux では検証不可。** WinRT OCR・Windows Graphics Capture・WPF・グローバルホットキーは Windows 実機での実行が必須です（[WSL / Windows boundary](docs/DESIGN-PLATFORM.md#wsl--windows-boundary)）。`scripts\build.ps1` および `scripts\test-capture.ps1` を Windows で実行してください
 - **`VrcVa.Core` はプラットフォーム非依存を維持すること。** WinRT の型を `Core` に持ち込まないでください
-- **画像・OCR テキスト・翻訳結果・シークレットをログに出力しないこと**（`DESIGN.md:226`）。テストを通すために入出力内容をログに出すことは禁止されています
+- **画像・OCR テキスト・翻訳結果・シークレットをログに出力しないこと**（[Security, privacy, and public-repository policy](docs/DESIGN-PLATFORM.md#security-privacy-and-public-repository-policy)）。テストを通すために入出力内容をログに出すことは禁止されています
 - **`provider = none` のとき OCR テキストが PC 外に出ない**というプライバシー境界を壊さないこと
 - 変更は `Trigger → Capture → Analyzer → Result → Renderer` のフローを保つ小さな垂直変更に留めること
 - 実 API キーやネットワーク実接続のテストを追加しないこと。`HttpMessageHandler` のフェイクを使用すること

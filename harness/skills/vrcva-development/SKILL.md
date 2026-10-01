@@ -9,7 +9,7 @@ Use this workflow for every VRCVA change.
 
 ## 1. Establish the change
 
-1. Follow the active session instructions. If the repository contains an `AGENTS.md`, read it; its absence is not a blocker. Inspect `README.md`, `DESIGN.md`, `TASKS.md`, and the relevant code before proposing behavior.
+1. Follow the active session instructions. If the repository contains an `AGENTS.md`, read it; its absence is not a blocker. Inspect `README.md`, the `DESIGN.md` entry point, the relevant `docs/DESIGN-PLATFORM.md` and/or `docs/DESIGN-JAPANESE-TRANSLATION.md`, `TASKS.md`, and the relevant code before proposing behavior. The foundation owns shared UI/input, feature registration, transport, and privacy; the translation design owns concrete capture/OCR, Japanese output, costs, and feature measurements. Paths are relative to the repository root, including when this skill is copied elsewhere.
 2. State the outcome, non-goals, affected files, and validation plan before a multi-file or uncertain change.
 3. Keep product behavior, magic numbers, thresholds, and compatibility workarounds in production code with focused tests; do not encode them in this skill.
 4. Read [source-of-truth.md](references/source-of-truth.md) before changing OpenVR interop, atlas-backed UI/hit testing, placement, capture sequencing, or persisted settings.

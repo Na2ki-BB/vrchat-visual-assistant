@@ -2,6 +2,8 @@
 
 This repository keeps its VRCVA development skill at `harness/skills/vrcva-development`. It is not installed automatically and does not change any personal Codex settings.
 
+The skill reads the repository's [design entry point](../DESIGN.md), [shared foundation design](DESIGN-PLATFORM.md), and [Japanese translation design](DESIGN-JAPANESE-TRANSLATION.md) according to the affected responsibility. These documents retain the original decisions and measurement history; the split does not enable another runtime feature.
+
 To make it discoverable in the current personal Codex skill directory, choose one manual method after reviewing the files:
 
 ```bash

@@ -15,7 +15,7 @@ Delete the branch once it merges.
 
 ## Before committing
 
-1. Read `DESIGN.md` and choose the existing component boundary.
+1. Read [DESIGN.md](DESIGN.md), then the relevant [foundation](docs/DESIGN-PLATFORM.md) or [Japanese translation](docs/DESIGN-JAPANESE-TRANSLATION.md) design, and choose the existing component boundary.
 2. Run `scripts\build.ps1` on Windows.
 3. Run `scripts\test-capture.ps1` for capture/OCR changes when VRChat itself is closed.
 4. Inspect staged files for secrets, captures, logs, dumps, user/world identifiers, and generated output.

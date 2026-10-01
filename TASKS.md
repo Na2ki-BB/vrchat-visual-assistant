@@ -2,6 +2,8 @@
 
 Status legend: `[x]` complete, `[>]` in progress, `[ ]` pending, `[-]` deliberately deferred.
 
+Design entry point: [DESIGN.md](DESIGN.md). Shared UI/input, feature registration, transport, privacy, and development rules belong to [the foundation design](docs/DESIGN-PLATFORM.md); capture, OCR, Japanese translation, feature costs, and measurement history belong to [the translation design](docs/DESIGN-JAPANESE-TRANSLATION.md). This split does not change the completion or device-validation status below.
+
 ## Milestone 0 — Research and decisions
 
 - [x] Inventory repository, OS, WSL, Windows interop, installed SDKs, GPU, VRChat, SteamVR, and GitHub CLI.
@@ -11,7 +13,7 @@ Status legend: `[x]` complete, `[>]` in progress, `[ ]` pending, `[-]` deliberat
 - [x] Review official Valve OpenVR/SteamVR overlay and input documentation.
 - [x] Review local and cloud OCR alternatives and OpenAI Responses API/model guidance.
 - [x] Compare C#, C++, Rust/Python/TypeScript approaches.
-- [x] Record architecture, privacy boundary, MVP scope, exclusions, and phased delivery in `DESIGN.md`.
+- [x] Record architecture, privacy boundary, MVP scope, exclusions, and phased delivery; [DESIGN.md](DESIGN.md) now routes to the shared foundation and Japanese translation designs, preserving the original decisions and evidence.
 
 Exit: a reviewer can explain why the MVP uses an external C# Windows app, local OCR, text-only translation, desktop UI, and a global hotkey.
 

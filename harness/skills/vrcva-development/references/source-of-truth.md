@@ -5,7 +5,9 @@ Read only the sections relevant to the requested change.
 | Concern | Primary source | Verification companion |
 | --- | --- | --- |
 | Project rules and authority | Active session and current task instructions | Repository `AGENTS.md` when present |
-| Product decisions and measurement history | `DESIGN.md` | `README.md` user-facing behavior |
+| Design navigation and document ownership | `DESIGN.md` | `README.md` design links |
+| Shared platform, UI/input, feature/backend decisions and device history | `docs/DESIGN-PLATFORM.md` | `README.md` user-facing behavior; `TASKS.md` incomplete gates |
+| Concrete capture/OCR, Japanese translation, costs and measurements | `docs/DESIGN-JAPANESE-TRANSLATION.md` | `OCR-COVERAGE-PROPOSAL.md`; `TASKS.md` feature work |
 | App composition and lifecycle | `src/VrcVa.Windows/MainWindow.xaml.cs`, `src/VrcVa.Windows/App.xaml.cs` | Windows test project |
 | OpenVR runtime, ABI, and overlay ownership | `src/VrcVa.Windows/OpenVr/OpenVrRuntime.cs`, `src/VrcVa.Windows/OpenVr/OpenVrInterop.cs` | Matching Valve OpenVR header and OpenVR-focused tests |
 | Placement and coordinates | `src/VrcVa.Windows/OpenVr/ResultPanelPlacement.cs`, `src/VrcVa.Windows/OpenVr/WristLauncherPlacement.cs`, `src/VrcVa.Windows/OpenVr/OpenVrInterop.cs` | Placement and settings-store tests plus headset validation |
