@@ -10,9 +10,9 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 共通の音声入力で得た文章からYouTube動画を検索し、小さなサムネイルとタイトルで候補を選び、URLをWindowsクリップボードへコピーする。ワールドの動画プレイヤーへの貼り付けは本人が行う。
 
-2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界を具体化したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
+2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
 
-録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の純粋な設定/音声形式契約以外の機能コードは未実装とする。
+録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約とI2のtyped入力経路以外の機能コードは未実装とする。
 
 ## Problem and accepted flow
 
@@ -24,10 +24,10 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 
 ## Current baseline and required changes
 
-| 現行コードの確認 | 必要な差分（未実装） |
+| 現行コードの確認 | 残る差分 |
 | --- | --- |
-| `FeatureInputKind` は `CapturedFrame` だけで、`FeatureEntry` は `IAnalyzer` を持つ | 共通認識文を受けるテキスト入力とhandlerを最小限追加する |
-| `ScanPipeline` は機能解決後に必ずcaptureする | 画像/テキスト経路を分け、動画検索でcapture/OCRしない |
+| I2で `CapturedFrame` / `Text` と `IAnalyzer` / `ITextFeatureHandler` を分離 | 共通認識文を返す音声adapterと公開入口はJ1〜J3/K5で接続する |
+| I2のテキスト経路はcapture/OCRを0回にし、画像翻訳は従来経路を維持 | 動画検索handler/providerはK1〜K3で追加する |
 | `ScanPipeline._isRunning` と `_uiScanRunning` はSCAN経路の制御 | 録音・検索・コピー・翻訳をまたぐアプリ単位のsingle-flightへ接続する |
 | VRのstatus atlasは非操作、失敗経路は腕へ戻る | 操作できる共通進捗/失敗画面に中止・やり直しを設ける |
 | `FeatureResult` はテキストセクション中心 | 候補ID・title・thumbnail・検証済みURLを対応づける型付き候補と選択actionを追加する |
@@ -178,7 +178,7 @@ I1でadapter/設定境界を以下のとおり具体化した。承認済みの�
 - **process（K2）**: 上記固定optionsへ `--no-js-runtimes --no-remote-components --no-update --socket-timeout 10 --retries 0 --extractor-retries 0` を加え、固定版READMEとfake引数で検証する。shellなし、検索語は `--` 後の1引数、全体timeout 30秒、stdout 1 MiB / stderr 64 KiBを別に並列で上限制御する。超過/取消/timeoutはprocess treeをkillして終了/pipe回収を待ち、後処理timeoutは5秒で別失敗にし、終了未確認ならgateを解放せず新処理を拒否する。stdout/stderrをログや一般例外本文へ流さない。実サービスで機能不足なら失敗を見せ、外部JS runtime/remote component/ffmpegを黙って導入しない
 - **metadata/URL（K1/K2）**: titleは非空のプレーンテキスト4,000 UTF-8 byteまで、動画IDはASCII `[A-Za-z0-9_-]{11}`。IDだけでも正規watch URLを作り、provider URLがある場合はHTTPSの `www.youtube.com/watch?v=...` / `youtube.com/watch?v=...` / `youtu.be/<id>` のみ受け付け、userinfo/非既定port/余分なpath/fragment、重複v、別IDを拒否する。不要なqueryはコピーへ引き継がず、`https://www.youtube.com/watch?v=<id>` に正規化する。entry配列と各fieldを検証し、無効/重複候補は除外、正常0件と全件不正を区別する
 - **thumbnail（K4）**: HTTPSかつhostが厳密に `i.ytimg.com` / `img.youtube.com`、port 443のみ。userinfo/fragment、redirect、他hostを拒否する。資格情報/cookieなしの専用HttpClient、1枚timeout 5秒、encoded body 512 KiB、JPEG/PNG/WebPの静止1frameのみ、画像1辺1,024 px以下・合計1,048,576 pixel以下、decoded RGBA 4 MiB以下、memoryだけへdecodeする。decoder非対応/不足/失敗はplaceholderにし、タイトル/選択を維持する。URL suffixやContent-Typeだけで画像と信頼しない。自動redirectを無効にし、encoded sizeとdecode前寸法の両方を検証する
-- **基盤型/UI（I2/I3/K1/K5/L1）**: 画像の `IAnalyzer` は維持し、text専用handlerを追加する。認識文session、処理operation、typed候補IDの所有は共通側へ分け、具体クラス名は対応PRで最小限に決める。最終寸法/長文/title/サムネイルの描画とWPF/VRの同一状態反映はK5/L1/L2へ残す
+- **基盤型/UI（I2/I3/K1/K5/L1）**: I2で画像の `IAnalyzer` を維持し、`ITextFeatureHandler` / `TextInputSession` と不変の認識文を追加した。処理operation/世代管理はI3、typed候補ID/選択actionはK1へ残す。最終寸法/長文/title/サムネイルの描画とWPF/VRの同一状態反映はK5/L1/L2へ残す
 - **実機/実サービス（L2/L3）**: Windows + SteamVR + QuestでのVRChatミュート時録音、歩行、カード操作、clipboard、遅延/負荷、固定版yt-dlp実検索・thumbnail互換、API精度/価格/保持条件を別に確認する。I1の純粋な契約テストでこれらを合格扱いにしない
 
 個人利用に必要な範囲へ絞る。動的plugin、汎用tool実行、エージェントloop、追加の手続書は含めない。実装タスクは既存の [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) で管理し、別の一覧は増やさない。

@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Added: 2026-10-01. **I1のadapter/設定境界を具体化し、純粋な設定/音声形式契約を追加。I2以降は未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。マイク/通信/公開画面/実quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
+Added: 2026-10-01. **I1の設定/音声形式契約と、I2の画像/テキスト分岐・不変の認識文sessionを追加。I3以降は未着手**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。マイク/通信/公開画面/実quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -345,9 +345,10 @@ Added: 2026-10-01. **I1のadapter/設定境界を具体化し、純粋な設定/
   - 確認: 設計の「Remaining implementation decisions」の各項目が後続タスクへ対応する。既決定の操作を選び直さず、画面寸法の最終調整と性能/精度はL2/L3へ残す。
   - 2026-10-01実装: `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` の初期値・個別値域・PCM容量・要求ごとの秒数切上げを追加。基盤/動画検索設計へadapter判断と後続タスクを対応付けた。設定保存・既存翻訳hard cap変更・消費カウンター・録音/外部通信/UIの接続はこの変更に含めない。Linux .NET 8.0.422でsolution Release cross-build、Core 96件/Infrastructure 24件の回帰が通過。独立レビューでblocking指摘なし。Windows testsはLinuxにWindowsDesktop runtimeがないためCIで別確認し、実マイク/API/Questの受入は未実施。全体formatには既存Windowsファイル5件の違反があり、この変更のC#4ファイルのtargeted formatは通過。
 
-- [ ] **I2 — 画像とテキストの入力経路を分ける**（依存: I1）
+- [x] **I2 — 画像とテキストの入力経路を分ける**（依存: I1）
   - 範囲: `Features.cs` / `Contracts.cs` / `Models.cs` / `ScanPipeline`に最小のtext handler境界を追加。認識文は共通sessionに保持し、用途の検索語とは分離する。音声/検索テキストの送信先を説明できるdata boundaryを加える。候補型/選択actionはK1で追加する。
   - 確認: fakeテキスト機能はcapture/OCRを0回、画像翻訳は従来経路を1回通る。入力種別不一致・未知IDを実処理前に拒否。翻訳primary section/互換表示、OCR-onlyの外部通信0回、未登録要約を維持する。
+  - 2026-10-01実装: `ITextFeatureHandler` / `TextInputSession` / `ScanRequest.CreateText` とtyped routingを追加。本文は4,000 UTF-8 byte以内で原文保持、検索語で上書きしない。音声/OpenAI、入力text/OpenAI、検索語/YouTubeのmetadataを区別し、fakeのcancel/失敗・既存single-flight・内容を残さないlogを検証。Windows composition rootへtext機能は未登録で、マイク/通信/UI/アプリ共通gateは未接続。実機/実APIの証拠は追加しない。Linux .NET 8.0.422でsolution Release cross-buildは0 warnings/errors、Core 121件/Infrastructure 26件の回帰と変更C#8ファイルのtargeted formatが通過。全体formatは既存Windows5ファイルの違反とLinuxのWindows参照読込みwarningを残す。独立レビューでcanonical source sectionより前にある補助sectionが上書きされる既存adapterの問題を見つけ、明示source IDを優先する修正と統合回帰を追加。Windows全testsはCIで別確認する。
 
 - [ ] **I3 — 全入口のsingle-flightと世代管理を共通化する**（依存: I2）
   - 範囲: `ScanPipeline._isRunning`と`MainWindow._uiScanRunning`の役割を整理し、アプリ寿命の共通gateへ既存SCAN全入口を接続。録音から文字起こし完了までを1処理、検索/コピーを個別処理とし、認識文/候補の待機中は解放する。session/operation、取消、後処理完了後の解放を共通化する。

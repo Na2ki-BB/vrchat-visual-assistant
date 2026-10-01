@@ -10,6 +10,7 @@ public enum ScanStage
     Translation,
     Rendering,
     Completed,
+    TextHandling,
 }
 
 public enum ScanFailureCode
@@ -29,6 +30,7 @@ public enum ScanFailureCode
     TranslationFailed,
     Cancelled,
     Unexpected,
+    InputKindMismatch,
 }
 
 public sealed record ScanRequest(
@@ -38,6 +40,12 @@ public sealed record ScanRequest(
 {
     public FeatureId FeatureId { get; init; } = FeatureIds.Translation;
 
+    public TextInputSession? TextInput { get; init; }
+
+    public FeatureInputKind InputKind => TextInput is null
+        ? FeatureInputKind.CapturedFrame
+        : FeatureInputKind.Text;
+
     public static ScanRequest Create(string triggerName) =>
         new(Guid.NewGuid(), DateTimeOffset.UtcNow, triggerName);
 
@@ -46,6 +54,16 @@ public sealed record ScanRequest(
         {
             FeatureId = featureId,
         };
+
+    public static ScanRequest CreateText(
+        string triggerName,
+        FeatureId featureId,
+        TextInputSession input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        return Create(triggerName, featureId) with { TextInput = input };
+    }
 }
 
 public sealed class CapturedFrame : IDisposable
@@ -398,13 +416,21 @@ public sealed record AnalysisResult(
                 CaptureSourceKind);
         }
 
-        int firstSupportingIndex = -1;
+        int sourceSectionIndex = -1;
         for (int index = 0; index < _canonicalResult.Sections.Count; index++)
         {
-            if (!_canonicalResult.Sections[index].IsPrimary)
+            if (string.Equals(
+                _canonicalResult.Sections[index].Id,
+                TranslationResultSectionIds.SourceText,
+                StringComparison.Ordinal))
             {
-                firstSupportingIndex = index;
+                sourceSectionIndex = index;
                 break;
+            }
+
+            if (sourceSectionIndex < 0 && !_canonicalResult.Sections[index].IsPrimary)
+            {
+                sourceSectionIndex = index;
             }
         }
 
@@ -421,7 +447,7 @@ public sealed record AnalysisResult(
                     ? translationPrimaryIsSource
                         ? SourceText
                         : JapaneseText
-                    : index == firstSupportingIndex
+                    : index == sourceSectionIndex
                         ? SourceText
                         : section.Text,
                 section.Role))
