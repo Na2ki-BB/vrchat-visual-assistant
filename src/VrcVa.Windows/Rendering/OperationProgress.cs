@@ -214,7 +214,8 @@ internal sealed class OperationProgressController : IDisposable
         }
         if (!_voiceView || _voice is null) { return null; }
         VoiceInputFlow voice = _voice;
-        if (!voice.IsCurrent && voice.State != VoiceFlowState.Failed) { return null; }
+        if (!voice.IsCurrent && !(voice.State == VoiceFlowState.Failed
+            && (voice.SessionId == Guid.Empty || voice.RequiresRestart))) { return null; }
         return voice.State switch
         {
             VoiceFlowState.Recording => new(voice.SessionId, _execution.CurrentOperationId,

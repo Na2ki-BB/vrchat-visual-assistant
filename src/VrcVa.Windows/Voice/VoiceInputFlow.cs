@@ -46,7 +46,7 @@ internal sealed class VoiceInputFlow : IAsyncDisposable
         && _transcriptionFailure is not (ScanFailureCode.VoiceAuthenticationFailed
             or ScanFailureCode.VoiceUsageLimitReached or ScanFailureCode.VoiceTranscriptionNotConfigured
             or ScanFailureCode.VoiceInputDisabled or ScanFailureCode.VoiceAudioInvalid or ScanFailureCode.VoiceAudioTooLarge);
-    internal bool CanRestartRecording => State == VoiceFlowState.Failed && !_execution.IsRunning
+    internal bool CanRestartRecording => IsCurrent && State == VoiceFlowState.Failed && !_execution.IsRunning
         && !RequiresRestart && _recordingFailure is VoiceInputFailureCode.EmptyAudio
             or VoiceInputFailureCode.SilentAudio or VoiceInputFailureCode.DeviceLost
             or VoiceInputFailureCode.RecordingFailed;

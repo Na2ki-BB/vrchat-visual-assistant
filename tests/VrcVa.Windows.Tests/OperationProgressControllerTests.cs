@@ -312,6 +312,30 @@ public sealed class OperationProgressControllerTests
     }
 
     [Fact]
+    public async Task OldRecordingFailure_CannotRestartOrCloseAfterAnotherSessionCompletes()
+    {
+        ExecutionCoordinator execution = new();
+        RetryRecordingFactory microphones = new();
+        await using VoiceInputFlow flow = new(execution, microphones,
+            () => new(new VoiceInputOptions { IsEnabled = true }, new NeverTranscriber()));
+        ProgressView view = new();
+        using OperationProgressController controller = new(execution, view);
+        controller.AttachVoice(flow);
+        Assert.True(flow.TryStart());
+        await flow.WhenIdle;
+        controller.Refresh();
+        Assert.True(view.Current!.CanRetry);
+        Assert.True(execution.TryBeginSession(Guid.NewGuid(), out ExecutionOperation? newer));
+        newer!.Dispose();
+        controller.Refresh();
+        Assert.False(flow.CanRestartRecording);
+        view.Activate(OperationProgressAction.Retry);
+        view.Activate(OperationProgressAction.Close);
+        Assert.True(execution.IsSessionCurrent(newer.SessionId));
+        Assert.Equal(1, microphones.Opens);
+    }
+
+    [Fact]
     public void ScanDisconnect_DrainsOriginalOwnerWithoutRestartingDisplay()
     {
         ExecutionCoordinator execution = new();
