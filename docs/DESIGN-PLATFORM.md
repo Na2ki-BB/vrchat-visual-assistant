@@ -14,7 +14,7 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 これは設計書の責務分割であり、新しい共通機構の実装ではない。現在の入力型は `CapturedFrame` のみで、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
 
-2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名、費用上限の未決事項も残す。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名等の実装判断は残す。音声送信上限は下記で合意済みとする。
 
 ## Reading current behavior and history
 
@@ -196,8 +196,10 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 - 既存のWindows Credential Managerを活用し、公式OpenAI endpoint以外へ保存キーを送らない。翻訳用キーがあるだけでマイク取得・音声送信を有効にせず、音声機能の明示有効化と送信先・費用の表示を設ける
 - 音声用のAPIは既存Responsesテキスト通信と分ける。既存の `store: false`、入力4,000バイト、10回quota等が音声にもそのまま適用されるとは説明しない
-- 1回30秒と、プロセス/セッション全体の音声秒数・送信回数上限は別。失敗したネットワーク送信も回数に含め、設定再読込で上限を迂回させない方針とする。後者の数値・予約/解放の計数詳細、音声要求のサイズ・timeoutは未決定であり、実装時の利用開始前に決める
-- テキスト解釈が `ITextModelClient` を使う場合は翻訳と共通のquotaを使い、機能ごとに新しいquotaを作って上限を迂回しない。新モデルや料金は未確定
+- 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutは実装時に確定する
+- 音声quotaはHTTP送信直前に、その要求に含む音声の全秒数と1回を一括予約する。予約で上限を超える場合は送信しない。送信開始後の失敗・中止・timeoutは返却せず、本人による再送も新たに秒数と回数を消費する。録音中の中止など送信前に終了したものは消費しない（予約後でも送信未開始を確認できれば返却する）。自動再送はしない
+- 音声quotaはアプリのプロセス寿命で共有し、画面を閉じる、録り直す、設定再読込、runtime再構築では消費量をリセットしない。アプリ再起動でリセットされるため、月額支出上限やアカウント全体の予算保証ではない
+- 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細は下記の未実装のquota分離設計を参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
@@ -207,20 +209,22 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The earlier OCR/text-only extension point was proved with the unregistered summarization analyzer. The next user-visible feature is now the approved voice-driven video-search design above, which needs a minimal text-input extension; it must not force microphone input through OCR. OCR/world text, transcripts, model outputs, and search metadata are untrusted content, not authority for arbitrary tools or settings changes.
 
-The foundation now resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the process-wide ten-attempt quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
+The current implemented foundation resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the process-wide ten-attempt quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
 
-新機能を追加するときの既存境界:
+上の10回共通枠は現行実装の説明であり、動画検索追加後の目標は下記の独立quotaとする。
+
+新機能を追加するときの境界:
 
 1. 機能固有の目的・入力・出力・データ送信範囲を別の機能設計で定義し、実装済みの入力型で表現できるか確認する。
 2. `FeatureDescriptor` / `FeatureEntry` / `FeatureCatalog` へコンパイル時登録する。未登録の要約をUIで有効化したものとして扱わない。
 3. 画像機能は `IAnalyzer` に処理を置き、結果セクションを返す。新しいテキスト機能は上記の入力別handlerを使い、翻訳専用プロンプトや検索語解釈の指示を共通UIへ持ち込まない。
-4. テキストAIが必要なら `ITextModelClient` と同一プロセスの使用量制限を使う。外部送信の明示選択、キャンセル、エラー処理、fake-clientによる無通信テストを維持する。
+4. テキストAIが必要なら `ITextModelClient` を再利用し、プロセス寿命で保持する用途別の使用量制限を適用する。翻訳と検索AI解釈の残回数は共有しない。外部送信の明示選択、キャンセル、エラー処理、fake-clientによる無通信テストを維持する。
 5. 入力型の追加、画像送信、外部ツール、副作用、自律実行は別の設計・承認が必要な範囲。今回合意した共通音声入力、yt-dlpによるmetadata検索、本人が選んだURLコピーだけを必要な拡張とし、任意ツールや自律実行へ広げない。既存の拡張点だけで対応済みとも主張しない。
 6. 結果UI・配置・入力を変更する場合は、下記の実機ゲートと [development harness](../harness/skills/vrcva-development/SKILL.md) の統合検証を適用する。
 
 ## Shared text-model transport and credentials
 
-Windows Credential Manager remains the selected personal-use secret store. It gives the API key an OS-managed, per-user boundary without placing it in `settings.json`, environment files, command history, or logs. Saving or deleting a key must affect the next SCAN without restarting VRCVA. A process-lifetime quota object survives runtime reconstruction so editing settings cannot reset the ten-attempt guard. Saved OpenAI credentials are valid only for the official endpoint preset; custom endpoints require a separate future profile and credential.
+Windows Credential Manager remains the selected personal-use secret store. It gives the API key an OS-managed, per-user boundary without placing it in `settings.json`, environment files, command history, or logs. Saving or deleting a key must affect the next SCAN without restarting VRCVA. In the current implementation, a process-lifetime quota object survives runtime reconstruction so editing settings cannot reset the ten-attempt guard. Saved OpenAI credentials are valid only for the official endpoint preset; custom endpoints require a separate future profile and credential.
 
 現在の共通通信はOpenAI Responses API用の `OpenAiResponsesTextModelClient`。`OpenAiTextTranslator` は翻訳指示と結果整形を担当する。クラス・設定名に残る `Translation` は既存実装の命名であり、今回リネームしない。
 
@@ -237,7 +241,19 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 | Local-first behavior | No key/provider selection means local OCR; no generic `OPENAI_API_KEY` fallback |
 | Tests and logs | Fake HTTP handlers and placeholder keys; no content, credential, or HTTP-body logging |
 
-設定の優先順位・モデル切替と翻訳への適用は[翻訳機能のOpenAI仕様](DESIGN-JAPANESE-TRANSLATION.md#translation)を参照。料金と過去の費用見積もりも機能側に置き、この共通制限をアカウント全体の支出保証とみなさない。
+動画検索で採用した `gpt-6-luna` は現行allowlistに含まれない。実装時に共通通信へ明示的に対応を追加し、翻訳の既定モデル・切替候補は変えない。設定で任意モデルを素通ししたり、利用できない時に別モデルへ暗黙fallbackしたりしない。
+
+### Independent usage quotas — approved separation, not implemented
+
+2026-10-01の追加指示で、翻訳と検索AI解釈を同じ10回枠にする案を変更した。共通にするのは通信・認証・検証の仕組みであり、消費カウンターではない。現在は上表の共有 `TranslationRequestQuota` が実装されているため、用途別カウンターと接続の変更が必要となる。
+
+- 翻訳と検索AI解釈に別々のプロセス寿命のquotaを持たせ、どちらを使っても他方の残回数を減らさない。片方が上限に達しても他方は自分の残回数で利用できる
+- 初期値は既存の数値を引き継ぎ、**翻訳10回・検索AI解釈10回／起動**をそれぞれ設定する。10回ずつという数値は新しく利用希望回数を指定されたものではなく、分離時の初期値であり、用途別に変更可能とする。設定場所・許容範囲は実装時に決める
+- 各枠でHTTP送信直前に1回を予約し、開始後の失敗・中止もその枠だけで計数する。自動再送はしない。設定再読込・モデル切替・runtime再構築で消費量は戻さず、アプリ再起動時にリセットする。同じ用途の入口やclientごとに別カウンターを作って迂回しない
+- 音声の300秒・30送信枠は両テキスト枠から独立する。「そのまま検索」は解釈枠を消費せず、確定済み検索語によるyt-dlpの再試行も翻訳/解釈枠を消費しない
+- **single-flightは引き続き全用途で共通**。quotaの分離は同時に処理してよいという意味ではない。上限表示や失敗理由には対象の用途を示す
+
+設定の優先順位・モデル切替と翻訳への適用は[翻訳機能のOpenAI仕様](DESIGN-JAPANESE-TRANSLATION.md#translation)を参照。料金と過去の費用見積もりも機能側に置き、これらの起動ごとの制限をアカウント全体の支出保証とみなさない。
 
 ## Security, privacy, and public-repository policy
 

@@ -154,7 +154,7 @@ The earlier environment-only statement that the key was never persisted is super
 
 Source: [TranslateAnalyzer.cs](../src/VrcVa.Core/TranslateAnalyzer.cs), [OcrAnalyzer.cs](../src/VrcVa.Core/OcrAnalyzer.cs), [OpenAiTextTranslator.cs](../src/VrcVa.Infrastructure/OpenAiTextTranslator.cs), and [TranslationRuntime.cs](../src/VrcVa.Windows/Translation/TranslationRuntime.cs).
 
-The provider limits above apply through the [shared transport and credential policy](DESIGN-PLATFORM.md#shared-text-model-transport-and-credentials). They are not a second feature-local quota.
+The implemented provider limits above apply through the [shared transport and credential policy](DESIGN-PLATFORM.md#shared-text-model-transport-and-credentials), without a second feature-local counter in the current code. The approved video-search extension changes this to [independent translation and search-interpretation quotas](DESIGN-PLATFORM.md#independent-usage-quotas--approved-separation-not-implemented); that separation is not implemented yet. Translation and interpretation will not consume each other's allowance. Each starts at ten attempts per process as a carried-over default, configurable separately, while cross-feature single-flight remains shared.
 
 ## Costs and limits
 
