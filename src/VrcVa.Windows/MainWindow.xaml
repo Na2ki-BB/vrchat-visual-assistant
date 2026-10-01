@@ -8,6 +8,8 @@
         MinHeight="560"
         Background="{StaticResource WindowBackground}"
         WindowStartupLocation="Manual">
+  <TabControl Margin="0" Background="#111318" BorderThickness="0">
+    <TabItem Header="画面の翻訳">
   <Grid Margin="22">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -286,4 +288,9 @@
               Content="日本語訳をコピー" />
     </Grid>
   </Grid>
+    </TabItem>
+    <TabItem Header="音声入力">
+      <ContentControl x:Name="VoiceInputHost" />
+    </TabItem>
+  </TabControl>
 </Window>

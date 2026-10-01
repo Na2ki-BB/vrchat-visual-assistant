@@ -149,6 +149,14 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 ## Shared voice input — approved design, not implemented
 
+### J3 WPF integration status — 2026-10-01
+
+`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、VR UIはL1/L2まで追加しない。
+
+成功時は音声を破棄してから全文表示し、失敗時のみJ1の非更新期限内で手動再送する。設定/client交換後もMainWindow所有の音声quotaを共有する。中止・閉じる・録り直し・新SCAN・終了・接続済みSteamVRの喪失は旧音声/文を破棄し、後処理後までgateを保持する。SteamVRが最初から無い状態ではデスクトップ音声を妨げない。native cleanup失敗は型付き停止/終了案内を表示する。fakeマイク/HTTP/時計およびWPF dispatcherの回帰で境界を検証するが、Windows実マイク・有料API・Questの受入は未実施である。
+
+以下のapproved-design節の未実装表現は段階導入時点の記録であり、WPF接続の現在状態はこの節とTASKSを優先する。
+
 ### Responsibility and entry point
 
 既存の左腕メニューへマイクアイコンを追加する。共通側が「録音 → 文字起こし → 文章表示 → 使い道の選択」までを持ち、検索語の解釈・YouTube取得・候補選択は動画検索側が持つ。録音機構を動画検索の内部へ閉じ込めず、認識文を別用途に渡すための最小のテキスト入力境界を作る。現時点で未登録の用途や汎用エージェントを追加するものではない。
