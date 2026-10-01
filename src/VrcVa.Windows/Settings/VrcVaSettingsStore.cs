@@ -1,12 +1,13 @@
 using System.IO;
 using System.Text.Json;
+using VrcVa.Core;
 using VrcVa.Windows.OpenVr;
 
 namespace VrcVa.Windows.Settings;
 
 internal sealed class VrcVaSettingsStore
 {
-    private const int CurrentVersion = 5;
+    private const int CurrentVersion = 6;
     private const double QuaternionNormalizationTolerance = 1e-12;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -25,19 +26,31 @@ internal sealed class VrcVaSettingsStore
 
     public string Path => _path;
 
-    public VrcVaSettings Load()
+    public VrcVaSettings Load() => Load(allowMissing: true, out _);
+
+    public VrcVaSettings Load(bool allowMissing, out bool hasStoredSettings)
     {
-        if (!File.Exists(_path))
+        hasStoredSettings = false;
+        string json;
+        try
         {
+            json = File.ReadAllText(_path);
+            hasStoredSettings = true;
+        }
+        catch (Exception exception) when (
+            allowMissing && exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // File.Exists also returns false for directories and access failures.
+            // Only an actually absent initial file may opt into defaults.
             return VrcVaSettings.Default;
         }
-
-        string json = File.ReadAllText(_path);
         int version;
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty("Version", out JsonElement versionElement)
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("Version", out JsonElement versionElement)
+                || versionElement.ValueKind != JsonValueKind.Number
                 || !versionElement.TryGetInt32(out version))
             {
                 throw new InvalidDataException("The VRCVA settings file has no valid version.");
@@ -48,18 +61,28 @@ internal sealed class VrcVaSettingsStore
             throw new InvalidDataException("The VRCVA settings file is invalid JSON.", exception);
         }
 
-        return version switch
+        try
         {
-            1 => LoadVersion1(json),
-            2 => LoadVersion2(json),
-            3 => LoadVersion3(json),
-            4 => LoadVersion4(json),
-            CurrentVersion => LoadVersion5(json),
-            > CurrentVersion => throw new InvalidDataException(
-                $"The VRCVA settings file version {version} is newer than this application supports."),
-            _ => throw new InvalidDataException(
-                $"The VRCVA settings file version {version} is unsupported."),
-        };
+            return version switch
+            {
+                1 => LoadVersion1(json),
+                2 => LoadVersion2(json),
+                3 => LoadVersion3(json),
+                4 => LoadVersion4(json),
+                5 => LoadVersion5(json),
+                CurrentVersion => LoadVersion6(json),
+                > CurrentVersion => throw new InvalidDataException(
+                    $"The VRCVA settings file version {version} is newer than this application supports."),
+                _ => throw new InvalidDataException(
+                    $"The VRCVA settings file version {version} is unsupported."),
+            };
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException(
+                $"The VRCVA version {version} settings file contains invalid preferences.",
+                exception);
+        }
     }
 
     public void Save(VrcVaSettings settings)
@@ -78,11 +101,13 @@ internal sealed class VrcVaSettingsStore
         try
         {
             string json = JsonSerializer.Serialize(
-                new Version5StoredSettings(
+                new Version6StoredSettings(
                     CurrentVersion,
-                    settings.ResultPanel,
-                    settings.Onboarding,
-                    Version4WristLauncherPlacement.From(settings.WristLauncher)),
+                    Version6ResultPanelPlacement.From(settings.ResultPanel),
+                    Version6OnboardingSettings.From(settings.Onboarding),
+                    Version4WristLauncherPlacement.From(settings.WristLauncher),
+                    Version6VoiceInputOptions.From(settings.VoiceInput),
+                    Version6FeatureUsageLimits.From(settings.UsageLimits)),
                 JsonOptions);
             File.WriteAllText(temporaryPath, json);
             File.Move(temporaryPath, _path, overwrite: true);
@@ -186,6 +211,30 @@ internal sealed class VrcVaSettingsStore
         return settings;
     }
 
+    private static VrcVaSettings LoadVersion6(string json)
+    {
+        Version6StoredSettings stored = Deserialize<Version6StoredSettings>(json);
+        if (stored.ResultPanel is null
+            || stored.Onboarding is null
+            || stored.WristLauncher is null
+            || stored.VoiceInput is null
+            || stored.UsageLimits is null)
+        {
+            throw new InvalidDataException("The VRCVA version 6 settings file is invalid.");
+        }
+
+        VrcVaSettings settings = new(
+            stored.ResultPanel.ToPlacement(),
+            stored.Onboarding.ToSettings(),
+            stored.WristLauncher.ToPlacement(version: 6))
+        {
+            VoiceInput = stored.VoiceInput.ToOptions(),
+            UsageLimits = stored.UsageLimits.ToLimits(),
+        };
+        settings.Validate();
+        return settings;
+    }
+
     private static ResultPanelPlacement AlignLegacyLeftHandResult(
         ResultPanelPlacement resultPanel,
         WristLauncherPlacement wristLauncher)
@@ -277,6 +326,105 @@ internal sealed class VrcVaSettingsStore
         VrcVaOnboardingSettings? Onboarding,
         Version4WristLauncherPlacement? WristLauncher);
 
+    private sealed record Version6StoredSettings(
+        int Version,
+        Version6ResultPanelPlacement? ResultPanel,
+        Version6OnboardingSettings? Onboarding,
+        Version4WristLauncherPlacement? WristLauncher,
+        Version6VoiceInputOptions? VoiceInput,
+        Version6FeatureUsageLimits? UsageLimits);
+
+    private sealed record Version6ResultPanelPlacement(
+        ResultPanelAnchor? Anchor,
+        double? X,
+        double? Y,
+        double? Z,
+        double? PitchDegrees,
+        double? YawDegrees,
+        double? RollDegrees,
+        double? WidthMeters)
+    {
+        public static Version6ResultPanelPlacement From(ResultPanelPlacement placement) => new(
+            placement.Anchor,
+            placement.X,
+            placement.Y,
+            placement.Z,
+            placement.PitchDegrees,
+            placement.YawDegrees,
+            placement.RollDegrees,
+            placement.WidthMeters);
+
+        public ResultPanelPlacement ToPlacement() => new(
+            GetVersion6Required(Anchor, $"ResultPanel.{nameof(Anchor)}"),
+            GetVersion6Required(X, $"ResultPanel.{nameof(X)}"),
+            GetVersion6Required(Y, $"ResultPanel.{nameof(Y)}"),
+            GetVersion6Required(Z, $"ResultPanel.{nameof(Z)}"),
+            GetVersion6Required(PitchDegrees, $"ResultPanel.{nameof(PitchDegrees)}"),
+            GetVersion6Required(YawDegrees, $"ResultPanel.{nameof(YawDegrees)}"),
+            GetVersion6Required(RollDegrees, $"ResultPanel.{nameof(RollDegrees)}"),
+            GetVersion6Required(WidthMeters, $"ResultPanel.{nameof(WidthMeters)}"));
+    }
+
+    private sealed record Version6OnboardingSettings(
+        bool? IsCompleted,
+        bool? SteamVrAutoLaunchEnabled)
+    {
+        public static Version6OnboardingSettings From(VrcVaOnboardingSettings settings) => new(
+            settings.IsCompleted,
+            settings.SteamVrAutoLaunchEnabled);
+
+        public VrcVaOnboardingSettings ToSettings() => new(
+            GetVersion6Required(IsCompleted, $"Onboarding.{nameof(IsCompleted)}"),
+            GetVersion6Required(SteamVrAutoLaunchEnabled, $"Onboarding.{nameof(SteamVrAutoLaunchEnabled)}"));
+    }
+
+    private sealed record Version6VoiceInputOptions(
+        bool? IsEnabled,
+        int? MaximumRecordingSeconds,
+        int? FailedAudioRetentionSeconds)
+    {
+        public static Version6VoiceInputOptions From(VoiceInputOptions options) => new(
+            options.IsEnabled,
+            options.MaximumRecordingSeconds,
+            options.FailedAudioRetentionSeconds);
+
+        public VoiceInputOptions ToOptions() => new()
+        {
+            IsEnabled = GetVersion6Required(IsEnabled, $"VoiceInput.{nameof(IsEnabled)}"),
+            MaximumRecordingSeconds = GetVersion6Required(
+                MaximumRecordingSeconds,
+                $"VoiceInput.{nameof(MaximumRecordingSeconds)}"),
+            FailedAudioRetentionSeconds = GetVersion6Required(
+                FailedAudioRetentionSeconds,
+                $"VoiceInput.{nameof(FailedAudioRetentionSeconds)}"),
+        };
+    }
+
+    private sealed record Version6FeatureUsageLimits(
+        int? VoiceSeconds,
+        int? VoiceRequests,
+        int? TranslationRequests,
+        int? SearchInterpretationRequests)
+    {
+        public static Version6FeatureUsageLimits From(FeatureUsageLimits limits) => new(
+            limits.VoiceSeconds,
+            limits.VoiceRequests,
+            limits.TranslationRequests,
+            limits.SearchInterpretationRequests);
+
+        public FeatureUsageLimits ToLimits() => new()
+        {
+            VoiceSeconds = GetVersion6Required(VoiceSeconds, $"UsageLimits.{nameof(VoiceSeconds)}"),
+            VoiceRequests = GetVersion6Required(VoiceRequests, $"UsageLimits.{nameof(VoiceRequests)}"),
+            TranslationRequests = GetVersion6Required(
+                TranslationRequests,
+                $"UsageLimits.{nameof(TranslationRequests)}"),
+            SearchInterpretationRequests = GetVersion6Required(
+                SearchInterpretationRequests,
+                $"UsageLimits.{nameof(SearchInterpretationRequests)}"),
+        };
+    }
+
     private sealed record Version4WristLauncherPlacement(
         double? X,
         double? Y,
@@ -359,6 +507,13 @@ internal sealed class VrcVaSettingsStore
         }
 
         return required;
+    }
+
+    private static T GetVersion6Required<T>(T? value, string name)
+        where T : struct
+    {
+        return value ?? throw new InvalidDataException(
+            $"The VRCVA version 6 settings {name} is missing or null.");
     }
 
     private static void ValidateVersion3Angle(double value, string name)

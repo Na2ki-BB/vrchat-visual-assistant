@@ -172,13 +172,13 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 ### I1 adapter and settings decisions — foundation contracts only
 
-2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。**マイク、設定保存、同意画面、通信、実quotaへの接続は未実装**。現行翻訳の10回hard capやモデルallowlistはこのPRでは変えない。
+2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**マイク、同意画面、音声/検索の通信は未実装**。翻訳モデルallowlistは変更しない。
 
 - **録音（J1）**: Windows標準のWinMM `waveIn` を直接包み、追加ライブラリは導入しない。`WAVE_MAPPER` と `WAVE_MAPPED_DEFAULT_COMMUNICATION_DEVICE` でWindows既定の通信入力デバイスを使う。`WAVE_MAPPER` 単独は別の対応デバイスを選び得るので使わない。録音開始時のデバイス/設定を固定し、途中切替や別マイクへの暗黙fallbackはしない。形式照会、未接続/拒否/非対応/切断を段階別の失敗にする。デバイス選択はWindows側で行い、アプリ内一覧は初期範囲に加えない
 - **形式/容量（J1/J2）**: little-endian PCM16、mono、16,000 Hz（32,000 byte/秒）、44 byte headerのWAVをメモリで作る。録音上限は30秒、変更範囲1〜120秒。現設定秒数×32,000 byteで入力を止め、全体hard capはPCM 3,840,000 byte + WAV header 44 byte。余分なWAV chunk、別形式、途中sample、空データは送信しない。Windows driver内の同一デバイス形式変換の可否はJ1/L2で検証する
 - **無音/保持（J1/J3）**: 停止後に空データ、または全体RMS ≤ 0.001かつpeak ≤ 0.01（PCM16正規化値）の近無音を拒否する。これは発話検出ではなく、無音で早期停止もしない。失敗音声は最初の送信失敗時から単調時計で初期120秒（許容15〜300秒）だけ保持し、再試行で期限を延ばさない。期限内に開始した送信は取消/完了まで所有するが、それ以降の再送は不可。期限、成功、閉じる、中止、録り直し、終了で所有bufferをゼロ化・解放する
 - **文字起こし（J2）**: `POST https://api.openai.com/v1/audio/transcriptions` へ `multipart/form-data`、`model=gpt-transcribe`、`file=recording.wav` / `audio/wav`、`response_format=json`、`stream=false`。初期は言語自動判定、prompt/keywords/話者情報なし。専用adapterのallowlistはこのモデルと公式endpointだけ。`AllowAutoRedirect=false` とし、3xxは失敗、307/308で音声やキーを再送しない。別モデルは検証付きの別変更で追加し、無断fallbackしない。timeout 60秒、応答body 64 KiB、空/不正応答を拒否し、認識文は4,000 UTF-8 byte以内で切り捨てず検証する。音声用キーは専用Credential Manager target `VrcVa/OpenAI/Voice` に置き、既存翻訳キーや一般環境変数を自動流用しない。キーの保存だけでは音声同意にならない
-- **設定（I4/J3）**: 既存 `%LOCALAPPDATA%/VrcVa/settings.json` の次のversion 6へ非秘密の `VoiceInput` / `UsageLimits` を追加し、旧version 1〜5から音声無効・下記初期値へ移行する。キー、音声、認識文、検索語、候補、消費量は保存しない。`VoiceInput.IsEnabled=false` が初期値で、J3の専用説明/明示操作でのみ有効化する。不正値は保存/新処理前に全体拒否し、失敗した再読込は最後の有効snapshotを維持する。version 6の保存/migration自体はこのPRに含めない
+- **設定（I4/J3）**: 既存 `%LOCALAPPDATA%/VrcVa/settings.json` の次のversion 6へ非秘密の `VoiceInput` / `UsageLimits` を追加し、旧version 1〜5から音声無効・下記初期値へ移行する。キー、音声、認識文、検索語、候補、消費量は保存しない。`VoiceInput.IsEnabled=false` が初期値で、J3の専用説明/明示操作でのみ有効化する。不正値は保存/新処理前に全体拒否し、失敗した再読込は最後の有効snapshotを維持する。I4でversion 6の保存/migrationを実装。新規公開音声opt-in UIはJ3へ残す
 
 | 独立した設定値 | 初期値 | 許容範囲（整数・両端含む） | 接続タスク |
 | --- | --- | --- | --- |
@@ -211,7 +211,7 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 - WPF/OpenVRは成功・失敗・進捗をdispatcher実行直前に再検証する。VRの本人によるcloseはcapture用Hideと別のeventで失効し、画像選択dialogも単調な世代で古い操作を拒否する
 - Windows終了はClosingを一度保留し、operationとOSC起動の回収を待つ。最後のCloseを必ずdispatcherへpostしてからpanel/HTTP/CTSを破棄する。captureのhide/boundary/discard/adoptと参照数付きOpenVR所有は変更しない
 
-共通制御と利用quotaは別の所有物で、翻訳10回/解釈10回、音声300秒/30送信の初期値は変更しない。quota runtime接続はI4/J2、音声/検索UIと操作できるVR進捗/失敗画面はJ3/K5/L1以降へ残す。
+共通制御と利用quotaは別の所有物で、翻訳10回/解釈10回、音声300秒/30送信の初期値は変更しない。text quota runtime接続はI4で実装済み、音声quotaはJ2、音声/検索UIと操作できるVR進捗/失敗画面はJ3/K5/L1以降へ残す。
 
 1. 明示操作でgateを取得し、現在のsession/operationとキャンセルトークンを発行する。録音開始から文字起こし完了までを1処理として占有する
 2. 認識文や候補を表示しているだけの待機状態ではgateを解放する。次の検索・コピー・SCANも同じgateで競合を確認する。他の処理中は新要求をqueueに積まず、現在の画面を壊さない短い処理中表示にする
@@ -231,19 +231,19 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 - 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutは下記I1で固定し、接続はJ2/J3へ残す
 - 音声quotaはHTTP送信直前に、その要求に含む音声の全秒数と1回を一括予約する。予約で上限を超える場合は送信しない。送信開始後の失敗・中止・timeoutは返却せず、本人による再送も新たに秒数と回数を消費する。録音中の中止など送信前に終了したものは消費しない（予約後でも送信未開始を確認できれば返却する）。自動再送はしない
 - 音声quotaはアプリのプロセス寿命で共有し、画面を閉じる、録り直す、設定再読込、runtime再構築では消費量をリセットしない。アプリ再起動でリセットされるため、月額支出上限やアカウント全体の予算保証ではない
-- 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細は下記の未実装のquota分離設計を参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
+- 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細は下記のI4で実装した独立text quotaと、未実装の音声quota設計を参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
-音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。本節は設計合意であり、コード・設定・利用制限が実装済みという宣言ではない。
+音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、録音/音声送信/音声quotaは未実装。I4の非秘密設定保存と独立text quotaだけは実装済みである。
 
 ## Feature extension rules
 
 Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The earlier OCR/text-only extension point was proved with the unregistered summarization analyzer. The next user-visible feature is now the approved voice-driven video-search design above, which needs a minimal text-input extension; it must not force microphone input through OCR. OCR/world text, transcripts, model outputs, and search metadata are untrusted content, not authority for arbitrary tools or settings changes.
 
-The current implemented foundation resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the process-wide ten-attempt quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
+The current implemented foundation resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the purpose-bound process-lifetime quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
 
-上の10回共通枠は現行実装の説明であり、動画検索追加後の目標は下記の独立quotaとする。
+I4で翻訳/検索AI解釈に別カウンターを追加した。各10回は初期値で、設定により1〜100へ個別変更できる。音声quotaと公開解釈adapterは後続タスクへ残す。
 
 新機能を追加するときの境界:
 
@@ -256,7 +256,7 @@ The current implemented foundation resolves a typed feature before capture and r
 
 ## Shared text-model transport and credentials
 
-Windows Credential Manager remains the selected personal-use secret store. It gives the API key an OS-managed, per-user boundary without placing it in `settings.json`, environment files, command history, or logs. Saving or deleting a key must affect the next SCAN without restarting VRCVA. In the current implementation, a process-lifetime quota object survives runtime reconstruction so editing settings cannot reset the ten-attempt guard. Saved OpenAI credentials are valid only for the official endpoint preset; custom endpoints require a separate future profile and credential.
+Windows Credential Manager remains the selected personal-use secret store. It gives the API key an OS-managed, per-user boundary without placing it in `settings.json`, environment files, command history, or logs. Saving or deleting a key must affect the next SCAN without restarting VRCVA. In the current implementation, independent process-lifetime quota objects survive runtime reconstruction and settings reload, preserving consumption even when their ceilings change. Saved OpenAI credentials are valid only for the official endpoint preset; custom endpoints require a separate future profile and credential.
 
 現在の共通通信はOpenAI Responses API用の `OpenAiResponsesTextModelClient`。`OpenAiTextTranslator` は翻訳指示と結果整形を担当する。クラス・設定名に残る `Translation` は既存実装の命名であり、今回リネームしない。
 
@@ -267,7 +267,7 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 | Input/output guard | At most 4,000 UTF-8 input bytes and 1,200 output tokens |
 | Timeout | `VRCVA_OPENAI_TIMEOUT_SECONDS` configures 1–25 seconds; hard maximum is 25 seconds |
 | Allowed model IDs | `gpt-5.6-luna` and `gpt-5.4-nano`; no arbitrary model bypass |
-| Process quota | One shared `TranslationRequestQuota`: at most ten network attempts; failed attempts count, runtime reconstruction does not reset it, process restart does |
+| Process quota | Application-owned `FeatureUsageQuotas` holds separate `TextRequestQuota` counters for translation/search interpretation, each initially ten attempts and configurable 1–100. Failed started sends count only their purpose; runtime reconstruction/reload never resets consumption, process restart does |
 | Persistent secret | Windows Credential Manager `VrcVa/OpenAIApiKey`; same-user boundary, not protection against every process running as that user |
 | Stored-key destination | Official OpenAI endpoint only; no silent forwarding to a custom endpoint |
 | Local-first behavior | No key/provider selection means local OCR; no generic `OPENAI_API_KEY` fallback |
@@ -275,15 +275,17 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 
 動画検索で採用した `gpt-6-luna` は現行allowlistに含まれない。実装時に共通通信へ明示的に対応を追加し、翻訳の既定モデル・切替候補は変えない。設定で任意モデルを素通ししたり、利用できない時に別モデルへ暗黙fallbackしたりしない。
 
-### Independent usage quotas — approved separation, not implemented
+### Independent usage quotas — implemented text counters
 
-2026-10-01の追加指示で、翻訳と検索AI解釈を同じ10回枠にする案を変更した。共通にするのは通信・認証・検証の仕組みであり、消費カウンターではない。現在は上表の共有 `TranslationRequestQuota` が実装されているため、用途別カウンターと接続の変更が必要となる。
+2026-10-01の追加指示で、翻訳と検索AI解釈を同じ10回枠にする案を変更した。共通にするのは通信・認証・検証の仕組みであり、消費カウンターではない。I4で共有 `TranslationRequestQuota` を用途付き `TextRequestQuota` と `FeatureUsageQuotas` に置き換えた。MainWindowが2つのカウンターをプロセス寿命で所有し、翻訳factoryと全再構築へ翻訳用の同じinstanceを渡す。解釈枠はfake共通HTTPで検証し、公開adapter/モデル接続はK3へ残す。
 
 - 翻訳と検索AI解釈に別々のプロセス寿命のquotaを持たせ、どちらを使っても他方の残回数を減らさない。片方が上限に達しても他方は自分の残回数で利用できる
-- 初期値は既存の数値を引き継ぎ、**翻訳10回・検索AI解釈10回／起動**をそれぞれ設定する。10回ずつという数値は新しく利用希望回数を指定されたものではなく、分離時の初期値であり、用途別に変更可能とする。設定場所・許容範囲は上記I1に従い、実quotaへの接続はI4へ残す
-- 各枠でHTTP送信直前に1回を予約し、開始後の失敗・中止もその枠だけで計数する。自動再送はしない。設定再読込・モデル切替・runtime再構築で消費量は戻さず、アプリ再起動時にリセットする。同じ用途の入口やclientごとに別カウンターを作って迂回しない
+- 初期値は既存の数値を引き継ぎ、**翻訳10回・検索AI解釈10回／起動**をそれぞれ設定する。10回ずつという数値は新しく利用希望回数を指定されたものではなく、分離時の初期値であり、用途別に変更可能とする。設定場所・許容範囲は上記I1に従い、text quotaへの接続はI4で実装済み
+- 各枠でHTTP送信直前に1回を予約し、`SendAsync`呼出しを試みる直前を開始境界として確定する。予約後に未開始の取消/timeoutを確認した場合だけ返却し、開始後の認証/通信失敗・中止・timeoutもその枠だけで計数する。providerの受付確認がない通信失敗も保守的に数える。自動再送はしない。設定再読込・モデル切替・runtime再構築で消費量は戻さず、アプリ再起動時にリセットする。同じ用途の入口やclientごとに別カウンターを作って迂回しない
 - 音声の300秒・30送信枠は両テキスト枠から独立する。「そのまま検索」は解釈枠を消費せず、確定済み検索語によるyt-dlpの再試行も翻訳/解釈枠を消費しない
 - **single-flightは引き続き全用途で共通**。quotaの分離は同時に処理してよいという意味ではない。上限表示や失敗理由には対象の用途を示す
+
+I4の`UsageSettingsSnapshot`は全体を検証した後だけ設定を交換する。version 1〜5は音声無効/初期枠へ移行し、version 6の全fieldを必須とする。SCANの受付後・capture前、および資格情報runtime交換時に共通gateを保持して再読込する。無効な設定は最後の有効snapshotを維持したまま、そのSCANを通信/取得前に拒否し、修正後の次処理で復帰する。進行中は再読込せず、上限増減でも過去の消費量は不変。カウンター/キー/音声/本文は設定へ保存しない。音声枠の計数はJ2へ残す。
 
 設定の優先順位・モデル切替と翻訳への適用は[翻訳機能のOpenAI仕様](DESIGN-JAPANESE-TRANSLATION.md#translation)を参照。料金と過去の費用見積もりも機能側に置き、これらの起動ごとの制限をアカウント全体の支出保証とみなさない。
 

@@ -31,6 +31,7 @@ public enum ScanFailureCode
     Cancelled,
     Unexpected,
     InputKindMismatch,
+    SearchInterpretationUsageLimitReached,
 }
 
 public sealed record ScanRequest(

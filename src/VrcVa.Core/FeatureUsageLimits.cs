@@ -2,7 +2,7 @@ namespace VrcVa.Core;
 
 /// <summary>
 /// Independent per-process usage ceilings, not usage counters or account budgets.
-/// The runtime quota adapters will consume these limits in later implementation tasks.
+/// Text counters consume these limits independently; audio counters are a separate adapter.
 /// </summary>
 public sealed record FeatureUsageLimits
 {

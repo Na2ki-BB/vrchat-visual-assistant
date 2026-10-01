@@ -15,7 +15,7 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
     private readonly HttpClient _httpClient;
     private readonly OpenAiTranslatorOptions _options;
     private readonly string? _apiKey;
-    private readonly TranslationRequestQuota _requestQuota;
+    private readonly TextRequestQuota _requestQuota;
 
     public OpenAiResponsesTextModelClient(
         HttpClient httpClient,
@@ -29,7 +29,7 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         HttpClient httpClient,
         OpenAiTranslatorOptions options,
         string? apiKey,
-        TranslationRequestQuota requestQuota)
+        TextRequestQuota requestQuota)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(options);
@@ -60,11 +60,27 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
                 $"OpenAI output token maximum must be between 1 and {HardMaximumOutputTokens}.");
         }
 
+        if (options.MaxRequestsPerSession is < 1 or > TextRequestQuota.HardMaximum)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.MaxRequestsPerSession,
+                $"OpenAI request maximum must be between 1 and {TextRequestQuota.HardMaximum}.");
+        }
+
         _httpClient = httpClient;
         _options = options;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
         _requestQuota = requestQuota;
     }
+
+    private string PurposeName => _requestQuota.Purpose == TextRequestPurpose.Translation
+        ? "翻訳"
+        : "検索AI解釈";
+
+    private ScanStage FailureStage => _requestQuota.Purpose == TextRequestPurpose.Translation
+        ? ScanStage.Translation
+        : ScanStage.TextHandling;
+
+    public TextRequestPurpose Purpose => _requestQuota.Purpose;
 
     public int MaxRequestsPerSession => _requestQuota.Maximum;
 
@@ -91,8 +107,8 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         {
             throw new ScanException(
                 ScanFailureCode.TranslationNotConfigured,
-                ScanStage.Translation,
-                "翻訳APIキーが未設定です。VRCVA画面のOpenAI APIキー欄から登録してください。");
+                FailureStage,
+                $"{PurposeName}APIキーが未設定です。専用APIキーの設定を確認してください。");
         }
 
         int inputUtf8Bytes = Encoding.UTF8.GetByteCount(request.Input);
@@ -100,8 +116,8 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         {
             throw new ScanException(
                 ScanFailureCode.TranslationInputTooLarge,
-                ScanStage.Translation,
-                $"OCRテキストが翻訳上限（UTF-8で{_options.MaxInputUtf8Bytes:N0}バイト）を超えたため、外部送信を停止しました。");
+                FailureStage,
+                $"{PurposeName}入力が上限（UTF-8で{_options.MaxInputUtf8Bytes:N0}バイト）を超えたため、外部送信を停止しました。");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -111,17 +127,23 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
             cancellationToken);
         timeout.CancelAfter(_options.Timeout);
 
-        if (!_requestQuota.TryReserve())
+        if (!_requestQuota.TryReserve(out TextRequestQuota.TextRequestReservation? reservation))
         {
             throw new ScanException(
-                ScanFailureCode.TranslationUsageLimitReached,
-                ScanStage.Translation,
-                $"この起動中の翻訳上限（{_requestQuota.Maximum}回）に達したため、外部送信を停止しました。必要ならアプリを再起動してください。");
+                _requestQuota.Purpose == TextRequestPurpose.Translation
+                    ? ScanFailureCode.TranslationUsageLimitReached
+                    : ScanFailureCode.SearchInterpretationUsageLimitReached,
+                FailureStage,
+                $"この起動中の{PurposeName}上限（{_requestQuota.Maximum}回）に達したため、外部送信を停止しました。必要ならアプリを再起動してください。");
         }
 
+        using TextRequestQuota.TextRequestReservation reservedRequest = reservation;
         HttpResponseMessage response;
         try
         {
+            // This invocation boundary is conservative: an attempted send counts even
+            // when its transport fails before a provider confirms receipt.
+            reservedRequest.MarkSendStarted(timeout.Token);
             response = await _httpClient
                 .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
@@ -161,8 +183,8 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
                 {
                     throw new ScanException(
                         ScanFailureCode.TranslationFailed,
-                        ScanStage.Translation,
-                        "翻訳サービスからテキスト結果が返りませんでした。");
+                        FailureStage,
+                        $"{PurposeName}サービスからテキスト結果が返りませんでした。");
                 }
 
                 return new TextModelResponse(
@@ -182,17 +204,17 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
             {
                 throw new ScanException(
                     ScanFailureCode.TranslationFailed,
-                    ScanStage.Translation,
-                    "翻訳サービスの応答形式を解釈できませんでした。",
+                    FailureStage,
+                    $"{PurposeName}サービスの応答形式を解釈できませんでした。",
                     exception);
             }
         }
     }
 
-    private static TranslationRequestQuota CreateRequestQuota(OpenAiTranslatorOptions options)
+    private static TextRequestQuota CreateRequestQuota(OpenAiTranslatorOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return new TranslationRequestQuota(options.MaxRequestsPerSession);
+        return new TextRequestQuota(options.MaxRequestsPerSession);
     }
 
     private static string ValidateModel(string model)
@@ -236,15 +258,15 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
     private ScanException CreateTimeoutFailure(OperationCanceledException exception) =>
         new(
             ScanFailureCode.TranslationTimedOut,
-            ScanStage.Translation,
-            $"翻訳が{_options.Timeout.TotalSeconds:0}秒以内に完了しませんでした。",
+            FailureStage,
+            $"{PurposeName}が{_options.Timeout.TotalSeconds:0}秒以内に完了しませんでした。",
             exception);
 
-    private static ScanException CreateConnectionFailure(HttpRequestException exception) =>
+    private ScanException CreateConnectionFailure(HttpRequestException exception) =>
         new(
             ScanFailureCode.TranslationFailed,
-            ScanStage.Translation,
-            "翻訳サービスへ接続できませんでした。ネットワーク接続を確認してください。",
+            FailureStage,
+            $"{PurposeName}サービスへ接続できませんでした。ネットワーク接続を確認してください。",
             exception);
 
     private static string ExtractOutputText(JsonElement root)
@@ -286,7 +308,7 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         return string.Join(Environment.NewLine, parts);
     }
 
-    private static ScanException CreateHttpFailure(
+    private ScanException CreateHttpFailure(
         HttpStatusCode statusCode,
         string? requestId)
     {
@@ -298,16 +320,16 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         {
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => new ScanException(
                 ScanFailureCode.TranslationAuthenticationFailed,
-                ScanStage.Translation,
-                $"翻訳APIの認証に失敗しました。APIキーと利用権限を確認してください。{requestIdSuffix}"),
+                FailureStage,
+                $"{PurposeName}APIの認証に失敗しました。APIキーと利用権限を確認してください。{requestIdSuffix}"),
             HttpStatusCode.TooManyRequests => new ScanException(
                 ScanFailureCode.TranslationRateLimited,
-                ScanStage.Translation,
-                $"翻訳APIの利用上限またはレート制限に達しました。少し待ってから再試行してください。{requestIdSuffix}"),
+                FailureStage,
+                $"{PurposeName}APIの利用上限またはレート制限に達しました。少し待ってから再試行してください。{requestIdSuffix}"),
             _ => new ScanException(
                 ScanFailureCode.TranslationFailed,
-                ScanStage.Translation,
-                $"翻訳サービスがHTTP {(int)statusCode}を返しました。{requestIdSuffix}"),
+                FailureStage,
+                $"{PurposeName}サービスがHTTP {(int)statusCode}を返しました。{requestIdSuffix}"),
         };
     }
 }

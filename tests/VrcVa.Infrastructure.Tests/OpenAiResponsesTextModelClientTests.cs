@@ -59,7 +59,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions(),
@@ -91,7 +91,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions() with { MaxOutputTokens = 500 },
@@ -111,7 +111,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new OpenAiResponsesTextModelClient(
             httpClient,
@@ -148,7 +148,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions(),
@@ -168,7 +168,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions() with { MaxInputUtf8Bytes = 5 },
@@ -188,7 +188,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions(),
@@ -209,7 +209,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new(maximum: 2);
+        TextRequestQuota quota = new(maximum: 2);
         OpenAiResponsesTextModelClient firstClient = new(
             httpClient,
             CreateOptions(),
@@ -240,7 +240,7 @@ public sealed class OpenAiResponsesTextModelClientTests
             HttpStatusCode.InternalServerError,
             "SECRET_PROVIDER_RESPONSE_BODY");
         using HttpClient failureHttpClient = new(failureHandler);
-        TranslationRequestQuota quota = new(maximum: 2);
+        TextRequestQuota quota = new(maximum: 2);
         OpenAiResponsesTextModelClient failureClient = new(
             failureHttpClient,
             CreateOptions(),
@@ -276,7 +276,7 @@ public sealed class OpenAiResponsesTextModelClientTests
     {
         BlockingHandler handler = new();
         using HttpClient httpClient = new(handler);
-        TranslationRequestQuota quota = new();
+        TextRequestQuota quota = new();
         OpenAiResponsesTextModelClient client = new(
             httpClient,
             CreateOptions(),
@@ -285,7 +285,7 @@ public sealed class OpenAiResponsesTextModelClientTests
 
         Task<TextModelResponse>[] allowed = Enumerable.Range(
                 0,
-                TranslationRequestQuota.HardMaximum)
+                quota.Maximum)
             .Select(index => client.GenerateAsync(
                 CreateRequest($"Allowed {index}"),
                 CancellationToken.None))
@@ -296,21 +296,21 @@ public sealed class OpenAiResponsesTextModelClientTests
 
         ScanException exception = await Assert.ThrowsAsync<ScanException>(() => excess);
         Assert.Equal(ScanFailureCode.TranslationUsageLimitReached, exception.FailureCode);
-        Assert.Equal(TranslationRequestQuota.HardMaximum, handler.SendCount);
+        Assert.Equal(quota.Maximum, handler.SendCount);
 
         handler.Release();
         await Task.WhenAll(allowed);
 
-        Assert.Equal(TranslationRequestQuota.HardMaximum, handler.SendCount);
+        Assert.Equal(quota.Maximum, handler.SendCount);
         Assert.Equal(0, quota.Remaining);
     }
 
     [Fact]
-    public void TranslationRequestQuota_RejectsMaximumAboveHardLimit()
+    public void TextRequestQuota_RejectsMaximumAboveHardLimit()
     {
-        Assert.Equal(10, TranslationRequestQuota.HardMaximum);
+        Assert.Equal(100, TextRequestQuota.HardMaximum);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new TranslationRequestQuota(TranslationRequestQuota.HardMaximum + 1));
+            new TextRequestQuota(TextRequestQuota.HardMaximum + 1));
 
         RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
         using HttpClient httpClient = new(handler);
@@ -319,7 +319,7 @@ public sealed class OpenAiResponsesTextModelClientTests
                 httpClient,
                 CreateOptions() with
                 {
-                    MaxRequestsPerSession = TranslationRequestQuota.HardMaximum + 1,
+                    MaxRequestsPerSession = TextRequestQuota.HardMaximum + 1,
                 },
                 "test-api-key"));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -327,7 +327,7 @@ public sealed class OpenAiResponsesTextModelClientTests
                 httpClient,
                 CreateOptions() with
                 {
-                    MaxRequestsPerSession = TranslationRequestQuota.HardMaximum + 1,
+                    MaxRequestsPerSession = TextRequestQuota.HardMaximum + 1,
                 },
                 "test-api-key"));
     }
@@ -356,6 +356,22 @@ public sealed class OpenAiResponsesTextModelClientTests
         Assert.Equal(expectedFailureCode, exception.FailureCode);
         Assert.DoesNotContain("secret provider body", exception.ToString(), StringComparison.Ordinal);
         Assert.Contains("req_test_123", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Translator_RejectsInterpretationClientOrQuotaBeforeAnySend()
+    {
+        RecordingHandler handler = new(HttpStatusCode.OK, SuccessfulResponse);
+        using HttpClient http = new(handler);
+        FeatureUsageQuotas quotas = new();
+        OpenAiResponsesTextModelClient interpretation = new(http, CreateOptions(),
+            "test-api-key", quotas.SearchInterpretation);
+        Assert.Throws<ArgumentException>(() => new OpenAiTextTranslator(interpretation, CreateOptions()));
+        Assert.Throws<ArgumentException>(() => new OpenAiTextTranslator(http, CreateOptions(),
+            "test-api-key", quotas.SearchInterpretation));
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(10, quotas.Translation.Remaining);
+        Assert.Equal(10, quotas.SearchInterpretation.Remaining);
     }
 
     private static OpenAiTranslatorOptions CreateOptions() => new()
