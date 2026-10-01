@@ -499,9 +499,17 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 AI機能はコンパイル時登録のFeature Catalog、共通のテキストモデル通信、機能ごとのプロンプトと結果整形に分離しています。現在ユーザーが選べる機能は翻訳だけです。要約は拡張境界を自動テストするための未登録実装で、画面や通常SCANからは起動できず、API利用回数や料金を増やしません。動的プラグイン、画像送信、自律実行、外部ツールはまだ含めていません。
 
-動画検索のCore契約（K1）は、認識文を変更せず1回のprovider検索へ渡すhandler、型付き候補、5件ずつ最大2ページ、古い候補を拒否する選択identityまでfakeで検証しています。検索provider・AI解釈・サムネイル取得・候補URLのclipboard書込み・公開画面はまだ接続していません。現在のアプリからYouTube検索を利用できる段階ではありません。詳細は [動画検索機能設計](docs/DESIGN-VIDEO-SEARCH.md) と [実装タスク](TASKS.md#voice-input-and-video-search--implementation-sequence) を参照してください。
+動画検索のCore契約（K1）は、認識文を変更せず1回のprovider検索へ渡すhandler、型付き候補、5件ずつ最大2ページ、古い候補を拒否する選択identityまでfakeで検証しています。K2で固定yt-dlpのmetadata検索adapterを追加しましたが、AI解釈・サムネイル取得・候補URLのclipboard書込み・公開画面はまだ接続していません。現在のアプリからYouTube検索を利用できる段階ではありません。詳細は [動画検索機能設計](docs/DESIGN-VIDEO-SEARCH.md) と [実装タスク](TASKS.md#voice-input-and-video-search--implementation-sequence) を参照してください。
 
 OSCQuery経由のButton操作、任意のOpenAI翻訳、VR内での位置調整とボタン判定は実機確認済みです。現行Releaseでは、左手・右手・HMD配置の保存と通常再起動、結果ページ1〜3の操作、下部レール全域でのカーソル継続、SCANメニューと結果の位置・角度一致、および10回のキャプチャでVRCVA表示が採用画像へ混入しないことも確認済みです。
+
+### 動画検索providerの準備（K2、公開UIは未接続）
+
+初期の承認済み版はWindows x64のyt-dlp **2026.08.19**です。アプリは自動ダウンロード、インストール、更新をしません。本人が [公式release](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19) の `yt-dlp.exe` を取得し、同releaseの `SHA2-256SUMS` と照合して `%LOCALAPPDATA%\VrcVa\tools\yt-dlp\2026.08.19\yt-dlp.exe` へ配置してください。承認済みSHA256は `66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a` です。通常のフォルダーを使い、リンク・別版・PATH上の実行ファイルは使いません。更新は新version/hashを検証した別PRと本人による交換が必要です。再配布する場合はreleaseの付属ライセンスを別途確認します。
+
+adapterは起動前に固定path/hashを確認し、同じhandleを保持して版を照合します。30秒の全体上限と5秒の後処理上限、stdout 1 MiB / stderr 64 KiBを持ち、設定/plugin/cookies/外部JS runtime/remote componentを取り込みません。動画・音声・サムネイル・metadataファイルや履歴を保存しない検索用optionsだけを渡します。公式one-fileバイナリ自体はPyInstallerにより一時的な実行用ファイルを展開し得ます。未導入・版/hash不一致・異常終了・不正応答・timeoutを正常0件と区別し、終了を確認できない場合は新しい全処理を拒否し、アプリの終了・再起動を求めます。stdout/stderrや検索語をログに含めません。
+
+今回は偽process、自作JSONとローカルの自作process fixtureだけで検証しています。固定yt-dlpでの実YouTube検索、YouTube利用条件・互換性、Windows/Questの公開フローはL3/L2の未実施ゲートです。アカウント/cookiesを用いる回避や追加依存の自動導入は含みません。
 
 ## ライセンス
 

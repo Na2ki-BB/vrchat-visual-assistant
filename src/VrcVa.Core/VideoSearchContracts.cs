@@ -35,7 +35,7 @@ public sealed class VideoSearchRequest
 /// <summary>The entire search batch, retained in memory without additional page fetches.</summary>
 public sealed class VideoSearchBatch
 {
-    public VideoSearchBatch(IEnumerable<VideoMetadata> videos)
+    public VideoSearchBatch(IEnumerable<VideoMetadata> videos, bool isPartial = false)
     {
         ArgumentNullException.ThrowIfNull(videos);
         // Bound enumeration as well as the retained collection, including faulty providers.
@@ -48,9 +48,11 @@ public sealed class VideoSearchBatch
         }
 
         Videos = Array.AsReadOnly(snapshot);
+        IsPartial = isPartial;
     }
 
     public IReadOnlyList<VideoMetadata> Videos { get; }
+    public bool IsPartial { get; }
 }
 
 public interface IVideoSearchProvider
@@ -105,6 +107,7 @@ public sealed class VideoSearchResult
         OperationId = request.OperationId;
         Query = request.Query;
         SearchDuration = searchDuration;
+        IsPartial = batch.IsPartial;
         Candidates = Array.AsReadOnly(batch.Videos.Select(video =>
             new VideoCandidate(SessionId, OperationId, video)).ToArray());
     }
@@ -113,6 +116,7 @@ public sealed class VideoSearchResult
     public Guid OperationId { get; }
     public string Query { get; }
     public TimeSpan SearchDuration { get; }
+    public bool IsPartial { get; }
     public IReadOnlyList<VideoCandidate> Candidates { get; }
     public int PageCount => Math.Max(1, (Candidates.Count + CandidatesPerPage - 1) / CandidatesPerPage);
 

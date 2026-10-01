@@ -65,6 +65,19 @@ public sealed class DirectVideoSearchHandlerTests
     }
 
     [Fact]
+    public async Task PartialProviderBatch_PropagatesThroughTypedSnapshotAndCompatibilityProjection()
+    {
+        Harness harness = new(1);
+        harness.Provider.Batch = new VideoSearchBatch(CreateBatch(1).Videos, isPartial: true);
+        VideoSearchResult result = await harness.Search();
+        Assert.True(result.IsPartial);
+        FeatureResult feature = new(FeatureIds.DirectVideoSearch,
+            [new ResultSection("query", "Query", "synthetic", ResultSectionRole.Primary)], videoSearch: result);
+        Assert.True(new AnalysisResult(feature).FeatureResult.VideoSearch!.IsPartial);
+        Assert.Single(result.GetPage(0));
+    }
+
+    [Fact]
     public async Task Selection_RejectsUnknownActionAndAllStaleOrForgedIdentities()
     {
         Harness harness = new(1);

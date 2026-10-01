@@ -32,6 +32,13 @@ public enum ScanFailureCode
     Unexpected,
     InputKindMismatch,
     SearchInterpretationUsageLimitReached,
+    VideoSearchNotConfigured,
+    VideoSearchExecutableRejected,
+    VideoSearchFailed,
+    VideoSearchInvalidMetadata,
+    VideoSearchOutputTooLarge,
+    VideoSearchTimedOut,
+    VideoSearchCleanupFailed,
 }
 
 public sealed record ScanRequest(
