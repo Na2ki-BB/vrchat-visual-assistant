@@ -12,6 +12,7 @@ public enum ScanStage
     Completed,
     TextHandling,
     Transcription,
+    SearchInterpretation,
 }
 
 public enum ScanFailureCode
@@ -51,6 +52,14 @@ public enum ScanFailureCode
     VoiceTranscriptionInvalidResponse,
     VoiceTranscriptionEmpty,
     VoiceTranscriptionFailed,
+    SearchInterpretationNotConfigured,
+    SearchInterpretationInputTooLarge,
+    SearchInterpretationAuthenticationFailed,
+    SearchInterpretationRateLimited,
+    SearchInterpretationTimedOut,
+    SearchInterpretationInvalidResponse,
+    SearchInterpretationFailed,
+    SearchInterpretationInvalidInput,
 }
 
 public sealed record ScanRequest(
@@ -61,6 +70,9 @@ public sealed record ScanRequest(
     public FeatureId FeatureId { get; init; } = FeatureIds.Translation;
 
     public TextInputSession? TextInput { get; init; }
+
+    /// <summary>Explicit retry of this failed interpreted search, without another paid interpretation.</summary>
+    public Guid? RetrySearchOperationId { get; init; }
 
     public FeatureInputKind InputKind => TextInput is null
         ? FeatureInputKind.CapturedFrame

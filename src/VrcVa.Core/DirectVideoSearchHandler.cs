@@ -24,7 +24,8 @@ public sealed class DirectVideoSearchHandler : ITextFeatureHandler
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(request);
-        if (request.FeatureId != FeatureIds.DirectVideoSearch || !ReferenceEquals(request.TextInput, input))
+        if (request.FeatureId != FeatureIds.DirectVideoSearch || !ReferenceEquals(request.TextInput, input)
+            || request.RetrySearchOperationId is not null)
         {
             throw new ArgumentException("The direct search request must match its transcript and feature.", nameof(request));
         }
