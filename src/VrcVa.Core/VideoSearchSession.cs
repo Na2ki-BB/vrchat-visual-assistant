@@ -24,6 +24,19 @@ public sealed class VideoSearchSession
         _execution = execution;
     }
 
+    /// <summary>Releases invalidated content immediately on close/re-record, without touching a newer live session.</summary>
+    public void DiscardInvalidatedState()
+    {
+        lock (_sync)
+        {
+            DiscardStaleSession();
+            if (_searchOperation is not null && !_execution.IsResultCurrent(_searchOperation))
+            {
+                _searchOperation = null;
+            }
+        }
+    }
+
     public VideoSearchResult? CurrentResult
     {
         get
