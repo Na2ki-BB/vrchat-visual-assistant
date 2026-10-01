@@ -1,10 +1,10 @@
 # VRChat Visual Assistant — 共通AI基盤設計
 
-Status: implemented baseline / unexposed Windows recording adapter / approved voice flow (not connected) / historical decisions
+Status: WPF/VR voice and video-search integration implemented; automated verification recorded; separate real-device/service gates pending
 
-Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: through 2026-08-15 (Asia/Tokyo).
+Last updated: 2026-10-01 (Etc/UTC). Current implementation: I1–L2. Historical device evidence: through 2026-08-15 (Asia/Tokyo); new voice/search screens remain unverified on device.
 
-[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md) · [動画検索機能設計（設計合意・未実装）](DESIGN-VIDEO-SEARCH.md)
+[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md) · [動画検索機能設計](DESIGN-VIDEO-SEARCH.md)
 
 ## Purpose and ownership
 
@@ -12,9 +12,9 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 画面の具体的な取得方法、OCR精度、英語から日本語への変換、翻訳費用と実測は[日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md)で管理する。`ICaptureSource` とフレームの所有権は基盤の契約だが、現行のOpenVR/Windows取得方式の詳細は同文書が正本となる。
 
-文書再整理そのものでは実装を変更しなかった。その後のI2で `CapturedFrame` と `TextInputSession` の入力境界を追加したが、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
+文書再整理そのものでは実装を変更しなかった。その後I2で `CapturedFrame` と `TextInputSession` の入力境界、K5で翻訳・直接検索・解釈検索の実行時catalogを追加した。J3/K5/L2で共通音声入力と動画検索をWPF/VRへ接続済み。要約は未登録のテスト用実装であり、音声翻訳・任意ツールの実行基盤は含まない。
 
-2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節ではI1/I2の純粋な契約と未実装の接続を区別し、共通音声フロー全体が対応済みとはみなさない。J1で未公開Windows録音adapterと音声sessionを追加した。通信/UIの接続と実機受入は残す。音声送信上限は下記で合意済みとする。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下はI1/I2の契約からJ1/J2の録音・通信・quota、J3の同意/資格情報/WPF、L2のVRまでの現在実装を記す。新機能の実マイク・API・YouTube・Quest受入は未実施で、[L3検証記録](../TASKS.md#l3-verification-evidence--2026-10-01)と区別する。
 
 ## Reading current behavior and history
 
@@ -128,7 +128,7 @@ The project count is deliberately small. OpenVR remains a Windows adapter behind
 - `FeatureResult` contains ordered, uniquely identified sections and exactly one primary section. `AnalysisResult` remains the compatibility adapter for existing translation consumers.
 - `ITextModelClient` is the shared text-model boundary. Feature code owns instructions and result mapping; the infrastructure adapter owns HTTP, authentication, parsing, and bounded usage policy.
 
-The I2 foundation distinguishes `FeatureInputKind.CapturedFrame` and `Text`. `ScanRequest.CreateText` carries an immutable, in-memory `TextInputSession` with a nonempty session ID and the original transcript (up to 4,000 UTF-8 bytes, without trimming/truncation). The text route uses `ScanStage.TextHandling` and sets capture source to `none`; the image route and translation compatibility remain unchanged. No text feature is registered by the Windows composition root yet. I3 adds an application-owned `ExecutionCoordinator` shared by all Windows SCAN pipelines and result copy. Audio/search adapters and their public UI remain later tasks.
+The I2 foundation distinguishes `FeatureInputKind.CapturedFrame` and `Text`. `ScanRequest.CreateText` carries an immutable, in-memory `TextInputSession` with a nonempty session ID and the original transcript (up to 4,000 UTF-8 bytes, without trimming/truncation). The text route uses `ScanStage.TextHandling` and sets capture source to `none`; the image route and translation compatibility remain unchanged. K5 registers both text search features alongside translation. I3 provides the application-owned `ExecutionCoordinator`, now shared by all SCAN, voice, search, and copy flows. J3/K5/L2 connect their WPF/VR entry points; real-device/service acceptance remains pending.
 
 Source: [Features.cs](../src/VrcVa.Core/Features.cs), [Models.cs](../src/VrcVa.Core/Models.cs), [ScanPipeline.cs](../src/VrcVa.Core/ScanPipeline.cs), and [OpenAiResponsesTextModelClient.cs](../src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs).
 
@@ -147,15 +147,15 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 `OpenVrRuntime` is process-wide and reference counted. Capture and rendering hold leases on the same runtime; disposing a per-scan capture lease must not shut down the result panel's lease. Use OpenVR only while SteamVR is already running, without starting SteamVR as a side effect. The feature-specific hide/boundary/discard/adopt ordering remains in [the translation capture contract](DESIGN-JAPANESE-TRANSLATION.md#capture).
 
-## Shared voice input — approved design, not implemented
+## Shared voice input — implemented, acceptance pending
 
 ### J3 WPF integration status — 2026-10-01
 
-`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionの空hostを用意した。検索ボタンはK5、腕マイク・VR認識文/候補はL2で同じflowへ接続した。
+`MainWindow`の「音声入力」タブへJ1/J2を接続した。`VoiceInputFlow`が録音から文字起こし/全文保持まで同じ`ExecutionCoordinator`を使い、`VoiceInputConfiguration`が明示同意と専用`VrcVa/OpenAI/Voice`を分離する。資格情報だけで有効化せず、説明/参考料金/公式料金・保持条件リンク/周囲の声の注意を表示する。原文は`TextInputSession`としてメモリだけに保持し、用途actionのhostを用意した。検索ボタンはK5、腕マイク・VR認識文/候補はL2で同じflowへ接続した。
 
 成功時は音声を破棄してから全文表示し、失敗時のみJ1の非更新期限内で手動再送する。設定/client交換後もMainWindow所有の音声quotaを共有する。中止・閉じる・録り直し・新SCAN・終了・接続済みSteamVRの喪失は旧音声/文を破棄し、後処理後までgateを保持する。SteamVRが最初から無い状態ではデスクトップ音声を妨げない。native cleanup失敗は型付き停止/終了案内を表示する。fakeマイク/HTTP/時計およびWPF dispatcherの回帰で境界を検証するが、Windows実マイク・有料API・Questの受入は未実施である。
 
-以下のapproved-design節の未実装表現は段階導入時点の記録であり、WPF接続の現在状態はこの節とTASKSを優先する。
+WPFとVRは同じflow/sessionを使い、公開fakeデモへの切替はない。通常版の停止/上限到達は実際の有料送信へ進むため、実機評価時にもAPI承認範囲を先に確認する。
 
 ### L1 shared interactive progress integration — 2026-10-01
 
@@ -165,7 +165,7 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 capture中はcontrollerのVR表示更新を抑制し、既存overlay gateのhide/boundary/discard/adopt順序に従う。WPF中止は残し、owner回収後にのみ操作を再開する。各actionは描画snapshotと現在のsession/operation/stateを再照合し、旧失敗のretry/closeで新操作を変更しない。接続済みSteamVRの喪失は音声/SCANを取り消し、再接続を同期的に誘発せず回収する。終了はtimer/表示callbackを停止してから既存の回収待ちへ渡す。
 
-L1のfake/境界testsは画面の寸法と制御契約を検証するだけで、新画面のQuest実機可読性・歩行・実マイク/APIの成功を示さない。腕マイク/認識文/候補カードはL2、現在buildの実機/実サービス受入はL2/L3に未完了で残す。
+L1のfake/境界testsは画面の寸法と制御契約を検証するだけで、新画面のQuest実機可読性・歩行・実マイク/APIの成功を示さない。腕マイク/認識文/候補カードはL2で接続済み。現在buildの実機/実サービス受入はL2/L3に未完了で残す。
 
 ### Responsibility and entry point
 
@@ -188,19 +188,19 @@ WPFと同じ共通音声・検索flowを腕マイクとVR認識文/候補へ接�
 
 音声認識は**OpenAI GPT Transcribeを正式採用**する。これは採用方針の決定であり、実APIでの精度・速度・マイク動作は未評価。音声用provider adapterに閉じ込め、具体モデルID・版を設定とadapterの境界で差し替えられるようにする。検索語を解釈するテキストモデルの選定とは分ける。ローカルAIは使わない。
 
-Windows側はマイク取得・停止・メモリバッファの所有、Infrastructure側は音声API通信・応答解析、共通入力側は状態と認識文を持つ。I1で下記の初期adapter境界を決め、実装はJ1/J2へ残す。本人はVRChatをミュートして話す運用を想定しているが、VRChat内ミュートとOS/物理マイクのミュートは別であり、同時利用の可否はWindows + SteamVR + Questで確認する。
+Windows側はマイク取得・停止・メモリバッファの所有、Infrastructure側は音声API通信・応答解析、共通入力側は状態と認識文を持つ。I1で下記の初期adapter境界を決め、J1/J2で実装した。本人はVRChatをミュートして話す運用を想定しているが、VRChat内ミュートとOS/物理マイクのミュートは別であり、同時利用の可否はWindows + SteamVR + Questで確認する。
 
 音声は明示した1回分をメモリ内にだけ保持する。文字起こし成功後は音声を解放する。失敗時の明示的な「やり直し」に必要な音声だけを現在の画面セッション内に一時保持し、中止・閉じる・録り直し・アプリ終了で録音停止と解放を行う。期限・サイズ制限は下記I1の判断に従う。内容の履歴、音声ファイル、逐次ストリーミング送信は初期仕様に追加しない。
 
 ### I1 adapter and settings decisions — foundation contracts only
 
-2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**J1の未公開録音adapterとJ2の未公開音声HTTP/quotaを追加済み。同意画面、資格情報保存/読込、公開音声/検索UIは未接続**。翻訳モデルallowlistは変更しない。
+2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加した。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。J1/J2の録音・音声HTTP/quota、J3の同意/専用資格情報/WPF、K5/L2の検索WPF/VRへ接続済み。翻訳モデルallowlistは変更しない。
 
 - **録音（J1）**: Windows標準のWinMM `waveIn` を直接包み、追加ライブラリは導入しない。`WAVE_MAPPER` と `WAVE_MAPPED_DEFAULT_COMMUNICATION_DEVICE` でWindows既定の通信入力デバイスを使う。`WAVE_MAPPER` 単独は別の対応デバイスを選び得るので使わない。録音開始時のデバイス/設定を固定し、途中切替や別マイクへの暗黙fallbackはしない。形式照会、未接続/拒否/非対応/切断を段階別の失敗にする。デバイス選択はWindows側で行い、アプリ内一覧は初期範囲に加えない
 - **形式/容量（J1/J2）**: little-endian PCM16、mono、16,000 Hz（32,000 byte/秒）、44 byte headerのWAVをメモリで作る。録音上限は30秒、変更範囲1〜120秒。現設定秒数×32,000 byteで入力を止め、全体hard capはPCM 3,840,000 byte + WAV header 44 byte。余分なWAV chunk、別形式、途中sample、空データは送信しない。Windows driver内の同一デバイス形式変換の可否はJ1/L2で検証する
 - **無音/保持（J1/J3）**: 停止後に空データ、または全体RMS ≤ 0.001かつpeak ≤ 0.01（PCM16正規化値）の近無音を拒否する。これは発話検出ではなく、無音で早期停止もしない。失敗音声は最初の送信失敗時から単調時計で初期120秒（許容15〜300秒）だけ保持し、再試行で期限を延ばさない。期限内に開始した送信は取消/完了まで所有するが、それ以降の再送は不可。期限、成功、閉じる、中止、録り直し、終了で所有bufferをゼロ化・解放する
 - **文字起こし（J2）**: `POST https://api.openai.com/v1/audio/transcriptions` へ `multipart/form-data`、`model=gpt-transcribe`、`file=recording.wav` / `audio/wav`、`response_format=json`、`stream=false`。初期は言語自動判定、prompt/keywords/話者情報なし。専用adapterのallowlistはこのモデルと公式endpointだけ。`AllowAutoRedirect=false` とし、3xxは失敗、307/308で音声やキーを再送しない。別モデルは検証付きの別変更で追加し、無断fallbackしない。timeout 60秒、応答body 64 KiB、空/不正応答を拒否し、認識文は4,000 UTF-8 byte以内で切り捨てず検証する。音声用キーは専用Credential Manager target `VrcVa/OpenAI/Voice` に置き、既存翻訳キーや一般環境変数を自動流用しない。キーの保存だけでは音声同意にならない
-- **設定（I4/J3）**: 既存 `%LOCALAPPDATA%/VrcVa/settings.json` の次のversion 6へ非秘密の `VoiceInput` / `UsageLimits` を追加し、旧version 1〜5から音声無効・下記初期値へ移行する。キー、音声、認識文、検索語、候補、消費量は保存しない。`VoiceInput.IsEnabled=false` が初期値で、J3の専用説明/明示操作でのみ有効化する。不正値は保存/新処理前に全体拒否し、失敗した再読込は最後の有効snapshotを維持する。I4でversion 6の保存/migrationを実装。新規公開音声opt-in UIはJ3へ残す
+- **設定（I4/J3）**: 既存 `%LOCALAPPDATA%/VrcVa/settings.json` の次のversion 6へ非秘密の `VoiceInput` / `UsageLimits` を追加し、旧version 1〜5から音声無効・下記初期値へ移行する。キー、音声、認識文、検索語、候補、消費量は保存しない。`VoiceInput.IsEnabled=false` が初期値で、J3の専用説明/明示操作でのみ有効化する。不正値は保存/新処理前に全体拒否し、失敗した再読込は最後の有効snapshotを維持する。I4でversion 6の保存/migrationを実装。公開音声opt-in UIはJ3で接続済み
 
 | 独立した設定値 | 初期値 | 許容範囲（整数・両端含む） | 接続タスク |
 | --- | --- | --- | --- |
@@ -213,11 +213,11 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 音声quotaは実sample数から求め、送信するPCM byte数を32,000で割った秒数を**要求ごとに整数秒へ切上げ**る（例: 32,000 byteは1秒、32,002 byteは2秒）。header/送信準備/壁時計は数えず、失敗音声の再送も同じ全量を新たに予約する。3つの用途の消費カウンターはcomposition rootのプロセス寿命所有とし、client/runtime/設定snapshotの交換とは別に保持する。設定を増減しても既消費量は不変、下げて消費済み量を下回った枠は残り0、再び増やせば新上限から既消費量を引く。進行中の録音/操作は開始時snapshotで完走し、新上限は次の操作から適用する。予約・取消・消費の実処理はI4/J2で検証する。
 
-公式根拠は [Microsoft waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[OpenAI audio transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe)。2026-10-01に文書契約のみ確認し、価格/保持条件の利用前表示、実マイク、実API性能/精度はJ3/L2/L3の確認を残す。
+公式根拠は [Microsoft waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[OpenAI audio transcription API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe)。2026-10-01に文書契約のみ確認し、価格/保持条件の利用前表示はJ3で接続済み。実マイク、実API性能/精度はL2/L3の確認を残す。
 
-### J1 Windows recording adapter — unexposed implementation
+### J1 Windows recording adapter — implemented
 
-`VoiceInputRecorder` は `VoiceInputOptions.IsEnabled` と専用音声キー利用可否の非秘密snapshotを確認し、共通 `ExecutionCoordinator` の新sessionを受け付けてからマイクを開く。拒否/Busyでは現sessionを変更しない。公開WPF、Credential Manager接続、文字起こしAPI、音声quotaは追加しない。J3は開始時snapshotと明示操作をこの境界へ渡す。
+`VoiceInputRecorder` は `VoiceInputOptions.IsEnabled` と専用音声キー利用可否の非秘密snapshotを確認し、共通 `ExecutionCoordinator` の新sessionを受け付けてからマイクを開く。拒否/Busyでは現sessionを変更しない。録音adapter自体は公開WPFやCredential Managerを所有しない。J2の文字起こし/音声quota、J3の資格情報と開始時snapshot、L2のVR明示操作を同じ境界へ接続する。
 
 `WinMmMicrophoneFactory` は既定通信deviceの形式を照会し、`CALLBACK_EVENT` と専用workerで3個の100 ms native bufferを循環する。実際のWinMM endpoint IDをCoreAudioへ対応付け、入力endpointの状態と通信既定の変更通知/再確認で喪失を検出する。WinMMの既定streamはOSにより別deviceへrouteされ得るため、変更を検知した録音は失敗とし、新既定へ継続しない。driverから返ったbufferはqueue順で処理し、停止時の最終部分bufferも回収する。reset、unprepare、closeと通知解除が完了するまで後続処理へ渡さない。COM callback interface/実装は必要最小限のpublic型、ctorはinternalとする。登録/解除はAddRef/ReleaseしないWindows契約のためcallback pointerを明示保持し、同pointerで解除成功後にだけReleaseする。
 
@@ -225,29 +225,29 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 正常driverの停止/解放順序はfakeで確認する。driverが繰返しreset/unprepare/closeを拒否する、または通知解除が失敗する異常経路では、まだdriverが所有するpointer/eventを解放してuse-after-freeを起こさず、最大1録音分のbounded native allocationと必要な通知ownerをprocess内で隔離する。`MicrophoneCleanupFailed` を返し、native再openを拒否し、共通coordinatorの `Stop()` で全用途の新admissionも拒否する。shutdown待ちは完了できるが、driver所有資源を解放成功とは扱わず保持する。OS資源回収には本人のアプリ再起動が必要となる可能性があり、この経路を正常解放成功と扱わない。
 
-根拠: [waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[waveInReset](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinreset)、[waveInClose](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinclose)、[GetState](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-getstate)、[stream routing](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)、[COM visibility](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.comvisibleattribute)、[notification lifetime](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-registerendpointnotificationcallback)。2026-10-01に公式仕様とfakeを確認。実マイク/OS・物理ミュート/SteamVR/QuestはL2、実APIと保持条件はJ3/L3で確認する。
+根拠: [waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[waveInReset](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinreset)、[waveInClose](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinclose)、[GetState](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-getstate)、[stream routing](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)、[COM visibility](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.comvisibleattribute)、[notification lifetime](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-registerendpointnotificationcallback)。2026-10-01に公式仕様とfakeを確認。実マイク/OS・物理ミュート/SteamVR/QuestはL2、実API評価と利用前の条件再確認はL3へ残す。
 
-### J2 transcription adapter and process-lifetime audio quota — unexposed implementation
+### J2 transcription adapter and process-lifetime audio quota — implemented
 
-`IVoiceTranscriber` はimmutableな借用canonical WAVを受け、callerがJ1音声leaseを処理/取消回収の完了まで保つ。`OpenAiVoiceTranscriber` は明示opt-in snapshotと専用型`OpenAiVoiceCredential`を別々に検査し、未同意/キーなしではquota予約も通信もしない。credential型の専用targetは`VrcVa/OpenAI/Voice`、文字列化はredacted。credential store/環境変数のread/write、既存翻訳キーの流用、公開WPF接続は含めずJ3へ残す。
+`IVoiceTranscriber` はimmutableな借用canonical WAVを受け、callerがJ1音声leaseを処理/取消回収の完了まで保つ。`OpenAiVoiceTranscriber` は明示opt-in snapshotと専用型`OpenAiVoiceCredential`を別々に検査し、未同意/キーなしではquota予約も通信もしない。credential型の専用targetは`VrcVa/OpenAI/Voice`、文字列化はredacted。adapter自体はcredential store/環境変数をread/writeせず、既存翻訳キーも流用しない。J3が専用Credential Managerから取得し、WPF/VRの同じflowへ接続する。
 
 productionの専用HTTP handlerはredirect/cookieを無効化し、公式endpointと`gpt-transcribe`だけを受け付ける。44 byte headerのcanonical WAVの全field/長さ、開始時録音上限1〜120秒のPCM容量を送信前に照合する。multipartは`model`、`file=recording.wav` / `audio/wav`、`response_format=json`、`stream=false`のみ。言語/prompt/話者情報/Responsesの`store`を付けない。60秒以内のlinked取消をheader/body/parse後まで適用し、response全体64 KiBと不正/空JSON、認識文4,000 UTF-8 byteを拒否する。本文は切り捨てず保持し、エラーbodyやHTTP例外内容を利用者へ出さず、statusと短いASCII request IDだけを表示する。HTTP3xx/認証/429/失敗はtyped errorで返し、自動再送/fallbackはしない。
 
 `FeatureUsageQuotas.Voice` はcomposition rootが既に持つapp-ownedオブジェクトの一部で、翻訳/検索AI解釈と独立。`VoiceRequestQuota` はPCM実sampleから各送信の秒数を切上げ、秒数と1回を同じlockで予約する。`SendAsync`を試みる直前だけ消費へ移し、取消/破棄で返却できるのは未開始の予約だけ。認証/通信失敗、timeout、取消、本人の再送は開始した全量/1回を数える。`ApplyLimits`は全用途の設定を同じlockで更新し、client再構築/reloadでidentity/既消費/保留予約を変えない。上限を下げても予約済みoperationは開始時snapshotで完走し、新admissionだけを制限する。
 
-2026-10-01に[公式file transcription](https://developers.openai.com/api/docs/guides/speech-to-text)、[API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[model](https://developers.openai.com/api/docs/models/gpt-transcribe)、[retention](https://developers.openai.com/api/docs/guides/your-data)を再確認。retention表は音声transcriptionsの学習利用No、abuse monitoring/Application stateともNoneを記載する。これはアプリのResponses `store:false`による保証ではない。利用前の最新料金/条件表示はJ3、実マイク/API/Quest受入はL2/L3へ残す。
+2026-10-01に[公式file transcription](https://developers.openai.com/api/docs/guides/speech-to-text)、[API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[model](https://developers.openai.com/api/docs/models/gpt-transcribe)、[retention](https://developers.openai.com/api/docs/guides/your-data)を再確認。retention表は音声transcriptionsの学習利用No、abuse monitoring/Application stateともNoneを記載する。これはアプリのResponses `store:false`による保証ではない。利用前の料金/条件リンクはJ3で表示し、実マイク/API/Quest受入はL2/L3へ残す。
 
 ### Minimal input and result extension
 
 I2で `FeatureInputKind.Text`、`TextInputSession`、`FeatureEntry(ITextFeatureHandler)` と `ScanRequest.CreateText` を追加し、`ScanPipeline` は入力種別を実処理前に検証して画像/テキスト経路へ分岐する。音声や文章を偽の `CapturedFrame` に包まず、テキスト機能のためにcapture/OCRを呼ばない。既存翻訳は現行analyzerと互換結果を維持する。具体型・クラス名の確定や全pipelineの一般化は本設計の条件にしない。
 
-I2で `FeatureDataBoundary` をflagsへ拡張し、既存のlocal/抽出text/imageの値を維持したまま `VoiceAudioToOpenAi`、`InputTextToOpenAi`、`SearchTextToYouTube` を区別する。解釈検索は後者2つを組み合わせられ、音声の送信境界とは独立する。metadataはprovider有効化や送信同意ではなく、実通信は未接続である。「抽出テキストのみ」の表示で音声を送らない。認識文は不変のsession IDと本文を持ち、用途の検索語は共通sessionへ保存/上書きしない。I3で用途処理のoperation IDと世代、古い応答/操作の拒否を共通gateへ接続した。具体的な検索候補/音声adapterの接続は後続タスクで行う。
+I2で `FeatureDataBoundary` をflagsへ拡張し、既存のlocal/抽出text/imageの値を維持したまま `VoiceAudioToOpenAi`、`InputTextToOpenAi`、`SearchTextToYouTube` を区別する。解釈検索は後者2つを組み合わせられ、音声の送信境界とは独立する。metadata自体はprovider有効化や送信同意ではない。実通信はJ3/K5の明示操作へ接続済み。「抽出テキストのみ」の表示で音声を送らない。認識文は不変のsession IDと本文を持ち、用途の検索語は共通sessionへ保存/上書きしない。I3で用途処理のoperation IDと世代、古い応答/操作の拒否を共通gateへ接続した。具体的な検索候補/音声adapterはK5/J3とL2で接続した。
 
 テキストセクションだけの `FeatureResult` に、動画候補の型付きデータと選択actionを追加する。タイトルや任意URL文字列をコマンドとして扱わず、現在の候補IDを照合して許可済みのコピーだけを実行する。翻訳のprimary section・互換表示は壊さない。候補の詳細は動画検索設計を正本とする。
 
 ### Cross-feature single-flight and cancellation
 
-I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoordinator` / `ExecutionOperation` へ置き換えた。MainWindowは1つのgateをアプリ寿命で所有し、desktop/hotkey/OSC/腕SCAN、診断画像、既存結果のコピーに共有する。録音/文字起こし/検索はまだ公開していないが、fake操作で同じ所有境界を検証する。録音、文字起こし、検索語解釈、検索、コピー、および既存翻訳を含めて、**処理は一度に1つ**にする。
+I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoordinator` / `ExecutionOperation` へ置き換えた。MainWindowは1つのgateをアプリ寿命で所有し、desktop/hotkey/OSC/腕SCAN、診断画像、既存結果のコピーに共有する。録音/文字起こし/検索も同じgateへ接続し、fake操作で所有境界を検証する。録音、文字起こし、検索語解釈、検索、コピー、および既存翻訳を含めて、**処理は一度に1つ**にする。
 
 - `TryBeginSession` は新しい入力を、`TryBeginOperation` は現在のsessionの検索/コピー等を受け付ける。Busyでは世代/画面を変えずqueueにも積まない。OSCは受信時に判定してからdispatcherへ渡し、腕SCANは受付後にのみlauncherを隠す
 - operation IDは1起動中に再利用せず、同じoperationでpipelineを2回実行できない。認識文/候補の待機中はoperationを解放する。modelの短いメモリ更新はadmissionと原子的に排他し、資格情報の保存/削除とruntime交換は設定用operationを通して一括所有する
@@ -255,7 +255,7 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 - WPF/OpenVRは成功・失敗・進捗をdispatcher実行直前に再検証する。VRの本人によるcloseはcapture用Hideと別のeventで失効し、画像選択dialogも単調な世代で古い操作を拒否する
 - Windows終了はClosingを一度保留し、operationとOSC起動の回収を待つ。最後のCloseを必ずdispatcherへpostしてからpanel/HTTP/CTSを破棄する。captureのhide/boundary/discard/adoptと参照数付きOpenVR所有は変更しない
 
-共通制御と利用quotaは別の所有物で、翻訳10回/解釈10回、音声300秒/30送信の初期値は変更しない。text quota runtime接続はI4で実装済み、音声quotaはJ2、音声/検索UIと操作できるVR進捗/失敗画面はJ3/K5/L1以降へ残す。
+共通制御と利用quotaは別の所有物で、翻訳10回/解釈10回、音声300秒/30送信の初期値は変更しない。text quotaはI4、音声quotaはJ2、音声/検索UIと操作できるVR進捗/失敗画面はJ3/K5/L1/L2で接続済み。
 
 1. 明示操作でgateを取得し、現在のsession/operationとキャンセルトークンを発行する。録音開始から文字起こし完了までを1処理として占有する
 2. 認識文や候補を表示しているだけの待機状態ではgateを解放する。次の検索・コピー・SCANも同じgateで競合を確認する。他の処理中は新要求をqueueに積まず、現在の画面を壊さない短い処理中表示にする
@@ -264,7 +264,7 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 5. 中止後は「中止中」を示し、ローカルの処理とリソースの回収を確認してからgateを解放する。遅れて返った結果で新画面や新候補を置き換えない。既にサービスが受け付けた要求の中止が、課金取消を保証するわけではない
 6. 失敗は段階と短い理由を表示し、本人が「やり直し」を選んだ時だけ該当段階から再実行する。認識文・確定済み検索語など有効な入力は再利用し、成功済みの有料段階を自動でやり直さない。認証不足・上限到達では設定案内を出し、無意味な再送をしない
 
-処理表示だけの現行status atlasや、エラー時に腕へ戻る現行経路では中止・やり直しを操作できない。共通の**操作可能な処理中/失敗画面**を新設する必要がある。full 1280x720 view、表示とhit-testが同じ矩形を使う契約、priority-zero入力、歩行の非干渉を継承する。ヘッダーは表示専用とし、中止・やり直し等の操作は既存body railに置く。用途ボタンは認識文の直下となるbody内に配置する。
+従来の処理表示だけのstatus atlasとエラー時の腕戻りに代わり、L1で共通の**操作可能な処理中/失敗画面**を接続した。full 1280x720 view、表示とhit-testが同じ矩形を使う契約、priority-zero入力、歩行の非干渉を継承する。ヘッダーは表示専用とし、中止・やり直し等の操作は既存body railに置く。用途ボタンは認識文の直下となるbody内に配置する。
 
 既存翻訳のcapture時には、新しい音声画面を含むVRCVA overlayを従来どおり抑制する。取得のhide/boundary/discard/adopt順序を変えない。captureの短い非表示中はWPF側の中止経路を維持し、その後に共通進捗画面へ戻す。SteamVR喪失・デバイス切断・終了でも録音や操作状態が残らないようにする。
 
@@ -272,22 +272,22 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 
 - 既存のWindows Credential Managerを活用し、公式OpenAI endpoint以外へ保存キーを送らない。翻訳用キーがあるだけでマイク取得・音声送信を有効にせず、音声機能の明示有効化と送信先・費用の表示を設ける
 - 音声用のAPIは既存Responsesテキスト通信と分ける。既存の `store: false`、入力4,000バイト、10回quota等が音声にもそのまま適用されるとは説明しない
-- 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutは下記I1で固定し、接続はJ2/J3へ残す
+- 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutはI1で固定し、J2/J3で接続済み
 - 音声quotaはHTTP送信直前に、その要求に含む音声の全秒数と1回を一括予約する。予約で上限を超える場合は送信しない。送信開始後の失敗・中止・timeoutは返却せず、本人による再送も新たに秒数と回数を消費する。録音中の中止など送信前に終了したものは消費しない（予約後でも送信未開始を確認できれば返却する）。自動再送はしない
 - 音声quotaはアプリのプロセス寿命で共有し、画面を閉じる、録り直す、設定再読込、runtime再構築では消費量をリセットしない。アプリ再起動でリセットされるため、月額支出上限やアカウント全体の予算保証ではない
 - 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細はI4の独立text quotaとJ2の独立音声quotaを参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
-音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、J1の未公開録音adapter/sessionとI4の非秘密設定保存/独立text quotaを実装済み。J2の音声HTTP/quotaもfakeで実装済みだが、資格情報store/公開UIは未接続である。
+音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローはJ1/J2のadapterとI4の設定/独立quotaをJ3/L2の同意・専用資格情報・WPF/VRへ接続済み。実機/実サービスの未完了ゲートはTASKSで管理する。
 
 ## Feature extension rules
 
-Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The earlier OCR/text-only extension point was proved with the unregistered summarization analyzer. The next user-visible feature is now the approved voice-driven video-search design above, which needs a minimal text-input extension; it must not force microphone input through OCR. OCR/world text, transcripts, model outputs, and search metadata are untrusted content, not authority for arbitrary tools or settings changes.
+Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The earlier OCR/text-only extension point was proved with the unregistered summarization analyzer. Voice-driven video search now uses the text-input extension above, without forcing microphone input through OCR. OCR/world text, transcripts, model outputs, and search metadata are untrusted content, not authority for arbitrary tools or settings changes.
 
 The current implemented foundation resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the purpose-bound process-lifetime quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
 
-I4で翻訳/検索AI解釈に別カウンターを追加した。各10回は初期値で、設定により1〜100へ個別変更できる。J2で音声quotaを追加し、公開解釈adapterは後続タスクへ残す。
+I4で翻訳/検索AI解釈に別カウンターを追加した。各10回は初期値で、設定により1〜100へ個別変更できる。J2で音声quota、K3/K5で解釈adapterと公開操作を追加した。
 
 新機能を追加するときの境界:
 
@@ -321,7 +321,7 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 
 ### Independent usage quotas — implemented text counters
 
-2026-10-01の追加指示で、翻訳と検索AI解釈を同じ10回枠にする案を変更した。共通にするのは通信・認証・検証の仕組みであり、消費カウンターではない。I4で共有 `TranslationRequestQuota` を用途付き `TextRequestQuota` と `FeatureUsageQuotas` に置き換えた。MainWindowが2つのカウンターをプロセス寿命で所有し、翻訳factoryと全再構築へ翻訳用の同じinstanceを渡す。解釈枠はfake共通HTTPで検証し、公開adapter/モデル接続はK3へ残す。
+2026-10-01の追加指示で、翻訳と検索AI解釈を同じ10回枠にする案を変更した。共通にするのは通信・認証・検証の仕組みであり、消費カウンターではない。I4で共有 `TranslationRequestQuota` を用途付き `TextRequestQuota` と `FeatureUsageQuotas` に置き換えた。MainWindowが翻訳・解釈の2つのtextカウンターと独立した音声quotaをプロセス寿命で所有し、翻訳factoryと全再構築へ翻訳用の同じinstanceを渡す。解釈枠はK3/K5のadapter/公開操作へ接続し、fake共通HTTPで検証する。
 
 - 翻訳と検索AI解釈に別々のプロセス寿命のquotaを持たせ、どちらを使っても他方の残回数を減らさない。片方が上限に達しても他方は自分の残回数で利用できる
 - 初期値は既存の数値を引き継ぎ、**翻訳10回・検索AI解釈10回／起動**をそれぞれ設定する。10回ずつという数値は新しく利用希望回数を指定されたものではなく、分離時の初期値であり、用途別に変更可能とする。設定場所・許容範囲は上記I1に従い、text quotaへの接続はI4で実装済み
@@ -329,7 +329,7 @@ Windows Credential Manager remains the selected personal-use secret store. It gi
 - 音声の300秒・30送信枠は両テキスト枠から独立する。「そのまま検索」は解釈枠を消費せず、確定済み検索語によるyt-dlpの再試行も翻訳/解釈枠を消費しない
 - **single-flightは引き続き全用途で共通**。quotaの分離は同時に処理してよいという意味ではない。上限表示や失敗理由には対象の用途を示す
 
-I4の`UsageSettingsSnapshot`は全体を検証した後だけ設定を交換する。version 1〜5は音声無効/初期枠へ移行し、version 6の全fieldを必須とする。SCANの受付後・capture前、および資格情報runtime交換時に共通gateを保持して再読込する。無効な設定は最後の有効snapshotを維持したまま、そのSCANを通信/取得前に拒否し、修正後の次処理で復帰する。進行中は再読込せず、上限増減でも過去の消費量は不変。カウンター/キー/音声/本文は設定へ保存しない。音声枠の計数はJ2へ残す。
+I4の`UsageSettingsSnapshot`は全体を検証した後だけ設定を交換する。version 1〜5は音声無効/初期枠へ移行し、version 6の全fieldを必須とする。SCANの受付後・capture前、および資格情報runtime交換時に共通gateを保持して再読込する。無効な設定は最後の有効snapshotを維持したまま、そのSCANを通信/取得前に拒否し、修正後の次処理で復帰する。進行中は再読込せず、上限増減でも過去の消費量は不変。カウンター/キー/音声/本文は設定へ保存しない。音声枠の計数はJ2で実装済み。
 
 設定の優先順位・モデル切替と翻訳への適用は[翻訳機能のOpenAI仕様](DESIGN-JAPANESE-TRANSLATION.md#translation)を参照。料金と過去の費用見積もりも機能側に置き、これらの起動ごとの制限をアカウント全体の支出保証とみなさない。
 
