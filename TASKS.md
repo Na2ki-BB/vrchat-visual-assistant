@@ -394,9 +394,11 @@ Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音�
 
   - 2026-10-01実装: Infrastructureに固定path/hash/version検証と `ArgumentList` による1検索引数、設定/plugin/cookie/JS/remote componentの隔離、親の秘密を継承しないprocess環境、並行stdout/stderr上限と30秒deadlineを追加。取消/timeout/超過でtree kill・親終了/pipe回収を確認し、後処理5秒で未確認ならprocess/handleを隔離して全新admissionを停止、再起動が必要なtyped failureをpipelineまで維持する。strict UTF-8/JSON/ID/title/許可URLを検証し、0件と全件不正を区別、無効/重複除外とstderr警告を `IsPartial` の不変snapshotへ渡す。fake・自作JSON・networkなしの自作process fixtureで引数/同時pipe/tree kill/reap/取消非協調/終了未確認/privacyを検証。Linux .NET 8.0.422でCore298件/Infrastructure182件の全回帰とsolution Release cross-build（0 warnings/errors）が通過。変更C#13ファイルのtargeted formatを確認し、全体formatは既存Windows5ファイルの違反を残す。Windows全testsはPRの正確なheadでCI確認する。公開UI・AI解釈・thumbnail取得・clipboardへの接続、yt-dlp導入や実YouTube検索は行わず、L2/L3は未実施のまま。
 
-- [ ] **K3 — GPT-6 Lunaの検索語解釈を追加する**（依存: I4、K1）
+- [x] **K3 — GPT-6 Lunaの検索語解釈を追加する**（依存: I4、K1）
   - 範囲: `ITextModelClient`と共通通信へ`gpt-6-luna`/`reasoning.effort=none`を明示対応。用途固有promptと上限付き出力検証、検索専用model設定/allowlistを追加し、認識文と確定検索語を別保持する。
   - 確認: fake HTTPで解釈1回・検索1回、共通文不変、検索解釈枠だけ消費。空/不正/超過出力は失敗とし、直接検索や別モデルへ暗黙fallbackしない。モデル生成URL/候補や任意toolを採用しない。検索だけ失敗した後の明示再試行は確定語を再利用し、追加解釈/文字起こし0回。翻訳モデル選択の回帰を確認する。
+
+  - 2026-10-01実装: 検索専用 `OpenAiSearchInterpretationOptions` / `OpenAiSearchQueryInterpreter` とCoreの `SearchQueryInterpretation` / `InterpretedVideoSearchHandler` を追加。翻訳allowlist/既定/切替を維持し、解釈だけ `gpt-6-luna` / none、固定prompt/endpoint、store:false、原文4,000 UTF-8 byte/出力400 tokens/1行1,000 byteに制限。共有clientの解釈応答は64 KiB以下、完了単一textのみを検証しtool/URL/空/不正/超過で検索0回・暗黙fallback/自動retryなし。アプリ所有解釈quotaだけを消費し、再構築で維持。sessionは確定queryと失敗検索IDを原文/候補と別保持し、同一認識文objectからの明示retryだけ解釈/文字起こしを追加せず再検索する。新検索/直接検索/取消/close/録り直し/終了と遅延応答の失効をfakeで検証。公式モデルID/none/Responses対応を再確認。Linux .NET 8.0.422でJ2統合後のsolution Release cross-build（0 warnings/errors）、新規fake94件を含むCore351件/Infrastructure329件の全回帰、変更C#12ファイルのtargeted format、diff/secret検査、独立レビューが通過。全体formatは既存Windows5ファイルの違反とLinux Windows参照読込みwarningを残す。レビューで固有名詞のコロン/ドットの過剰URL判定、不正Unicode入力の置換送信、独立取消token時のquery保持を修正し、J2 enumの既存序数を維持。Windows全testsはPRの正確なheadでCI確認する。公開UI/資格情報変更/実API/実YouTube検索/Quest評価は追加せずK5/L2/L3へ残す。
 
 - [ ] **K4 — サムネイルとclipboardの副作用境界を作る**（依存: I1、K1）
   - 範囲: thumbnailは許可HTTPS先・redirect・byte数・timeout・デコード寸法を制限してメモリ取得する。clipboardはWPF dispatcher/STAへ分離し、書込み直前に現在のsession/候補IDを再確認する。コピーも共通gateを通す。

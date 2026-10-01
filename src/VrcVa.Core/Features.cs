@@ -143,6 +143,8 @@ public static class FeatureIds
     public static FeatureId Summarization { get; } = new("summarization");
 
     public static FeatureId DirectVideoSearch { get; } = new("video-search.direct");
+
+    public static FeatureId InterpretedVideoSearch { get; } = new("video-search.interpreted");
 }
 
 public static class BuiltInFeatures
@@ -153,6 +155,12 @@ public static class BuiltInFeatures
         "そのまま検索",
         FeatureInputKind.Text,
         FeatureDataBoundary.SearchTextToYouTube);
+
+    public static FeatureDescriptor InterpretedVideoSearch { get; } = new(
+        FeatureIds.InterpretedVideoSearch,
+        "解釈して検索",
+        FeatureInputKind.Text,
+        FeatureDataBoundary.InputTextToOpenAi | FeatureDataBoundary.SearchTextToYouTube);
 
     public static FeatureDescriptor Translation { get; } = new(
         FeatureIds.Translation,

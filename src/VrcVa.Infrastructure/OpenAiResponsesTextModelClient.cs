@@ -10,12 +10,14 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
 {
     private const string ProviderName = "OpenAI Responses API";
     private const int HardMaximumOutputTokens = 1_200;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly TimeSpan MinimumTimeout = TimeSpan.FromMilliseconds(1);
 
     private readonly HttpClient _httpClient;
     private readonly OpenAiTranslatorOptions _options;
     private readonly string? _apiKey;
     private readonly TextRequestQuota _requestQuota;
+    private readonly bool _strictInterpretation;
 
     public OpenAiResponsesTextModelClient(
         HttpClient httpClient,
@@ -72,13 +74,33 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         _requestQuota = requestQuota;
     }
 
+    public OpenAiResponsesTextModelClient(
+        HttpClient httpClient,
+        OpenAiSearchInterpretationOptions options,
+        string? apiKey,
+        TextRequestQuota requestQuota)
+        : this(httpClient, GetInterpretationTransport(options, requestQuota), apiKey, requestQuota)
+    {
+        _strictInterpretation = true;
+    }
+
+    private static OpenAiTranslatorOptions GetInterpretationTransport(
+        OpenAiSearchInterpretationOptions options, TextRequestQuota requestQuota)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options.ToTransportOptions(requestQuota);
+    }
+
+    private ScanFailureCode FailureCode(ScanFailureCode translation, ScanFailureCode interpretation) =>
+        _strictInterpretation ? interpretation : translation;
+
     private string PurposeName => _requestQuota.Purpose == TextRequestPurpose.Translation
         ? "翻訳"
         : "検索AI解釈";
 
     private ScanStage FailureStage => _requestQuota.Purpose == TextRequestPurpose.Translation
         ? ScanStage.Translation
-        : ScanStage.TextHandling;
+        : _strictInterpretation ? ScanStage.SearchInterpretation : ScanStage.TextHandling;
 
     public TextRequestPurpose Purpose => _requestQuota.Purpose;
 
@@ -106,16 +128,25 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         if (_apiKey is null)
         {
             throw new ScanException(
-                ScanFailureCode.TranslationNotConfigured,
+                FailureCode(ScanFailureCode.TranslationNotConfigured, ScanFailureCode.SearchInterpretationNotConfigured),
                 FailureStage,
                 $"{PurposeName}APIキーが未設定です。専用APIキーの設定を確認してください。");
         }
 
-        int inputUtf8Bytes = Encoding.UTF8.GetByteCount(request.Input);
+        int inputUtf8Bytes;
+        try
+        {
+            inputUtf8Bytes = (_strictInterpretation ? StrictUtf8 : Encoding.UTF8).GetByteCount(request.Input);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw new ScanException(ScanFailureCode.SearchInterpretationInvalidInput,
+                ScanStage.SearchInterpretation, "検索AI解釈の入力に不正な文字があるため、外部送信を停止しました。");
+        }
         if (inputUtf8Bytes > _options.MaxInputUtf8Bytes)
         {
             throw new ScanException(
-                ScanFailureCode.TranslationInputTooLarge,
+                FailureCode(ScanFailureCode.TranslationInputTooLarge, ScanFailureCode.SearchInterpretationInputTooLarge),
                 FailureStage,
                 $"{PurposeName}入力が上限（UTF-8で{_options.MaxInputUtf8Bytes:N0}バイト）を超えたため、外部送信を停止しました。");
         }
@@ -174,15 +205,17 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
                 await using Stream responseStream = await response.Content
                     .ReadAsStreamAsync(timeout.Token)
                     .ConfigureAwait(false);
-                using JsonDocument document = await JsonDocument
-                    .ParseAsync(responseStream, cancellationToken: timeout.Token)
-                    .ConfigureAwait(false);
+                using JsonDocument document = _strictInterpretation
+                    ? await ReadBoundedInterpretationResponseAsync(responseStream, timeout.Token).ConfigureAwait(false)
+                    : await JsonDocument.ParseAsync(responseStream, cancellationToken: timeout.Token).ConfigureAwait(false);
 
-                string outputText = ExtractOutputText(document.RootElement);
+                string outputText = _strictInterpretation
+                    ? ExtractInterpretationText(document.RootElement)
+                    : ExtractOutputText(document.RootElement);
                 if (string.IsNullOrWhiteSpace(outputText))
                 {
                     throw new ScanException(
-                        ScanFailureCode.TranslationFailed,
+                        FailureCode(ScanFailureCode.TranslationFailed, ScanFailureCode.SearchInterpretationFailed),
                         FailureStage,
                         $"{PurposeName}サービスからテキスト結果が返りませんでした。");
                 }
@@ -200,10 +233,15 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
             {
                 throw CreateConnectionFailure(exception);
             }
+            catch (InvalidOperationException exception) when (_strictInterpretation)
+            {
+                throw new ScanException(ScanFailureCode.SearchInterpretationInvalidResponse,
+                    ScanStage.SearchInterpretation, "検索AI解釈サービスの応答形式を解釈できませんでした。", exception);
+            }
             catch (JsonException exception)
             {
                 throw new ScanException(
-                    ScanFailureCode.TranslationFailed,
+                    FailureCode(ScanFailureCode.TranslationFailed, ScanFailureCode.SearchInterpretationInvalidResponse),
                     FailureStage,
                     $"{PurposeName}サービスの応答形式を解釈できませんでした。",
                     exception);
@@ -217,13 +255,17 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         return new TextRequestQuota(options.MaxRequestsPerSession);
     }
 
-    private static string ValidateModel(string model)
+    private string ValidateModel(string model)
     {
         string value = string.IsNullOrWhiteSpace(model) ? string.Empty : model.Trim();
-        if (!OpenAiTranslatorOptions.IsSupportedModel(value))
+        if (!(_strictInterpretation
+            ? OpenAiSearchInterpretationOptions.IsSupportedModel(value)
+            : OpenAiTranslatorOptions.IsSupportedModel(value)))
         {
             throw new ArgumentException(
-                $"OpenAI model must be {OpenAiTranslatorOptions.QualityModel} or {OpenAiTranslatorOptions.BudgetModel}.",
+                _strictInterpretation
+                    ? $"Search interpretation model must be {OpenAiSearchInterpretationOptions.DefaultModel}."
+                    : $"OpenAI model must be {OpenAiTranslatorOptions.QualityModel} or {OpenAiTranslatorOptions.BudgetModel}.",
                 nameof(model));
         }
 
@@ -257,17 +299,75 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
 
     private ScanException CreateTimeoutFailure(OperationCanceledException exception) =>
         new(
-            ScanFailureCode.TranslationTimedOut,
+            FailureCode(ScanFailureCode.TranslationTimedOut, ScanFailureCode.SearchInterpretationTimedOut),
             FailureStage,
             $"{PurposeName}が{_options.Timeout.TotalSeconds:0}秒以内に完了しませんでした。",
             exception);
 
     private ScanException CreateConnectionFailure(HttpRequestException exception) =>
         new(
-            ScanFailureCode.TranslationFailed,
+            FailureCode(ScanFailureCode.TranslationFailed, ScanFailureCode.SearchInterpretationFailed),
             FailureStage,
             $"{PurposeName}サービスへ接続できませんでした。ネットワーク接続を確認してください。",
             exception);
+
+    private static async Task<JsonDocument> ReadBoundedInterpretationResponseAsync(
+        Stream stream, CancellationToken cancellationToken)
+    {
+        using MemoryStream buffer = new();
+        byte[] bytes = new byte[4_096];
+        int read;
+        while ((read = await stream.ReadAsync(bytes, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > OpenAiSearchInterpretationOptions.MaximumResponseBytes)
+            {
+                throw InvalidInterpretationResponse();
+            }
+            buffer.Write(bytes, 0, read);
+        }
+        return JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
+    }
+
+    private static ScanException InvalidInterpretationResponse() => new(
+        ScanFailureCode.SearchInterpretationInvalidResponse, ScanStage.SearchInterpretation,
+        "検索AI解釈サービスから有効なテキスト応答が返りませんでした。");
+
+    private static string ExtractInterpretationText(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("status", out JsonElement status)
+            || status.ValueKind != JsonValueKind.String || status.GetString() != "completed"
+            || (root.TryGetProperty("error", out JsonElement error) && error.ValueKind != JsonValueKind.Null)
+            || (root.TryGetProperty("incomplete_details", out JsonElement incomplete) && incomplete.ValueKind != JsonValueKind.Null)
+            || !root.TryGetProperty("output", out JsonElement output)
+            || output.ValueKind != JsonValueKind.Array || output.GetArrayLength() != 1)
+        {
+            throw InvalidInterpretationResponse();
+        }
+        JsonElement message = output[0];
+        if (message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("type", out JsonElement type)
+            || type.ValueKind != JsonValueKind.String || type.GetString() != "message"
+            || (message.TryGetProperty("status", out status)
+                && (status.ValueKind != JsonValueKind.String || status.GetString() != "completed"))
+            || (message.TryGetProperty("role", out JsonElement role)
+                && (role.ValueKind != JsonValueKind.String || role.GetString() != "assistant"))
+            || !message.TryGetProperty("content", out JsonElement content)
+            || content.ValueKind != JsonValueKind.Array || content.GetArrayLength() != 1)
+        {
+            throw InvalidInterpretationResponse();
+        }
+        JsonElement part = content[0];
+        if (part.ValueKind != JsonValueKind.Object
+            || !part.TryGetProperty("type", out type)
+            || type.ValueKind != JsonValueKind.String || type.GetString() != "output_text"
+            || !part.TryGetProperty("text", out JsonElement text) || text.ValueKind != JsonValueKind.String)
+        {
+            throw InvalidInterpretationResponse();
+        }
+        // Validate before any downstream search. Tool/candidate output is never adopted.
+        return new SearchQueryInterpretation(text.GetString()!).Query;
+    }
 
     private static string ExtractOutputText(JsonElement root)
     {
@@ -319,15 +419,15 @@ public sealed class OpenAiResponsesTextModelClient : ITextModelClient
         return statusCode switch
         {
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => new ScanException(
-                ScanFailureCode.TranslationAuthenticationFailed,
+                FailureCode(ScanFailureCode.TranslationAuthenticationFailed, ScanFailureCode.SearchInterpretationAuthenticationFailed),
                 FailureStage,
                 $"{PurposeName}APIの認証に失敗しました。APIキーと利用権限を確認してください。{requestIdSuffix}"),
             HttpStatusCode.TooManyRequests => new ScanException(
-                ScanFailureCode.TranslationRateLimited,
+                FailureCode(ScanFailureCode.TranslationRateLimited, ScanFailureCode.SearchInterpretationRateLimited),
                 FailureStage,
                 $"{PurposeName}APIの利用上限またはレート制限に達しました。少し待ってから再試行してください。{requestIdSuffix}"),
             _ => new ScanException(
-                ScanFailureCode.TranslationFailed,
+                FailureCode(ScanFailureCode.TranslationFailed, ScanFailureCode.SearchInterpretationFailed),
                 FailureStage,
                 $"{PurposeName}サービスがHTTP {(int)statusCode}を返しました。{requestIdSuffix}"),
         };
