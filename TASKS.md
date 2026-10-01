@@ -445,12 +445,15 @@ Exit: 新しい画面/マイクの実機証拠と有料APIの評価を、それ�
 
 ### L3 verification evidence — 2026-10-01
 
-実装の確認基準は [`9df98ed38d6e8af7d282d9684b043c3e498abb4b`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/9df98ed38d6e8af7d282d9684b043c3e498abb4b)（[PR39](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/39) merge、tree `03696e6e`）。この引渡し変更は文書のみで、実行コード/テスト/CI workflowを変更しない。文書PR自身のexact-head CIと独立差分レビューはPRへ別記する。
+実装の確認基準は [`560f4a09c11ddb6632939d363933c696d3848456`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/560f4a09c11ddb6632939d363933c696d3848456)（[PR41](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/41) merge、tree `4bb33911`）。production実装はPR39の `9df98ed3` から変えず、PR41は下記のtest同期修正だけを追加した。この引渡し変更は文書のみで、実行コード/テスト/CI workflowを変更しない。文書PR自身のexact-head CIと独立差分レビューはPRへ別記する。
 
 | 確認 | 結果と限界 |
 | --- | --- |
-| Windows CI99 | [run 36904204575](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36904204575) の上記main SHAでrestore、Release build、Core365 / Infrastructure412 / Windows667 = **全1,444件成功**。別実行のcold shutdown **3件成功**。実機・API・yt-dlp実検索は呼ばない |
-| 独立Linux再検証 | .NET SDK 8.0.422。single-node restore、solution Release cross-build **0 warnings/errors**、Core365 / Infrastructure412 **777件成功、failed/skipped 0**。WindowsDesktop実行はLinuxで行わず上記CIへ分離 |
+| PR39後のWindows CI99（修正前） | [run 36904204575](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36904204575) のmain `9df98ed3` でrestore、Release build、Core365 / Infrastructure412 / Windows667 = **全1,444件成功**。別実行のcold shutdown **3件成功**。実機・API・yt-dlp実検索は呼ばない |
+| PR41 Windows CI101 | [run 36907389172](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36907389172) のhead `940ab9eb`（上記mainとtree一致）でrestore、Release build **0 warnings/errors**、Core365 / Infrastructure412 / Windows668 = **全1,445件成功、failed/skipped 0**、cold shutdown **3件成功** |
+| PR41 merge後main Windows CI102 | [run 36907832881](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36907832881) の `560f4a09` でもrestore、Release build **0 warnings/errors**、**全1,445件 + cold shutdown3件成功、failed/skipped 0** |
+| CI100で見つけたtest同期 | [PR40初回run](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36906118929)はcontrollerの `CanNext` assertionで1件失敗（1,443成功）。旧fixtureはTaskSchedulerだけを設定し、`Progress<T>`がThreadPoolで並行実行された。同じassertionとcallbackのowner不一致をportableで再現。PR41で専用SynchronizationContextへ揃え、新規owner回帰と影響した解釈flow **500回連続成功**を確認。既存assertion/timeout/productionは変更しない。元の失敗はrerunで隠さず保持 |
+| 独立Linux再検証 | .NET SDK 8.0.422。single-node restore、solution Release cross-build **0 warnings/errors**、Core365 / Infrastructure412 **777件成功、failed/skipped 0**。source-linked音声/検索/controllerの**79件成功**（新規owner回帰・一時probe2件を含む）。WindowsDesktop実行はLinuxで行わず上記CIへ分離 |
 | 全体format | `dotnet format VRChatVisualAssistant.sln --verify-no-changes --no-restore` はLinuxでexit 2。既存Windows5ファイルの違反とWindows参照読込みwarningを再現。**format合格とはしない**。Windows CIはformatを実行しないためWindowsでの結果は未取得。今回C#変更なし |
 | 公開差分 | `git diff --check`、変更文書全体と未追跡ファイルの確認。実キー・録音・ユーザー由来本文・キャプチャ・ログ・生成物は含めない。公開前の独立レビューはPRに記録 |
 | 配布 | CI workflowは失敗時TRXだけをartifact化する。成功runにアプリZIP/installerはない。Windowsで既存 `scripts\build.ps1` / `scripts\publish-beta.ps1` を使う。今回release公開・ZIP添付・yt-dlp同梱は行わない |
