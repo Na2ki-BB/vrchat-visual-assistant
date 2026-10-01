@@ -221,7 +221,8 @@ public sealed record FeatureResult
     public FeatureResult(
         FeatureId featureId,
         IEnumerable<ResultSection> sections,
-        TextModelMetadata? textModelMetadata = null)
+        TextModelMetadata? textModelMetadata = null,
+        VideoSearchResult? videoSearch = null)
     {
         if (featureId.IsEmpty)
         {
@@ -266,6 +267,7 @@ public sealed record FeatureResult
         Sections = Array.AsReadOnly(orderedSections);
         PrimarySection = primarySections[0];
         TextModelMetadata = textModelMetadata;
+        VideoSearch = videoSearch;
     }
 
     public FeatureId FeatureId { get; }
@@ -275,6 +277,8 @@ public sealed record FeatureResult
     public ResultSection PrimarySection { get; }
 
     public TextModelMetadata? TextModelMetadata { get; }
+
+    public VideoSearchResult? VideoSearch { get; }
 
     public TimeSpan OcrDuration { get; init; }
 
@@ -373,6 +377,7 @@ public sealed record AnalysisResult(
         hash.Add(TranslationDuration);
         hash.Add(Warning, StringComparer.Ordinal);
         hash.Add(CaptureSourceKind, StringComparer.Ordinal);
+        hash.Add(_canonicalResult?.VideoSearch);
         if (_canonicalResult is not null
             && _canonicalResult.FeatureId != FeatureIds.Translation)
         {
@@ -457,7 +462,8 @@ public sealed record AnalysisResult(
         return new FeatureResult(
             _canonicalResult.FeatureId,
             projectedSections,
-            CreateTextModelMetadata(OcrLanguage, TranslationProvider, TranslationModel))
+            CreateTextModelMetadata(OcrLanguage, TranslationProvider, TranslationModel),
+            _canonicalResult.VideoSearch)
         {
             OcrDuration = OcrDuration,
             TranslationDuration = TranslationDuration,
@@ -478,7 +484,8 @@ public sealed record AnalysisResult(
         && OcrDuration == other.OcrDuration
         && TranslationDuration == other.TranslationDuration
         && string.Equals(Warning, other.Warning, StringComparison.Ordinal)
-        && string.Equals(CaptureSourceKind, other.CaptureSourceKind, StringComparison.Ordinal);
+        && string.Equals(CaptureSourceKind, other.CaptureSourceKind, StringComparison.Ordinal)
+        && Equals(_canonicalResult?.VideoSearch, other._canonicalResult?.VideoSearch);
 
     private bool HasEqualCanonicalIdentity(AnalysisResult other)
     {

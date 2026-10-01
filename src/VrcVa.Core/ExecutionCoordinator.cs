@@ -15,6 +15,7 @@ public sealed class ExecutionCoordinator
     private Guid _sessionId;
     private Guid _operationId;
     private long _generation;
+    private long _invalidatedThroughGeneration;
     private bool _stopped;
 
     public bool IsRunning
@@ -98,6 +99,28 @@ public sealed class ExecutionCoordinator
         lock (_sync) { return ReferenceEquals(_active, operation); }
     }
 
+    // Borrow identity/token for a feature handler; ownership and release remain with its caller.
+    internal ExecutionOperation? FindActiveOperation(Guid sessionId, Guid operationId)
+    {
+        lock (_sync)
+        {
+            return _active is not null && _active.SessionId == sessionId && _active.OperationId == operationId
+                && IsCurrent(_active) ? _active : null;
+        }
+    }
+
+    // Result snapshots survive later ordinary operations, but never any subsequent invalidation.
+    internal bool IsResultCurrent(ExecutionOperation source)
+    {
+        lock (_sync)
+        {
+            return !_stopped && _sessionId == source.SessionId
+                && source.Generation > _invalidatedThroughGeneration
+                && !source.CancellationToken.IsCancellationRequested
+                && (_active is null || !_active.CancellationToken.IsCancellationRequested);
+        }
+    }
+
     public void CancelCurrentOperation() => Invalidate(endSession: false, stop: false);
 
     public void CloseSession() => Invalidate(endSession: true, stop: false);
@@ -159,7 +182,7 @@ public sealed class ExecutionCoordinator
                 if (operation.CancellationToken.IsCancellationRequested)
                 {
                     _operationId = Guid.Empty;
-                    _generation++;
+                    _invalidatedThroughGeneration = ++_generation;
                 }
 
                 _active = null;
@@ -174,7 +197,7 @@ public sealed class ExecutionCoordinator
         ExecutionOperation? operation;
         lock (_sync)
         {
-            _generation++;
+            _invalidatedThroughGeneration = ++_generation;
             _operationId = Guid.Empty;
             if (endSession) { _sessionId = Guid.Empty; }
             _stopped |= stop;

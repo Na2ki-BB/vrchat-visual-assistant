@@ -141,10 +141,19 @@ public static class FeatureIds
     public static FeatureId Translation { get; } = new("translation");
 
     public static FeatureId Summarization { get; } = new("summarization");
+
+    public static FeatureId DirectVideoSearch { get; } = new("video-search.direct");
 }
 
 public static class BuiltInFeatures
 {
+    // Contract only: the Windows runtime does not register search until K5.
+    public static FeatureDescriptor DirectVideoSearch { get; } = new(
+        FeatureIds.DirectVideoSearch,
+        "そのまま検索",
+        FeatureInputKind.Text,
+        FeatureDataBoundary.SearchTextToYouTube);
+
     public static FeatureDescriptor Translation { get; } = new(
         FeatureIds.Translation,
         "翻訳",
