@@ -172,7 +172,7 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 ### I1 adapter and settings decisions — foundation contracts only
 
-2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**J1の未公開録音adapterのみ追加済み。同意画面、音声/検索の通信は未実装**。翻訳モデルallowlistは変更しない。
+2026-10-01に具体化。Coreの `VoiceInputOptions` / `FeatureUsageLimits` / `VoiceAudioFormat` は初期値、値域、PCM容量とquota秒数切上げの純粋な契約として追加する。I4でversion 6の非秘密設定保存/移行と独立したtext quotaへ接続した。**J1の未公開録音adapterとJ2の未公開音声HTTP/quotaを追加済み。同意画面、資格情報保存/読込、公開音声/検索UIは未接続**。翻訳モデルallowlistは変更しない。
 
 - **録音（J1）**: Windows標準のWinMM `waveIn` を直接包み、追加ライブラリは導入しない。`WAVE_MAPPER` と `WAVE_MAPPED_DEFAULT_COMMUNICATION_DEVICE` でWindows既定の通信入力デバイスを使う。`WAVE_MAPPER` 単独は別の対応デバイスを選び得るので使わない。録音開始時のデバイス/設定を固定し、途中切替や別マイクへの暗黙fallbackはしない。形式照会、未接続/拒否/非対応/切断を段階別の失敗にする。デバイス選択はWindows側で行い、アプリ内一覧は初期範囲に加えない
 - **形式/容量（J1/J2）**: little-endian PCM16、mono、16,000 Hz（32,000 byte/秒）、44 byte headerのWAVをメモリで作る。録音上限は30秒、変更範囲1〜120秒。現設定秒数×32,000 byteで入力を止め、全体hard capはPCM 3,840,000 byte + WAV header 44 byte。余分なWAV chunk、別形式、途中sample、空データは送信しない。Windows driver内の同一デバイス形式変換の可否はJ1/L2で検証する
@@ -204,6 +204,16 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 正常driverの停止/解放順序はfakeで確認する。driverが繰返しreset/unprepare/closeを拒否する、または通知解除が失敗する異常経路では、まだdriverが所有するpointer/eventを解放してuse-after-freeを起こさず、最大1録音分のbounded native allocationと必要な通知ownerをprocess内で隔離する。`MicrophoneCleanupFailed` を返し、native再openを拒否し、共通coordinatorの `Stop()` で全用途の新admissionも拒否する。shutdown待ちは完了できるが、driver所有資源を解放成功とは扱わず保持する。OS資源回収には本人のアプリ再起動が必要となる可能性があり、この経路を正常解放成功と扱わない。
 
 根拠: [waveInOpen](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinopen)、[waveInReset](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinreset)、[waveInClose](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-waveinclose)、[GetState](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-getstate)、[stream routing](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-routing)、[COM visibility](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.comvisibleattribute)、[notification lifetime](https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-registerendpointnotificationcallback)。2026-10-01に公式仕様とfakeを確認。実マイク/OS・物理ミュート/SteamVR/QuestはL2、実APIと保持条件はJ3/L3で確認する。
+
+### J2 transcription adapter and process-lifetime audio quota — unexposed implementation
+
+`IVoiceTranscriber` はimmutableな借用canonical WAVを受け、callerがJ1音声leaseを処理/取消回収の完了まで保つ。`OpenAiVoiceTranscriber` は明示opt-in snapshotと専用型`OpenAiVoiceCredential`を別々に検査し、未同意/キーなしではquota予約も通信もしない。credential型の専用targetは`VrcVa/OpenAI/Voice`、文字列化はredacted。credential store/環境変数のread/write、既存翻訳キーの流用、公開WPF接続は含めずJ3へ残す。
+
+productionの専用HTTP handlerはredirect/cookieを無効化し、公式endpointと`gpt-transcribe`だけを受け付ける。44 byte headerのcanonical WAVの全field/長さ、開始時録音上限1〜120秒のPCM容量を送信前に照合する。multipartは`model`、`file=recording.wav` / `audio/wav`、`response_format=json`、`stream=false`のみ。言語/prompt/話者情報/Responsesの`store`を付けない。60秒以内のlinked取消をheader/body/parse後まで適用し、response全体64 KiBと不正/空JSON、認識文4,000 UTF-8 byteを拒否する。本文は切り捨てず保持し、エラーbodyやHTTP例外内容を利用者へ出さず、statusと短いASCII request IDだけを表示する。HTTP3xx/認証/429/失敗はtyped errorで返し、自動再送/fallbackはしない。
+
+`FeatureUsageQuotas.Voice` はcomposition rootが既に持つapp-ownedオブジェクトの一部で、翻訳/検索AI解釈と独立。`VoiceRequestQuota` はPCM実sampleから各送信の秒数を切上げ、秒数と1回を同じlockで予約する。`SendAsync`を試みる直前だけ消費へ移し、取消/破棄で返却できるのは未開始の予約だけ。認証/通信失敗、timeout、取消、本人の再送は開始した全量/1回を数える。`ApplyLimits`は全用途の設定を同じlockで更新し、client再構築/reloadでidentity/既消費/保留予約を変えない。上限を下げても予約済みoperationは開始時snapshotで完走し、新admissionだけを制限する。
+
+2026-10-01に[公式file transcription](https://developers.openai.com/api/docs/guides/speech-to-text)、[API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)、[model](https://developers.openai.com/api/docs/models/gpt-transcribe)、[retention](https://developers.openai.com/api/docs/guides/your-data)を再確認。retention表は音声transcriptionsの学習利用No、abuse monitoring/Application stateともNoneを記載する。これはアプリのResponses `store:false`による保証ではない。利用前の最新料金/条件表示はJ3、実マイク/API/Quest受入はL2/L3へ残す。
 
 ### Minimal input and result extension
 
@@ -243,11 +253,11 @@ I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoo
 - 1回の録音上限は初期30秒。これとは別に、音声送信は**1起動につき累積300秒（5分）か30送信のどちらかの上限**で止める。両方を満たす要求だけ送信可能とし、上限値は後から設定で変更できるようにする。許容範囲・設定場所、要求サイズ・timeoutは下記I1で固定し、接続はJ2/J3へ残す
 - 音声quotaはHTTP送信直前に、その要求に含む音声の全秒数と1回を一括予約する。予約で上限を超える場合は送信しない。送信開始後の失敗・中止・timeoutは返却せず、本人による再送も新たに秒数と回数を消費する。録音中の中止など送信前に終了したものは消費しない（予約後でも送信未開始を確認できれば返却する）。自動再送はしない
 - 音声quotaはアプリのプロセス寿命で共有し、画面を閉じる、録り直す、設定再読込、runtime再構築では消費量をリセットしない。アプリ再起動でリセットされるため、月額支出上限やアカウント全体の予算保証ではない
-- 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細は下記のI4で実装した独立text quotaと、未実装の音声quota設計を参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
+- 音声quota、翻訳quota、検索AI解釈quotaは**3つの独立した枠**にする。翻訳と解釈は互いの残回数を消費しない。テキストの初期値は既存の10回を各用途に置く設計とし、後から個別に変更可能にする。詳細はI4の独立text quotaとJ2の独立音声quotaを参照する。解釈モデルはGPT-6 Luna（`reasoning.effort=none`）を採用し、詳細・料金根拠は動画検索設計に置く
 - 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
 - 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
 
-音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、J1の未公開録音adapter/sessionとI4の非秘密設定保存/独立text quotaを実装済み。音声送信/音声quota/公開UIは未接続である。
+音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。音声フローは設計合意で、J1の未公開録音adapter/sessionとI4の非秘密設定保存/独立text quotaを実装済み。J2の音声HTTP/quotaもfakeで実装済みだが、資格情報store/公開UIは未接続である。
 
 ## Feature extension rules
 
@@ -255,7 +265,7 @@ Future AI features use a compile-time `FeatureCatalog`, typed feature descriptor
 
 The current implemented foundation resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the purpose-bound process-lifetime quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
 
-I4で翻訳/検索AI解釈に別カウンターを追加した。各10回は初期値で、設定により1〜100へ個別変更できる。音声quotaと公開解釈adapterは後続タスクへ残す。
+I4で翻訳/検索AI解釈に別カウンターを追加した。各10回は初期値で、設定により1〜100へ個別変更できる。J2で音声quotaを追加し、公開解釈adapterは後続タスクへ残す。
 
 新機能を追加するときの境界:
 

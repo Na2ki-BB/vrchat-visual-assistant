@@ -35,8 +35,8 @@ VRChatのヘッドセット視界に見えている英語を、明示的なSCAN 
 - ユーザーがクリック、ホットキー、診断コマンドを実行した瞬間だけ取得します。
 - キャプチャはメモリ内で処理し、通常動作では保存しません。処理後は画像バッファをゼロ化します。
 - 既定のキー未登録状態では、OCR済みテキストも外部へ送りません。
-- 任意のOpenAIアダプターを明示選択した場合も、送るのはOCR済みテキストだけです。画像は送りません。
-- OpenAI要求は `store: false` です。ただしOCRテキストが外部サービスへ送信される点は変わりません。
+- 任意のOpenAI翻訳アダプターを明示選択した場合も、送るのはOCR済みテキストだけです。画像は送りません。
+- 翻訳用Responses API要求は `store: false` です。ただしOCRテキストが外部サービスへ送信される点は変わりません。
 - ログは画像、OCR本文、翻訳本文、APIキー、HTTP本文を記録しません。寸法、文字数、時間、エラー種別だけです。
 - VRChatへのDLL注入、ファイル改変、メモリ読み取り、非公開API利用は行いません。
 - OSCトリガーを有効にすると、Windows DNS-SDの制約により動的ポートはネットワークインターフェース上へ登録されますが、VRCVAはこのPC自身のアドレスから来たOSC/OSCQueryだけを処理し、他端末からの接続は応答前に拒否します。OSCの送信先としてVRChatへ返す値も`127.0.0.1`です。自動検出用DNS-SD広告はサービス名とポートをLAN内へ通知しますが、画像、OCR本文、アバターIDは含めません。
@@ -356,16 +356,24 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | --- | --- | --- | --- |
 | `UsageLimits.TranslationRequests` | 10 | 1〜100送信／起動 | 翻訳へ適用 |
 | `UsageLimits.SearchInterpretationRequests` | 10 | 1〜100送信／起動 | 独立枠を実装。公開解釈機能は未接続 |
-| `UsageLimits.VoiceSeconds` | 300 | 1〜3,600秒／起動 | 設定のみ。音声quotaはJ2 |
-| `UsageLimits.VoiceRequests` | 30 | 1〜300送信／起動 | 設定のみ。音声quotaはJ2 |
+| `UsageLimits.VoiceSeconds` | 300 | 1〜3,600秒／起動 | 独立した音声quotaへ適用。公開音声UIはJ3 |
+| `UsageLimits.VoiceRequests` | 30 | 1〜300送信／起動 | 独立した音声quotaへ適用。公開音声UIはJ3 |
 | `VoiceInput.MaximumRecordingSeconds` | 30 | 1〜120秒 | 未公開録音adapterで使用。UIはJ3 |
 | `VoiceInput.FailedAudioRetentionSeconds` | 120 | 15〜300秒 | 未公開音声sessionで使用。UIはJ3 |
 
-`VoiceInput.IsEnabled`の初期値は`false`です。この値を編集しても、未公開録音adapterや未実装の文字起こし/検索を公開しません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
+`VoiceInput.IsEnabled`の初期値は`false`です。この値を編集しても、未公開録音/文字起こしadapterや検索を公開しません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
 
 次のSCAN（desktop、hotkey、OSC、腕、明示画像）と既存の資格情報runtime再構築時に、実行gateを保持して設定を再読込します。実行中の設定は固定し、消費量は保存もリセットもしません。上限を既消費量より下げれば残り0になり、増やせば新上限から既消費量を引きます。無効/読込失敗時は最後の有効snapshotとカウンターを残し、そのSCANを取得/送信前に拒否します。ファイル修正後は次のSCANで再開できます。
 
 HTTP送信直前の予約後でも、送信開始前の取消では枠を返します。`SendAsync`の呼出しを試みた後は認証/通信失敗・timeout・中止も対象用途の1回を消費し、返しません。本人が再度SCANすれば新しい1回になります。翻訳と解釈の枠は相互に消費せず、全用途のsingle-flightは維持します。起動ごとの制限は月額予算やアカウント全体の支出を止める仕組みではありません。
+
+### 未公開の音声文字起こしadapter（J2）
+
+`OpenAiVoiceTranscriber` は音声opt-inと専用credential snapshotの両方を要求し、canonical PCM16 mono 16 kHz WAVだけを公式OpenAI Audio Transcriptions APIへ送ります。既存翻訳キーや環境変数は読みません。専用Credential Manager targetは`VrcVa/OpenAI/Voice`ですが、保存/削除/読込と公開UIの配線はJ3です。現時点では操作可能な音声送信入口を追加していません。
+
+音声は各送信の実PCM秒数を整数秒へ切り上げ、300秒と30回の初期枠を同時予約します。送信を試みた後の認証/通信失敗・timeout・取消と本人による再送も計数し、自動再送しません。設定再読込/client再構築でも同じapp-owned quotaを維持します。録音初期30秒・許容1〜120秒、応答64 KiB/認識文4,000 UTF-8 byte、全HTTP処理60秒上限を適用し、redirectは禁止です。
+
+[OpenAIのデータ管理文書](https://developers.openai.com/api/docs/guides/your-data)の2026-10-01確認では`/v1/audio/transcriptions`は学習利用なし、abuse monitoring retention/application-state retentionともNoneと記載されています。音声リクエストにResponses APIの`store: false`を付けず、その設定が音声へ適用されるとも表示しません。将来の音声opt-inでは最新の料金/保持条件と周囲の声の注意を別に表示し、実マイク/API/Questでの受入は未実施です。
 
 ### 設定用環境変数
 

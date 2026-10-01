@@ -11,6 +11,7 @@ public enum ScanStage
     Rendering,
     Completed,
     TextHandling,
+    Transcription,
 }
 
 public enum ScanFailureCode
@@ -39,6 +40,17 @@ public enum ScanFailureCode
     VideoSearchOutputTooLarge,
     VideoSearchTimedOut,
     VideoSearchCleanupFailed,
+    VoiceInputDisabled,
+    VoiceTranscriptionNotConfigured,
+    VoiceAudioInvalid,
+    VoiceAudioTooLarge,
+    VoiceUsageLimitReached,
+    VoiceAuthenticationFailed,
+    VoiceRateLimited,
+    VoiceTranscriptionTimedOut,
+    VoiceTranscriptionInvalidResponse,
+    VoiceTranscriptionEmpty,
+    VoiceTranscriptionFailed,
 }
 
 public sealed record ScanRequest(

@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト分岐・不変の認識文session、I3の共通実行/取消世代管理、I4の独立text quota/version 6設定、J1の未公開Windows録音adapter/音声session、K1の動画検索Core契約を追加。音声/検索の外部adapter・公開UIは後続タスク**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。録音adapterはfakeで検証済み。音声・検索通信/公開画面/音声quotaへの接続は未実装で、既存Milestoneの完了状態や実機証拠は変更しない。
+Added: 2026-10-01. **I1の設定/音声形式契約、I2の画像/テキスト分岐・不変の認識文session、I3の共通実行/取消世代管理、I4の独立text quota/version 6設定、J1の未公開Windows録音adapter/音声session、K1の動画検索Core契約、J2の未公開音声HTTP/quota、K2の未公開metadata検索adapterを追加。公開UIは後続タスク**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。録音adapterはfakeで検証済み。音声/検索adapterは公開画面へ未接続で、既存Milestoneの完了状態や実機証拠は変更しない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -369,9 +369,11 @@ Exit: 既存翻訳の回帰を通し、fakeのテキスト機能を画像取得�
   - 確認: fakeマイク/時計で手動停止と上限到達が競合しても完了は1回。中止は文字起こしを開始しない。空/無音では検索へ進まず、無音による早期自動停止は加えない。デバイス喪失、閉じる、終了、SteamVR喪失時に停止・解放し、失敗音声も期限/サイズ上限を守る。正常認識後の解放はJ3で確認する。
   - 2026-10-01実装: 未公開の `WinMmMicrophoneFactory` / `VoiceInputRecorder` / `VoiceAudioSession` を追加。明示opt-in/専用音声キー可否をマイクopen前に確認し、既定通信endpointを固定・変更/喪失時に失敗とする。設定秒数の単調時計/実sample容量で停止し、手動停止との競合を1回に統合。空/近無音/途中sampleを拒否し、canonical WAVのみをメモリ所有する。共通gateはnative回収と後続処理の回収まで保持し、中止は後続処理を開始しない。最初の送信失敗から期限を延ばさない音声保持・期限内lease・ゼロ化、新session/閉じる/終了/VR喪失をfakeで検証。異常driverでreset/unprepare/close不能ならdriver所有memoryを解放せず、bounded quarantineと全用途の新admission拒否/要再起動のtyped failureを返す。公開WPF/資格情報保存/実文字起こし/音声quotaの接続はJ2/J3へ残す。Linux .NET 8.0.422のRelease cross-buildは0 warnings/errors、K1 mergeへrebase後のCore297件/Infrastructure108件、同一コードを一時net8 harnessへリンクしたfake66件と先行セッション29件の5回反復が通過。全変更C#のtargeted formatとdiff/secret検査を確認。全体formatは既存Windows5ファイルの違反とLinux Windows参照読込みwarningを残す。独立クロスレビューで失敗後Cancelの音声破棄と旧session取消/closeが次処理を止める競合を修正し、owner指定の原子的coordinator APIを追加。K1の取消epochを維持し、録り直しとowner取消/closeによる旧候補失効を統合回帰で確認。初回Windows CI74でCore297/Infrastructure108/Windows528の全933件が通過。その後COM callback可視性・明示AddRef/同pointer解除・解除不能時のquarantineを補強し、実デバイスを開かないWindows CCW/5-slot回帰を追加。新headのexact-head CIで再確認し、実マイク/API/Quest受入は未実施。
 
-- [ ] **J2 — GPT Transcribe通信と音声quotaを作る**（依存: I1、I4）
+- [x] **J2 — GPT Transcribe通信と音声quotaを作る**（依存: I1、I4）
   - 範囲: Infrastructureに音声専用adapterを追加し、公式endpoint、専用Credential Manager運用、timeout/サイズ上限と応答検証を適用する。音声300秒・30送信の双方を送信前に一括予約し、翻訳/解釈とは別のプロセス寿命枠で保持する。
   - 確認: fake HTTPでrequest形式、キー無し/未同意の0送信、空/不正応答、認証/上限/timeout/取消を検証。300秒と30回それぞれの直前/一致/超過、秒数丸め、予約後の送信未開始時だけ返却、開始後の失敗/取消/本人再送の計数、再構築で消費量維持を確認。自動再送なし。音声にResponsesの`store: false`が適用されるとは表示しない。
+
+  - 2026-10-01実装: 未公開`OpenAiVoiceTranscriber` / `IVoiceTranscriber`、音声専用credential snapshot、`VoiceRequestQuota`を追加。canonical WAV/設定秒数の容量、公式endpoint/model、multipart/json、redirect禁止、60秒timeout、64 KiB応答/4,000 UTF-8 byte認識文を検証する。app-owned `FeatureUsageQuotas.Voice` に秒数/回数を同時予約し、未開始時だけ返却、開始後の失敗/取消/本人再送を計数。翻訳10/解釈10と独立で、reload/client再構築はidentity/既消費量を維持。資格情報storeの実read/write、公開音声UI/実API/マイク/Quest受入は含めない。公式API/保持条件を再確認し、音声へResponses `store:false`を適用するとは扱わない。Linux .NET 8.0.422のsolution Release cross-buildは0 warnings/errors、Core298件/Infrastructure288件の全回帰と音声focused106件が通過。独立reviewで不正UTF-8/片側surrogateの例外分類を修正し、再review/再テストでblocking指摘なし。変更C#9ファイルのtargeted formatとdiff/secret検査を確認。全体formatは既存Windows5ファイルとLinux Windows参照読込みwarningを残す。Windows全testsはPRの正確なheadでCI確認する。
 
 - [ ] **J3 — 共通音声フローをWPFでつなぐ**（依存: J1、J2）
   - 範囲: `MainWindow`、設定/資格情報境界へ音声opt-inと送信先/費用/周囲の声への注意を追加。録音→文字起こし→全文表示、録り直し/閉じる、処理中の中止、段階別失敗を同じsessionへ接続する。用途actionの接続口を用意し、検索の公開ボタンはK5で実処理と同時に接続する。
