@@ -25,4 +25,6 @@ Last reorganized: 2026-10-01 (Etc/UTC)
 
 元の設計書の要求、方式比較、決定理由、Phase履歴、実測値、公式参照は、担当する設計書へ移しました。根拠の日時は2026-08-11〜15のまま保持し、過去のMVP除外事項や旧方式は履歴と区別しています。今回の再整理はWindows実機、API、価格、規約の再検証を意味しません。
 
-2026-10-01に追加した動画検索の概要Draftを、同日の7段階の設計確認に沿って更新しました。共通マイク入力（再押し停止・初期30秒上限）、GPT Transcribe、認識文直下の2つの検索ボタン、yt-dlpによるmetadata検索とURLコピーまでが合意済みです。同日の追加確認で解釈用GPT-6 Luna（reasoning.effort=none）と、音声送信の1起動300秒・30回上限を採用しました。さらに翻訳と検索AI解釈の利用上限を別枠にする方針へ更新し、通信・同時実行防止の共通化とは区別しました。[TASKSの音声入力・動画検索](TASKS.md#voice-input-and-video-search--implementation-sequence) のI1でadapter/設定境界を具体化し、初期値・値域・音声容量/秒数の純粋な契約を追加しました。I2でcapture/OCRなしのテキスト経路と不変の認識文session、I3でアプリ共通single-flight/取消世代管理と既存SCAN・コピーの接続を追加しました。マイク・検索の外部通信/公開UI・音声quotaの接続、J1以降、API/実機評価は未実施です。I4で翻訳/解釈の独立text quotaとversion 6設定の保存・移行・再読込を追加しました。
+2026-10-01に追加した動画検索の概要Draftを、同日の7段階の設計確認に沿って更新しました。共通マイク入力（再押し停止・初期30秒上限）、GPT Transcribe、認識文直下の2つの検索ボタン、yt-dlpによるmetadata検索とURLコピーまでが合意済みです。同日の追加確認で解釈用GPT-6 Luna（reasoning.effort=none）と、音声送信の1起動300秒・30回上限を採用しました。さらに翻訳と検索AI解釈の利用上限を別枠にする方針へ更新し、通信・同時実行防止の共通化とは区別しました。[TASKSの音声入力・動画検索](TASKS.md#voice-input-and-video-search--implementation-sequence) のI1でadapter/設定境界を具体化し、初期値・値域・音声容量/秒数の純粋な契約を追加しました。I2でcapture/OCRなしのテキスト経路と不変の認識文session、I3でアプリ共通single-flight/取消世代管理と既存SCAN・コピーの接続を追加しました。音声・検索の外部通信/公開UI・音声quotaの接続、J2以降、API/実機評価は未実施です。I4で翻訳/解釈の独立text quotaとversion 6設定の保存・移行・再読込を追加しました。
+
+J1で未公開のWindows録音adapterと音声sessionを追加した。opt-in/専用音声キーsnapshot、明示開始/停止、時間・容量上限、取消・native回収・期限付き音声保持をfakeで検証する。公開音声UI・音声送信/quota・実マイク/API/Quest受入はJ2/J3/L2/L3へ残す。

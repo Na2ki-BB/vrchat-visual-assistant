@@ -2,6 +2,82 @@ namespace VrcVa.Core.Tests;
 
 public sealed class ExecutionCoordinatorTests
 {
+    [Fact]
+    public void OwnerScopedCancelAndCloseRejectStaleAndForeignIdentity()
+    {
+        ExecutionCoordinator execution = new();
+        Assert.True(execution.TryBeginSession(Guid.NewGuid(), out ExecutionOperation? old));
+        Guid oldSession = old!.SessionId;
+        old.Dispose();
+        Assert.True(execution.TryBeginSession(Guid.NewGuid(), out ExecutionOperation? next));
+        using (next)
+        {
+            Assert.False(execution.CancelOperation(old));
+            Assert.False(execution.CloseSession(oldSession));
+            Assert.False(execution.CloseSession(Guid.Empty));
+            Assert.True(next!.IsCurrent);
+            Assert.False(next.CancellationToken.IsCancellationRequested);
+            Assert.True(execution.IsRunning);
+            Assert.True(execution.CancelOperation(next));
+            Assert.False(next.IsCurrent);
+            Assert.True(next.CancellationToken.IsCancellationRequested);
+            Assert.True(execution.IsRunning);
+        }
+
+        Assert.True(execution.TryBeginSession(Guid.NewGuid(), out ExecutionOperation? current));
+        using (current)
+        {
+            Assert.True(execution.CloseSession(current!.SessionId));
+            Assert.False(current.IsCurrent);
+            Assert.Equal(Guid.Empty, execution.CurrentSessionId);
+            Assert.True(execution.IsRunning);
+        }
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScopedCancelAndCloseInvalidateK1CandidatesBeforeCancellationCallbacks(bool close)
+    {
+        ExecutionCoordinator execution = new();
+        VideoSearchSession search = new(execution);
+        DirectVideoSearchHandler handler = new(new ScopedCancellationSearchProvider(), search);
+        TextInputSession transcript = TextInputSession.Create("synthetic transcript");
+        ScanRequest request = ScanRequest.CreateText("fake-search", FeatureIds.DirectVideoSearch, transcript);
+        Assert.True(execution.TryBeginSession(request.CorrelationId, out ExecutionOperation? operation, sessionId: transcript.SessionId));
+        VideoCandidateAction selection;
+        using (operation)
+        {
+            FeatureResult result = await handler.HandleAsync(transcript, request, null, default);
+            selection = result.VideoSearch!.Candidates[0].CreateSelectionAction();
+        }
+        Assert.True(execution.TryBeginOperation(transcript.SessionId, Guid.NewGuid(), out ExecutionOperation? copy));
+        using (copy)
+        {
+            Assert.False(execution.CancelOperation(operation!));
+            Assert.True(search.TryResolveSelection(selection, out _));
+            bool callbackRan = false;
+            using CancellationTokenRegistration callback = copy!.CancellationToken.Register(() =>
+            {
+                callbackRan = true;
+                Assert.False(search.TryResolveSelection(selection, out _));
+            });
+            Assert.True(close ? execution.CloseSession(transcript.SessionId) : execution.CancelOperation(copy));
+            Assert.True(callbackRan);
+            Assert.Null(copy.CancellationFailure);
+            Assert.False(search.TryResolveSelection(selection, out _));
+            Assert.True(execution.IsRunning);
+        }
+        Assert.False(search.TryResolveSelection(selection, out _));
+    }
+
+    private sealed class ScopedCancellationSearchProvider : IVideoSearchProvider
+    {
+        public Task<VideoSearchBatch> SearchAsync(VideoSearchRequest request, CancellationToken token) =>
+            Task.FromResult(new VideoSearchBatch([new VideoMetadata("sample00000", "synthetic title")]));
+    }
+
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [Theory]
