@@ -1,6 +1,6 @@
 # VRChat Visual Assistant — 動画検索機能設計
 
-Status: approved interaction and provider design / not implemented
+Status: approved interaction and provider design / K1 core contracts implemented; public flow and providers pending
 
 Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus official provider documentation; no API or device validation.
 
@@ -10,9 +10,9 @@ Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus off
 
 共通の音声入力で得た文章からYouTube動画を検索し、小さなサムネイルとタイトルで候補を選び、URLをWindowsクリップボードへコピーする。ワールドの動画プレイヤーへの貼り付けは本人が行う。
 
-2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**設計合意であって未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
+2026-10-01の概要案を、7段階の設計確認で合意した操作・件数・サービス選定と、コード読み取りで見つけた必要な基盤拡張へ更新した。**操作仕様は設計合意であり、公開フローは未実装**。追加確認で解釈用GPT-6 Lunaと音声の1起動300秒・30送信上限を採用した。I1でadapter/設定境界、I2で画像/テキスト分岐と不変の認識文sessionを追加したが、adapter接続とAPIの精度・速度やWindows/Questの動作は未確認である。
 
-録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約とI2のtyped入力経路以外の機能コードは未実装とする。
+録音・GPT Transcribe・認識文の保持は[共通音声入力](DESIGN-PLATFORM.md#shared-voice-input--approved-design-not-implemented)が正本。ここではその文章の使い道として、直接検索/解釈検索、yt-dlp、候補とページ移動、コピー、固有の送信範囲を定義する。既存翻訳は維持する。実装順序と完了条件は [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) にまとめ、I1の設定/音声形式契約、I2/I3の入力・実行境界、I4の独立text quotaとK1の直接検索Core契約を追加した。実サービスadapterと公開検索画面は未実装である。
 
 ## Problem and accepted flow
 
@@ -27,10 +27,10 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 | 現行コードの確認 | 残る差分 |
 | --- | --- |
 | I2で `CapturedFrame` / `Text` と `IAnalyzer` / `ITextFeatureHandler` を分離 | 共通認識文を返す音声adapterと公開入口はJ1〜J3/K5で接続する |
-| I2のテキスト経路はcapture/OCRを0回にし、画像翻訳は従来経路を維持 | 動画検索handler/providerはK1〜K3で追加する |
+| I2のテキスト経路はcapture/OCRを0回にし、画像翻訳は従来経路を維持 | K1で直接handler/provider契約を追加。実provider/AI解釈はK2/K3 |
 | `ScanPipeline._isRunning` と `_uiScanRunning` はSCAN経路の制御 | 録音・検索・コピー・翻訳をまたぐアプリ単位のsingle-flightへ接続する |
 | VRのstatus atlasは非操作、失敗経路は腕へ戻る | 操作できる共通進捗/失敗画面に中止・やり直しを設ける |
-| `FeatureResult` はテキストセクション中心 | 候補ID・title・thumbnail・検証済みURLを対応づける型付き候補と選択actionを追加する |
+| `FeatureResult` はテキストセクション中心 | K1で型付き候補/検証済みURLとIDだけの選択actionを追加。表示/副作用はK4/K5 |
 | WPFは表示テキストのコピーに対応 | VRの候補選択から、その動画のURLだけをコピーするWindows境界を追加する |
 | 実行時の機能は `Translation` のみ | 音声入力・検索を使える状態になったとは説明しない |
 
@@ -84,6 +84,14 @@ VRChat内で動画を探すためにデスクトップオーバーレイを開�
 ## Search provider — yt-dlp
 
 **検索providerはyt-dlpを正式採用**する。YouTubeの動画metadataだけを取得し、動画/音声をダウンロードしない。YouTube Data APIを前提にAPIキーを追加したり、検索のためにブラウザーを自動操作したりしない。取得できるmetadataや安定性はYouTube側・yt-dlp版に依存し、将来も必ず検索できるという保証ではない。
+
+### K1 core contracts — implemented, no external search
+
+`DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。`VideoSearchRequest.Query` は原文そのまま（空白・改行を含む4,000 UTF-8 byte以内）で、AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
+
+`VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。これは選択identityの認可までで、clipboardの取得・gate・STA書込み直前の再照合はK4へ残す。
+
+`FeatureResult.VideoSearch` と既存 `AnalysisResult` の互換projectionは同じtyped snapshotを維持する。Windows composition rootへは未登録で、マイク/yt-dlp/AI/thumbnail/clipboard/公開UIの新規通信や副作用は発生しない。
 
 ### One bounded batch and memory paging
 
@@ -178,12 +186,12 @@ I1でadapter/設定境界を以下のとおり具体化した。承認済みの�
 - **process（K2）**: 上記固定optionsへ `--no-js-runtimes --no-remote-components --no-update --socket-timeout 10 --retries 0 --extractor-retries 0` を加え、固定版READMEとfake引数で検証する。shellなし、検索語は `--` 後の1引数、全体timeout 30秒、stdout 1 MiB / stderr 64 KiBを別に並列で上限制御する。超過/取消/timeoutはprocess treeをkillして終了/pipe回収を待ち、後処理timeoutは5秒で別失敗にし、終了未確認ならgateを解放せず新処理を拒否する。stdout/stderrをログや一般例外本文へ流さない。実サービスで機能不足なら失敗を見せ、外部JS runtime/remote component/ffmpegを黙って導入しない
 - **metadata/URL（K1/K2）**: titleは非空のプレーンテキスト4,000 UTF-8 byteまで、動画IDはASCII `[A-Za-z0-9_-]{11}`。IDだけでも正規watch URLを作り、provider URLがある場合はHTTPSの `www.youtube.com/watch?v=...` / `youtube.com/watch?v=...` / `youtu.be/<id>` のみ受け付け、userinfo/非既定port/余分なpath/fragment、重複v、別IDを拒否する。不要なqueryはコピーへ引き継がず、`https://www.youtube.com/watch?v=<id>` に正規化する。entry配列と各fieldを検証し、無効/重複候補は除外、正常0件と全件不正を区別する
 - **thumbnail（K4）**: HTTPSかつhostが厳密に `i.ytimg.com` / `img.youtube.com`、port 443のみ。userinfo/fragment、redirect、他hostを拒否する。資格情報/cookieなしの専用HttpClient、1枚timeout 5秒、encoded body 512 KiB、JPEG/PNG/WebPの静止1frameのみ、画像1辺1,024 px以下・合計1,048,576 pixel以下、decoded RGBA 4 MiB以下、memoryだけへdecodeする。decoder非対応/不足/失敗はplaceholderにし、タイトル/選択を維持する。URL suffixやContent-Typeだけで画像と信頼しない。自動redirectを無効にし、encoded sizeとdecode前寸法の両方を検証する
-- **基盤型/UI（I2/I3/K1/K5/L1）**: I2で画像の `IAnalyzer` を維持し、`ITextFeatureHandler` / `TextInputSession` と不変の認識文を追加した。I3で共通operation/世代管理と既存SCAN/コピーの排他を追加した。具体的な検索adapterの接続とtyped候補ID/選択actionはK1以降へ残す。最終寸法/長文/title/サムネイルの描画とWPF/VRの同一状態反映はK5/L1/L2へ残す
+- **基盤型/UI（I2/I3/K1/K5/L1）**: I2で画像の `IAnalyzer` を維持し、`ITextFeatureHandler` / `TextInputSession` と不変の認識文を追加した。I3で共通operation/世代管理と既存SCAN/コピーの排他を追加した。K1で直接handler/provider契約、typed候補ID/選択actionとpage snapshotを追加した。具体的な外部adapterの接続と表示・副作用はK2以降へ残す。最終寸法/長文/title/サムネイルの描画とWPF/VRの同一状態反映はK5/L1/L2へ残す
 - **実機/実サービス（L2/L3）**: Windows + SteamVR + QuestでのVRChatミュート時録音、歩行、カード操作、clipboard、遅延/負荷、固定版yt-dlp実検索・thumbnail互換、API精度/価格/保持条件を別に確認する。I1の純粋な契約テストでこれらを合格扱いにしない
 
 個人利用に必要な範囲へ絞る。動的plugin、汎用tool実行、エージェントloop、追加の手続書は含めない。実装タスクは既存の [TASKS](../TASKS.md#voice-input-and-video-search--implementation-sequence) で管理し、別の一覧は増やさない。
 
-## Validation plan — implementation is not yet tested
+## Validation plan — K1 core fake tests passed; full flow pending
 
 | 観点 | fake/自動検証で確かめること |
 | --- | --- |
@@ -196,7 +204,7 @@ I1でadapter/設定境界を以下のとおり具体化した。承認済みの�
 | privacy/費用 | 未設定で送信しない、録音/検索内容の保存無し、例外/stdout/stderrを含むログの内容漏れ無し、300秒/30送信の直前・一致・超過、秒数と回数の一括予約、送信前中止と送信後失敗の計数、設定再読込/runtime再構築で消費量維持・再起動のみリセット、音声/翻訳/解釈の3枠の独立性、片方が上限でも他方を利用可能、同じ用途でclientを作り直しても迂回不可 |
 | 回帰 | 翻訳/OCR-only、capture抑制順序、既存表示・配置、shared runtime解放、入力非干渉、翻訳quotaの独立性維持、全用途共通single-flight維持 |
 
-APIキーや実通信はfakeテストに不要。実装後にWindows build/test/formatと、新しい全interactive controlの統合hit-testを行う。さらに現行ビルドのWindows + SteamVR + Questで、録音、中止、再操作、両ページの全候補とbody rail、歩行、コピーを確認する。過去の翻訳の実機証拠や文書レビューは、この受入確認の代わりにならない。
+K1の新規fake139件は、原文不変/AI・capture・OCRなし、0/1/5/6/10件のpaging、stale選択/取消遅延、metadata/URL境界を確認した。Linuxのsolution Release cross-buildとCore/Infrastructure回帰が通過し、Windows全testsはCIで別確認する。APIキーや実通信はfakeテストに不要。後続実装でもWindows build/test/formatと、新しい全interactive controlの統合hit-testを行う。さらに現行ビルドのWindows + SteamVR + Questで、録音、中止、再操作、両ページの全候補とbody rail、歩行、コピーを確認する。過去の翻訳の実機証拠や文書レビューは、この受入確認の代わりにならない。
 
 ## Decision log
 

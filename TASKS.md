@@ -380,9 +380,10 @@ Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音�
 
 ## Post-MVP Milestone K — bounded video search and desktop flow
 
-- [ ] **K1 — 型付き候補と直接検索の契約を作る**（依存: I2、I3）
+- [x] **K1 — 型付き候補と直接検索の契約を作る**（依存: I2、I3）
   - 範囲: text handler、検索provider境界、session/operation/候補ID/動画ID/title/任意thumbnail/正規watch URLの対応と許可された選択actionを定義する。「そのまま検索」は認識文を変更せず渡し、空白のみ/長さ超過は送信前に拒否する。
   - 確認: fake検索でAI/capture/OCRが0回、認識文不変、未知action/古いsession拒否。0/1/5/6/10件、5件ずつ最大2ページ、ページ送りで追加検索0回を検証。新検索/録り直しでは旧候補を選べない。
+  - 2026-10-01実装: `IVideoSearchProvider` / `VideoSearchRequest` / `VideoSearchBatch` と `DirectVideoSearchHandler` を追加。認識文は空白・改行込みでそのまま1回のmetadata検索へ渡し、原文・検索語・候補を別の不変snapshotとして保持する。10件上限/5件ページ、session・検索operation・候補ID、コピーだけの選択actionと正規watch URLを型付きにし、`FeatureResult` の互換projection/等価性でも検索identityを維持する。Coreの `VideoSearchSession` は共通gateのactive leaseを借用し、取消・閉じる・録り直し・新検索後の遅延候補/古い選択を拒否。ASCII動画ID、4,000 UTF-8 byte title、HTTPS許可URL/ID対応、parser正規化回避と任意thumbnail originを検証する。Linux .NET 8.0.422の新規fake139件、Core294件/Infrastructure108件の全回帰、solution Release cross-build（0 warnings/errors）が通過。変更C#10ファイルのtargeted formatとdiff/secret検査が通過し、全体formatは既存Windows5ファイルの違反を残す。Windows全testsはCIで別確認する。yt-dlp実行（K2）・AI解釈（K3）・thumbnail取得/clipboard書込み（K4）・公開UI（K5）・実サービス/Quest評価は追加しない。
 
 - [ ] **K2 — yt-dlpのmetadata検索adapterを作る**（依存: I1、K1）
   - 範囲: 固定実行パスと引数配列で`ytsearch10:`を1引数として渡す。設定/plugin/cookie取込みとshell連結を禁止し、simulate/skip-download/no-cache等の合意済み隔離を実装。stdout/stderrの並行・上限付き読取り、timeout、取消時の子プロセス終了/回収を行う。

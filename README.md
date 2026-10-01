@@ -499,6 +499,8 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 
 AI機能はコンパイル時登録のFeature Catalog、共通のテキストモデル通信、機能ごとのプロンプトと結果整形に分離しています。現在ユーザーが選べる機能は翻訳だけです。要約は拡張境界を自動テストするための未登録実装で、画面や通常SCANからは起動できず、API利用回数や料金を増やしません。動的プラグイン、画像送信、自律実行、外部ツールはまだ含めていません。
 
+動画検索のCore契約（K1）は、認識文を変更せず1回のprovider検索へ渡すhandler、型付き候補、5件ずつ最大2ページ、古い候補を拒否する選択identityまでfakeで検証しています。検索provider・AI解釈・サムネイル取得・候補URLのclipboard書込み・公開画面はまだ接続していません。現在のアプリからYouTube検索を利用できる段階ではありません。詳細は [動画検索機能設計](docs/DESIGN-VIDEO-SEARCH.md) と [実装タスク](TASKS.md#voice-input-and-video-search--implementation-sequence) を参照してください。
+
 OSCQuery経由のButton操作、任意のOpenAI翻訳、VR内での位置調整とボタン判定は実機確認済みです。現行Releaseでは、左手・右手・HMD配置の保存と通常再起動、結果ページ1〜3の操作、下部レール全域でのカーソル継続、SCANメニューと結果の位置・角度一致、および10回のキャプチャでVRCVA表示が採用画像へ混入しないことも確認済みです。
 
 ## ライセンス
