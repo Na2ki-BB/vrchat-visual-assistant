@@ -1,10 +1,10 @@
 # VRChat Visual Assistant — 共通AI基盤設計
 
-Status: implemented baseline and historical decisions
+Status: implemented baseline / approved voice-input design (not implemented) / historical decisions
 
 Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: through 2026-08-15 (Asia/Tokyo).
 
-[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md) · [動画検索機能設計（概要Draft）](DESIGN-VIDEO-SEARCH.md)
+[設計の入口](../DESIGN.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md) · [動画検索機能設計（設計合意・未実装）](DESIGN-VIDEO-SEARCH.md)
 
 ## Purpose and ownership
 
@@ -14,7 +14,7 @@ Last reorganized: 2026-10-01 (Etc/UTC). Implementation and device evidence: thro
 
 これは設計書の責務分割であり、新しい共通機構の実装ではない。現在の入力型は `CapturedFrame` のみで、実行時に選べる機能は `Translation` のみ。要約は未登録のテスト用実装であり、音声入力・音声翻訳・YouTube検索・任意ツールの実行基盤は実装済みと扱わない。
 
-音声入力からYouTube候補を選びURLをコピーする機能は、別の[動画検索の概要案](DESIGN-VIDEO-SEARCH.md)として整理する。音声・候補選択を既存のFeatureCatalogへ載せるための具体的な入力・実行・結果契約は未決定であり、現行の画像専用契約だけで対応済みとはみなさない。
+2026-10-01の設計合意では、録音・クラウド文字起こし・認識文の表示を**共通音声入力**としてこの基盤に置く。その文章から呼び出す最初の用途を[動画検索](DESIGN-VIDEO-SEARCH.md)とし、将来の別AI機能でも入力を再利用できるようにする。以下の専用節は未実装の設計であり、現行の画像専用契約だけで対応済みとはみなさない。具体adapter、型名、費用上限の未決事項も残す。
 
 ## Reading current behavior and history
 
@@ -131,7 +131,7 @@ The current foundation is still frame-based: `FeatureInputKind` only defines `Ca
 
 Source: [Features.cs](../src/VrcVa.Core/Features.cs), [Models.cs](../src/VrcVa.Core/Models.cs), [ScanPipeline.cs](../src/VrcVa.Core/ScanPipeline.cs), and [OpenAiResponsesTextModelClient.cs](../src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs).
 
-## Shared execution lifecycle
+## Shared execution lifecycle — current implementation
 
 1. The composition root turns a supported explicit trigger into a `ScanRequest` containing the selected feature ID, correlation ID, and timestamp.
 2. `ScanPipeline` enforces single-flight execution and resolves the registered feature before acquiring a frame.
@@ -146,9 +146,66 @@ The full current capture → OCR → optional Japanese translation lifecycle, in
 
 `OpenVrRuntime` is process-wide and reference counted. Capture and rendering hold leases on the same runtime; disposing a per-scan capture lease must not shut down the result panel's lease. Use OpenVR only while SteamVR is already running, without starting SteamVR as a side effect. The feature-specific hide/boundary/discard/adopt ordering remains in [the translation capture contract](DESIGN-JAPANESE-TRANSLATION.md#capture).
 
+## Shared voice input — approved design, not implemented
+
+### Responsibility and entry point
+
+既存の左腕メニューへマイクアイコンを追加する。共通側が「録音 → 文字起こし → 文章表示 → 使い道の選択」までを持ち、検索語の解釈・YouTube取得・候補選択は動画検索側が持つ。録音機構を動画検索の内部へ閉じ込めず、認識文を別用途に渡すための最小のテキスト入力境界を作る。現時点で未登録の用途や汎用エージェントを追加するものではない。
+
+- マイクを1回押すと録音開始、もう1回押すと停止してクラウド文字起こしへ進む。メニューを開いただけでは録音しない
+- 録音中表示、停止操作、残り秒数、中止を用意する。最大録音時間は**初期30秒**。到達時は自動停止し、手動停止と同じ文字起こし経路へ進む
+- 30秒は1か所の設定値で後から変更できる設計とし、UI・タイマー・容量検査で別々に固定しない。設定の置き場所と許容範囲は実装前に決める
+- 無音による自動終了は初期仕様に含めない。無音/空の入力・空の認識結果では検索へ進まず、短い理由と録り直しを表示する。無音判定の具体方式・閾値は未決定で、誤認識を完全に検出できるとは扱わない
+- 文字起こし中はその状態と中止を表示する。完了後は全文と用途ボタンを表示し、検索を自動実行しない
+- 認識文の直下に、最初から「そのまま検索」「解釈して検索」の2ボタンを並べる。先に「検索」を押してから方法を選ぶ二段階にはしない。ボタンの処理内容は動画検索側で定義する
+- 「録り直し」は新しい入力セッションを開始して認識文を全文置換する。追記やVRキーボードによる編集は行わず、旧文・旧候補の操作を無効にする
+- 正常に文字起こしできた共通の認識文は、検索語整形で上書きしない。用途から戻ってもセッション内では利用でき、終了・録り直しで破棄する
+
+### Speech provider and ownership
+
+音声認識は**OpenAI GPT Transcribeを正式採用**する。これは採用方針の決定であり、実APIでの精度・速度・マイク動作は未評価。音声用provider adapterに閉じ込め、具体モデルID・版を設定とadapterの境界で差し替えられるようにする。検索語を解釈するテキストモデルの選定とは分ける。ローカルAIは使わない。
+
+Windows側はマイク取得・停止・メモリバッファの所有、Infrastructure側は音声API通信・応答解析、共通入力側は状態と認識文を持つ。マイク選択、録音ライブラリ、サンプル形式・符号化・要求サイズ、具体adapterは未決定。本人はVRChatをミュートして話す運用を想定しているが、VRChat内ミュートとOS/物理マイクのミュートは別であり、同時利用の可否はWindows + SteamVR + Questで確認する。
+
+音声は明示した1回分をメモリ内にだけ保持する。文字起こし成功後は音声を解放する。失敗時の明示的な「やり直し」に必要な音声だけを現在の画面セッション内に一時保持し、中止・閉じる・録り直し・アプリ終了で録音停止と解放を行う。無制限の保持を避ける期限・サイズ制限はadapter詳細化時に定義する。内容の履歴、音声ファイル、逐次ストリーミング送信は初期仕様に追加しない。
+
+### Minimal input and result extension
+
+現行の `FeatureInputKind.CapturedFrame`、`FeatureEntry(IAnalyzer)`、`IAnalyzer.AnalyzeAsync(CapturedFrame, ...)` と `ScanPipeline` は画像専用である。共通音声入力が返すテキストを受ける入力型とhandler登録を必要な範囲だけ追加し、入力種別を検証して画像経路と分岐する。音声や文章を偽の `CapturedFrame` に包まず、テキスト機能のためにcapture/OCRを呼ばない。既存翻訳は現行analyzerと互換結果を維持する。具体型・クラス名の確定や全pipelineの一般化は本設計の条件にしない。
+
+`FeatureDataBoundary` の現行3値だけでは音声送信と検索先へのテキスト送信を正しく説明できない。共通音声入力の送信先と、用途ごとの後段の送信先を分けて表現する最小の拡張を行う。「抽出テキストのみ」の表示で音声を送らない。認識文はsession ID、用途処理はoperation IDを伴い、古い応答や操作を拒否する。
+
+テキストセクションだけの `FeatureResult` に、動画候補の型付きデータと選択actionを追加する。タイトルや任意URL文字列をコマンドとして扱わず、現在の候補IDを照合して許可済みのコピーだけを実行する。翻訳のprimary section・互換表示は壊さない。候補の詳細は動画検索設計を正本とする。
+
+### Cross-feature single-flight and cancellation
+
+現行の `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` はSCAN経路内の制御であり、音声・検索も排他済みとはみなさない。録音、文字起こし、検索語解釈、検索、コピー、および既存翻訳を含めて、**処理は一度に1つ**にする。アプリ単位の共通gateを全入口で通し、runtime再構築や別hotkeyから迂回させない。
+
+1. 明示操作でgateを取得し、現在のsession/operationとキャンセルトークンを発行する。録音開始から文字起こし完了までを1処理として占有する
+2. 認識文や候補を表示しているだけの待機状態ではgateを解放する。次の検索・コピー・SCANも同じgateで競合を確認する。他の処理中は新要求をqueueに積まず、現在の画面を壊さない短い処理中表示にする
+3. 手動停止と30秒到達が競合しても停止・送信は1回だけ。中止は停止と区別し、録音中の中止では文字起こしを送らない
+4. 中止・閉じる・新しい入力で世代を無効化し、HTTP、音声取得、検索子プロセス、画像取得へキャンセルを伝える。完了通知だけでなくUI反映とclipboard実行の直前にも世代を確認する
+5. 中止後は「中止中」を示し、ローカルの処理とリソースの回収を確認してからgateを解放する。遅れて返った結果で新画面や新候補を置き換えない。既にサービスが受け付けた要求の中止が、課金取消を保証するわけではない
+6. 失敗は段階と短い理由を表示し、本人が「やり直し」を選んだ時だけ該当段階から再実行する。認識文・確定済み検索語など有効な入力は再利用し、成功済みの有料段階を自動でやり直さない。認証不足・上限到達では設定案内を出し、無意味な再送をしない
+
+処理表示だけの現行status atlasや、エラー時に腕へ戻る現行経路では中止・やり直しを操作できない。共通の**操作可能な処理中/失敗画面**を新設する必要がある。full 1280x720 view、表示とhit-testが同じ矩形を使う契約、priority-zero入力、歩行の非干渉を継承する。ヘッダーは表示専用とし、中止・やり直し等の操作は既存body railに置く。用途ボタンは認識文の直下となるbody内に配置する。
+
+既存翻訳のcapture時には、新しい音声画面を含むVRCVA overlayを従来どおり抑制する。取得のhide/boundary/discard/adopt順序を変えない。captureの短い非表示中はWPF側の中止経路を維持し、その後に共通進捗画面へ戻す。SteamVR喪失・デバイス切断・終了でも録音や操作状態が残らないようにする。
+
+### Voice opt-in, cost policy, and privacy
+
+- 既存のWindows Credential Managerを活用し、公式OpenAI endpoint以外へ保存キーを送らない。翻訳用キーがあるだけでマイク取得・音声送信を有効にせず、音声機能の明示有効化と送信先・費用の表示を設ける
+- 音声用のAPIは既存Responsesテキスト通信と分ける。既存の `store: false`、入力4,000バイト、10回quota等が音声にもそのまま適用されるとは説明しない
+- 1回30秒と、プロセス/セッション全体の音声秒数・送信回数上限は別。失敗したネットワーク送信も回数に含め、設定再読込で上限を迂回させない方針とする。後者の数値・予約/解放の計数詳細、音声要求のサイズ・timeoutは未決定であり、実装時の利用開始前に決める
+- テキスト解釈が `ITextModelClient` を使う場合は翻訳と共通のquotaを使い、機能ごとに新しいquotaを作って上限を迂回しない。新モデルや料金は未確定
+- 通常ログは段階、時間、回数、サイズ、エラー種別等だけ。音声、認識文、検索語、候補のタイトル・URL、API本文、キーを記録せず、例外や子プロセス出力もそのままログへ流さない
+- 録音に周囲の声が入る可能性を案内する。常時録音・待ち受け・ワールド音声取得・会話履歴保存は行わない
+
+音声APIの公式根拠、動画検索固有の送信先、確認済み事項と未検証事項は[動画検索の根拠一覧](DESIGN-VIDEO-SEARCH.md#sources-and-verification-status)にまとめる。本節は設計合意であり、コード・設定・利用制限が実装済みという宣言ではない。
+
 ## Feature extension rules
 
-Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The second feature should reuse OCR plus the text-model boundary (for example summarization) to prove the extension point before adding image models or tools. OCR/world text is untrusted content; future tool-capable features must never interpret it as authority and must require explicit confirmation before external side effects.
+Future AI features use a compile-time `FeatureCatalog`, typed feature descriptors, and shared backend/usage policy. Dynamic plug-ins, an autonomous agent loop, arbitrary tools, and a general-purpose kernel remain deferred. The earlier OCR/text-only extension point was proved with the unregistered summarization analyzer. The next user-visible feature is now the approved voice-driven video-search design above, which needs a minimal text-input extension; it must not force microphone input through OCR. OCR/world text, transcripts, model outputs, and search metadata are untrusted content, not authority for arbitrary tools or settings changes.
 
 The foundation now resolves a typed feature before capture and returns an ordered, feature-neutral set of result sections with exactly one primary section. Unknown IDs fail at the trigger stage without capturing. OpenAI HTTP/authentication, bounded request policy, response parsing, and the process-wide ten-attempt quota live behind `ITextModelClient`; translation and summarization own only their prompts and result mapping. The summarization analyzer is deliberately left out of the runtime catalog and UI: fake-client tests prove the extension boundary without adding a user-visible feature or another way to spend API credit. Existing translation and OCR-only behavior are retained through a compatibility adapter while renderers consume the generic primary result.
 
@@ -156,9 +213,9 @@ The foundation now resolves a typed feature before capture and returns an ordere
 
 1. 機能固有の目的・入力・出力・データ送信範囲を別の機能設計で定義し、実装済みの入力型で表現できるか確認する。
 2. `FeatureDescriptor` / `FeatureEntry` / `FeatureCatalog` へコンパイル時登録する。未登録の要約をUIで有効化したものとして扱わない。
-3. `IAnalyzer` に処理を置き、結果セクションを返す。翻訳専用プロンプトやOCRの閾値を共通UIへ持ち込まない。
+3. 画像機能は `IAnalyzer` に処理を置き、結果セクションを返す。新しいテキスト機能は上記の入力別handlerを使い、翻訳専用プロンプトや検索語解釈の指示を共通UIへ持ち込まない。
 4. テキストAIが必要なら `ITextModelClient` と同一プロセスの使用量制限を使う。外部送信の明示選択、キャンセル、エラー処理、fake-clientによる無通信テストを維持する。
-5. 入力型の追加、画像送信、外部ツール、副作用、自律実行は別の設計・承認が必要な範囲であり、既存の拡張点だけで対応済みと主張しない。
+5. 入力型の追加、画像送信、外部ツール、副作用、自律実行は別の設計・承認が必要な範囲。今回合意した共通音声入力、yt-dlpによるmetadata検索、本人が選んだURLコピーだけを必要な拡張とし、任意ツールや自律実行へ広げない。既存の拡張点だけで対応済みとも主張しない。
 6. 結果UI・配置・入力を変更する場合は、下記の実機ゲートと [development harness](../harness/skills/vrcva-development/SKILL.md) の統合検証を適用する。
 
 ## Shared text-model transport and credentials
@@ -316,6 +373,9 @@ See [setup instructions](AI-HARNESS-SETUP.md) and the [source-of-truth map](../h
 
 | Date | Decision | Reason |
 | --- | --- | --- |
+| 2026-10-01 | 共通音声入力と用途別テキスト処理を分離し、GPT Transcribeを採用（未実装） | 動画検索以外でも認識文を使い、検索語の整形で共通文を上書きしない |
+| 2026-10-01 | 押して開始/再押し停止、初期30秒自動停止、録り直しは全文置換 | 明示操作と短い録音を保ち、VR文字編集を増やさない |
+| 2026-10-01 | 翻訳も含む共通single-flightと操作可能な中止/失敗画面を設計 | 現行SCAN内gateと非操作statusだけでは音声・検索の競合や再試行を扱えない |
 | 2026-08-11 | Start with an external Windows app, not a VRChat mod | Complies with the non-invasive requirement and avoids client/EAC risk |
 | 2026-08-11 | Select C#/.NET 8 + WPF | Best total fit for installed environment, Win32/WinRT, GUI, HTTP, tests, and maintainability |
 | 2026-08-11 | Use hotkey first, official VRChat OSC next | Proves value with no avatar work; OSC later gives native in-VR interaction through a supported interface |
