@@ -105,7 +105,7 @@ public sealed class VideoMetadata
         return shortUrl || videoParameters == 1;
     }
 
-    private static bool IsValidThumbnailUrl(Uri thumbnailUrl) =>
+    public static bool IsValidThumbnailUrl(Uri thumbnailUrl) =>
         thumbnailUrl.IsAbsoluteUri
         && TryReadHttpsUrl(thumbnailUrl.OriginalString, out _, out string authority, out _, out _)
         && (IsAuthority(authority, "i.ytimg.com") || IsAuthority(authority, "img.youtube.com"));

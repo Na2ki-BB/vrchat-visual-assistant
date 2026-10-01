@@ -183,6 +183,18 @@ public sealed class ExecutionCoordinator
         }
     }
 
+    // The clipboard callback is synchronous and single-attempt. Holding the identity lock
+    // makes revalidation and its OS side effect indivisible with Close/Cancel/Stop.
+    internal bool TryExecuteCurrentSideEffect(ExecutionOperation operation, Action sideEffect)
+    {
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_active, operation) || !IsCurrent(operation)) { return false; }
+            sideEffect();
+            return true;
+        }
+    }
+
     internal void Complete(ExecutionOperation operation)
     {
         lock (_sync)
