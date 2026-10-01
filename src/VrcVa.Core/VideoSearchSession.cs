@@ -208,6 +208,22 @@ public sealed class VideoSearchSession
         }
     }
 
+    internal bool TryWriteSelection(VideoCandidateAction action, ExecutionOperation copyOperation, Action<string> write)
+    {
+        lock (_sync)
+        {
+            // Lock order is always session then coordinator. No await can split this boundary.
+            return _execution.TryExecuteCurrentSideEffect(copyOperation, () =>
+            {
+                if (copyOperation.SessionId != action.SessionId || !TryResolveSelection(action, out var candidate))
+                {
+                    throw new OperationCanceledException(copyOperation.CancellationToken);
+                }
+                write(candidate.WatchUrl.AbsoluteUri);
+            });
+        }
+    }
+
     private void DiscardStaleSession()
     {
         if (_interpretationOperation is not null && !_execution.IsResultCurrent(_interpretationOperation))
