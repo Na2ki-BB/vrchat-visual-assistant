@@ -49,7 +49,10 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
     private bool _scanSessionActive;
     private bool _resultDesired;
     private bool _disposed;
+    private bool _launcherConnectionAvailable;
+    private bool _resultConnectionAvailable;
 
+    public event EventHandler? ConnectionLost;
     public event EventHandler? Hidden;
     public event EventHandler? ScanRequested;
     public event EventHandler? UserResultClosed;
@@ -178,6 +181,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
                 WristLauncherTexture.AtlasPixelWidth,
                 WristLauncherTexture.AtlasPixelHeight);
             _eventTimer.Start();
+            UpdateConnectionAvailability(true);
             return true;
         }
         catch
@@ -625,7 +629,9 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             return true;
         }
 
-        return OpenVrInterop.TryCreate(_placement, out _interop);
+        bool connected = OpenVrInterop.TryCreate(_placement, out _interop);
+        UpdateConnectionAvailability(connected, resultConnection: true);
+        return connected;
     }
 
     private void PollEvents(object? sender, EventArgs eventArgs)
@@ -651,6 +657,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
             {
                 switch (overlayEvent.EventType)
                 {
+                    case OpenVrEvent.Quit:
+                        NotifyConnectionLost();
+                        Disconnect();
+                        DisconnectLauncher();
+                        return;
                     case OpenVrEvent.OverlayClosed:
                         HandleUserResultClose();
                         return;
@@ -751,6 +762,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         while (_launcherInterop is not null
             && _launcherInterop.TryPollEvent(out OpenVrEvent launcherEvent))
         {
+            if (launcherEvent.EventType == OpenVrEvent.Quit)
+            {
+                NotifyConnectionLost();
+                Disconnect();
+                DisconnectLauncher();
+                return;
+            }
             if (launcherEvent.EventType == OpenVrEvent.ImageLoaded && _launcherImageLoading)
             {
                 _launcherImageLoading = false;
@@ -768,6 +786,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         while (_cursorInterop is not null
             && _cursorInterop.TryPollEvent(out OpenVrEvent cursorEvent))
         {
+            if (cursorEvent.EventType == OpenVrEvent.Quit)
+            {
+                NotifyConnectionLost();
+                Disconnect();
+                DisconnectLauncher();
+                return;
+            }
             if (cursorEvent.EventType == OpenVrEvent.ImageLoaded && _cursorImageLoading)
             {
                 _cursorImageLoading = false;
@@ -953,6 +978,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         {
             // Input failure is fail-open: never enable SteamVR's global laser.
             TryLogPointerError(exception);
+            NotifyConnectionLost();
             DisconnectLauncher();
             return false;
         }
@@ -1227,8 +1253,26 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
         _ = _launcherInterop.TryShowTrackedDeviceOnly(width);
     }
 
+    internal void UpdateConnectionAvailability(bool connected, bool resultConnection = false)
+    {
+        bool wasAvailable = _launcherConnectionAvailable || _resultConnectionAvailable;
+        if (resultConnection) { _resultConnectionAvailable = connected; }
+        else { _launcherConnectionAvailable = connected; }
+        if (wasAvailable && !_launcherConnectionAvailable && !_resultConnectionAvailable && !_disposed)
+        {
+            ConnectionLost?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void NotifyConnectionLost()
+    {
+        UpdateConnectionAvailability(false, resultConnection: true);
+        UpdateConnectionAvailability(false);
+    }
+
     private void DisconnectLauncher()
     {
+        UpdateConnectionAvailability(false);
         if (_launcherCalibrationActive)
         {
             AbandonWristLauncherCalibration();
@@ -1536,6 +1580,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
     private void Disconnect()
     {
+        UpdateConnectionAvailability(false, resultConnection: true);
         bool launcherConnected = _launcherInterop is not null;
         bool keepLauncherHiddenForActiveScan = _scanSessionActive && !_resultDesired;
         bool restoreLauncherPlacement = _launcherCalibrationActive;

@@ -356,24 +356,33 @@ dotnet .\src\VrcVa.Windows\bin\Release\net8.0-windows10.0.19041.0\VrcVa.dll `
 | --- | --- | --- | --- |
 | `UsageLimits.TranslationRequests` | 10 | 1〜100送信／起動 | 翻訳へ適用 |
 | `UsageLimits.SearchInterpretationRequests` | 10 | 1〜100送信／起動 | 独立枠を実装。公開解釈機能は未接続 |
-| `UsageLimits.VoiceSeconds` | 300 | 1〜3,600秒／起動 | 独立した音声quotaへ適用。公開音声UIはJ3 |
-| `UsageLimits.VoiceRequests` | 30 | 1〜300送信／起動 | 独立した音声quotaへ適用。公開音声UIはJ3 |
-| `VoiceInput.MaximumRecordingSeconds` | 30 | 1〜120秒 | 未公開録音adapterで使用。UIはJ3 |
-| `VoiceInput.FailedAudioRetentionSeconds` | 120 | 15〜300秒 | 未公開音声sessionで使用。UIはJ3 |
+| `UsageLimits.VoiceSeconds` | 300 | 1〜3,600秒／起動 | 独立した音声quotaとWPF音声入力へ適用 |
+| `UsageLimits.VoiceRequests` | 30 | 1〜300送信／起動 | 独立した音声quotaとWPF音声入力へ適用 |
+| `VoiceInput.MaximumRecordingSeconds` | 30 | 1〜120秒 | 録音/残り秒/容量の共通上限 |
+| `VoiceInput.FailedAudioRetentionSeconds` | 120 | 15〜300秒 | 失敗音声の初回失敗からの保持期限 |
 
-`VoiceInput.IsEnabled`の初期値は`false`です。この値を編集しても、未公開録音/文字起こしadapterや検索を公開しません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
+`VoiceInput.IsEnabled`の初期値は`false`です。「音声入力」タブの説明を確認し、明示チェックで有効化してください。保存済みの専用キーだけでは有効になりません。上記objectの全fieldは必須で、整数以外・欠落・値域外を部分的な初期値に置き換えません。
 
 次のSCAN（desktop、hotkey、OSC、腕、明示画像）と既存の資格情報runtime再構築時に、実行gateを保持して設定を再読込します。実行中の設定は固定し、消費量は保存もリセットもしません。上限を既消費量より下げれば残り0になり、増やせば新上限から既消費量を引きます。無効/読込失敗時は最後の有効snapshotとカウンターを残し、そのSCANを取得/送信前に拒否します。ファイル修正後は次のSCANで再開できます。
 
 HTTP送信直前の予約後でも、送信開始前の取消では枠を返します。`SendAsync`の呼出しを試みた後は認証/通信失敗・timeout・中止も対象用途の1回を消費し、返しません。本人が再度SCANすれば新しい1回になります。翻訳と解釈の枠は相互に消費せず、全用途のsingle-flightは維持します。起動ごとの制限は月額予算やアカウント全体の支出を止める仕組みではありません。
 
-### 未公開の音声文字起こしadapter（J2）
+### WPFの共通音声入力（J3）
 
-`OpenAiVoiceTranscriber` は音声opt-inと専用credential snapshotの両方を要求し、canonical PCM16 mono 16 kHz WAVだけを公式OpenAI Audio Transcriptions APIへ送ります。既存翻訳キーや環境変数は読みません。専用Credential Manager targetは`VrcVa/OpenAI/Voice`ですが、保存/削除/読込と公開UIの配線はJ3です。現時点では操作可能な音声送信入口を追加していません。
+1. 「音声入力」タブで送信先・費用・周囲の声への注意を読み、明示的に有効化します。キー保存とは独立した操作です
+2. 音声専用キーをWindows資格情報マネージャーへ保存します。翻訳キー/汎用環境変数は流用しません
+3. 「録音開始」を押し、再押しの「停止して文字起こし」または設定上限で送信します。録音中の中止は送信しません
+4. 成功後は認識した全文を表示し、元音声をゼロ化・解放します。文章は次の入力/閉じる/終了までメモリに保持します
+5. 通信等の失敗時は期限内の音声だけ「保持した音声を再送」で再利用できます。初回失敗からの期限は再送しても延びず、毎回新しく秒数/回数を消費します。認証/利用上限の失敗は設定の確認を案内します
+6. 中止・閉じる・録り直し・終了で内容を破棄します。中止中は資源の回収が終わるまで次を開始しません。接続済みSteamVRの喪失でも破棄し、その後はデスクトップから明示的に再開できます
+
+認識文の用途action接続口だけを用意しています。検索の公開ボタン/候補表示はK5、腕マイクやVRの音声操作画面はL1/L2で追加するため、まだ表示しません。既存の画像翻訳は「画面の翻訳」タブにあります。
+
+`OpenAiVoiceTranscriber` は音声opt-inと専用credential snapshotの両方を要求し、canonical PCM16 mono 16 kHz WAVだけを公式OpenAI Audio Transcriptions APIへ送ります。既存翻訳キーや環境変数は読みません。専用Credential Manager targetは`VrcVa/OpenAI/Voice`です。WPFの「音声入力」タブで同意とキー保存を別々に設定します。VR/VRChatを起動しなくても使えます。
 
 音声は各送信の実PCM秒数を整数秒へ切り上げ、300秒と30回の初期枠を同時予約します。送信を試みた後の認証/通信失敗・timeout・取消と本人による再送も計数し、自動再送しません。設定再読込/client再構築でも同じapp-owned quotaを維持します。録音初期30秒・許容1〜120秒、応答64 KiB/認識文4,000 UTF-8 byte、全HTTP処理60秒上限を適用し、redirectは禁止です。
 
-[OpenAIのデータ管理文書](https://developers.openai.com/api/docs/guides/your-data)の2026-10-01確認では`/v1/audio/transcriptions`は学習利用なし、abuse monitoring retention/application-state retentionともNoneと記載されています。音声リクエストにResponses APIの`store: false`を付けず、その設定が音声へ適用されるとも表示しません。将来の音声opt-inでは最新の料金/保持条件と周囲の声の注意を別に表示し、実マイク/API/Questでの受入は未実施です。
+[OpenAIのデータ管理文書](https://developers.openai.com/api/docs/guides/your-data)の2026-10-01確認では`/v1/audio/transcriptions`は学習利用なし、abuse monitoring retention/application-state retentionともNoneと記載されています。音声リクエストにResponses APIの`store: false`を付けず、その設定が音声へ適用されるとも表示しません。音声opt-inには有料送信・周囲の声・OS/物理ミュートの注意と公式料金/保持条件へのリンクを表示します。[公式料金](https://developers.openai.com/api/docs/pricing)の2026-10-01参考値は音声1分あたり約US$0.0045です。価格は変更され得ます。実マイク/API/Questでの受入は未実施です。
 
 ### 設定用環境変数
 

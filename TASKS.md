@@ -375,9 +375,10 @@ Exit: 既存翻訳の回帰を通し、fakeのテキスト機能を画像取得�
 
   - 2026-10-01実装: 未公開`OpenAiVoiceTranscriber` / `IVoiceTranscriber`、音声専用credential snapshot、`VoiceRequestQuota`を追加。canonical WAV/設定秒数の容量、公式endpoint/model、multipart/json、redirect禁止、60秒timeout、64 KiB応答/4,000 UTF-8 byte認識文を検証する。app-owned `FeatureUsageQuotas.Voice` に秒数/回数を同時予約し、未開始時だけ返却、開始後の失敗/取消/本人再送を計数。翻訳10/解釈10と独立で、reload/client再構築はidentity/既消費量を維持。資格情報storeの実read/write、公開音声UI/実API/マイク/Quest受入は含めない。公式API/保持条件を再確認し、音声へResponses `store:false`を適用するとは扱わない。Linux .NET 8.0.422のsolution Release cross-buildは0 warnings/errors、Core298件/Infrastructure288件の全回帰と音声focused106件が通過。独立reviewで不正UTF-8/片側surrogateの例外分類を修正し、再review/再テストでblocking指摘なし。変更C#9ファイルのtargeted formatとdiff/secret検査を確認。全体formatは既存Windows5ファイルとLinux Windows参照読込みwarningを残す。Windows全testsはPRの正確なheadでCI確認する。
 
-- [ ] **J3 — 共通音声フローをWPFでつなぐ**（依存: J1、J2）
+- [x] **J3 — 共通音声フローをWPFでつなぐ**（依存: J1、J2）
   - 範囲: `MainWindow`、設定/資格情報境界へ音声opt-inと送信先/費用/周囲の声への注意を追加。録音→文字起こし→全文表示、録り直し/閉じる、処理中の中止、段階別失敗を同じsessionへ接続する。用途actionの接続口を用意し、検索の公開ボタンはK5で実処理と同時に接続する。
   - 確認: fakeの全経路で成功後に音声を解放し、失敗の明示再試行だけ期限内音声を利用する。録り直し/閉じる/期限切れで破棄し、音声・本文・キーを設定やファイルに保存しない。キー保存済みでも音声未同意なら録音/送信0回。VRがなくてもWPFで中止・回復できる。
+  - 2026-10-01実装: WPFの音声専用タブへ明示同意/専用キー/送信先・参考料金・保持条件/周囲の声の注意、録音→文字起こし→全文、手動再送/中止/閉じる/録り直しを接続。アプリ所有の共通gate/音声quotaとJ1の期限/leaseを維持し、他のSCAN・SteamVR接続喪失・終了でも旧内容を破棄する。native cleanup失敗の停止案内と再送取消後の遅延失敗を独立レビューで修正しfake回帰を追加。用途actionの空hostのみで、検索ボタン/VR音声UIは未追加。Linux Release cross-buildとCore/Infrastructure回帰、source-linked音声フロー20件が通過。WPF/Windows全体はCIで別確認し、実キー・実マイク・有料API・Quest受入は未実施。
 
 Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音声枠とバッファ寿命を証明できる。Windows実マイク・実API精度は未確認のままL2/L3に残す。
 

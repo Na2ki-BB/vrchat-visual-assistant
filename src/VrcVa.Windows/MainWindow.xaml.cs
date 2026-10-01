@@ -15,6 +15,7 @@ using VrcVa.Windows.Security;
 using VrcVa.Windows.Settings;
 using VrcVa.Windows.Startup;
 using VrcVa.Windows.Translation;
+using VrcVa.Windows.Voice;
 using VrcVa.Windows.Win32;
 
 namespace VrcVa.Windows;
@@ -34,6 +35,8 @@ public partial class MainWindow : Window
     private readonly FeatureUsageQuotas _usageQuotas = new();
     private readonly UsageSettingsSnapshot _usageSettings;
     private readonly ExecutionCoordinator _execution = new();
+    private readonly VoiceInputFlow _voiceFlow;
+    private readonly VoiceInputPanel _voicePanel;
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
     private readonly ReloadableAnalyzer _analyzer;
@@ -141,6 +144,7 @@ public partial class MainWindow : Window
             _settings.WristLauncher);
         _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.ScanRequested += SteamVrResultPanel_ScanRequested;
+        _steamVrResultPanel.ConnectionLost += SteamVrResultPanel_ConnectionLost;
         _steamVrResultPanel.UserResultClosed += SteamVrResultPanel_UserResultClosed;
         _steamVrResultPanel.PlacementCalibrationFinished +=
             SteamVrResultPanel_PlacementCalibrationFinished;
@@ -182,6 +186,17 @@ public partial class MainWindow : Window
             _renderer,
             _logger,
             _execution);
+
+        VoiceInputConfiguration voiceConfiguration = new(
+            LoadVoiceSettings,
+            SaveVoiceSettings,
+            new WindowsVoiceCredentialStore(),
+            _usageQuotas.Voice);
+        _voiceFlow = new VoiceInputFlow(_execution, new WinMmMicrophoneFactory(), voiceConfiguration.CreateRuntime);
+        _voicePanel = new VoiceInputPanel(_voiceFlow, _execution, voiceConfiguration,
+            _usageQuotas.Voice, () => _usageSettings.VoiceInput);
+        VoiceInputHost.Content = _voicePanel;
+        _voiceFlow.Changed += VoiceFlow_Changed;
 
         InitializeModelSelector();
         InitializeResultPanelPlacementControls();
@@ -517,14 +532,15 @@ public partial class MainWindow : Window
 
     private void CancelButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        _execution.CancelCurrentOperation();
+        if (_voiceFlow.IsCurrent) { _voiceFlow.Cancel(); }
+        else { _execution.CancelCurrentOperation(); }
         StatusText.Text = "中止中です。処理とリソースの回収を待っています。";
         CancelButton.IsEnabled = false;
     }
 
     private void SteamVrResultPanel_UserResultClosed(object? sender, EventArgs eventArgs)
     {
-        _execution.CloseSession();
+        _execution.CloseSession(_displayedResultSessionId);
         _displayedResultSessionId = Guid.Empty;
         SourceTextBox.Clear();
         TranslationTextBox.Clear();
@@ -1116,6 +1132,8 @@ public partial class MainWindow : Window
         try
         {
             operation.ThrowIfNotCurrent();
+            await _voiceFlow.CloseAsync();
+            operation.ThrowIfNotCurrent();
             if (!TryReloadUsageSettings(operation))
             {
                 await _renderer.RenderOutcomeAsync(
@@ -1194,6 +1212,7 @@ public partial class MainWindow : Window
         TranslationModelComboBox.IsEnabled =
             !isRunning && _analyzer.Current.OpenAiTranslator is not null;
         PlacementSettingsExpander.IsEnabled = !isRunning && !_placementCalibrationActive;
+        _voicePanel.Refresh();
     }
 
     private void RenderProgress(ScanProgress progress)
@@ -1250,7 +1269,9 @@ public partial class MainWindow : Window
         _closed = true;
         _execution.Stop();
         _windowLifetimeCancellation.Cancel();
-        await WindowShutdown.DrainAndPostCloseAsync(Dispatcher, _execution.WhenIdle, _oscStartupTask, () =>
+        Task voiceCleanup = _voiceFlow.DisposeAsync().AsTask();
+        await WindowShutdown.DrainAndPostCloseAsync(Dispatcher, _execution.WhenIdle,
+            Task.WhenAll(_oscStartupTask, voiceCleanup), () =>
         {
             _shutdownDrained = true;
             Close();
@@ -1259,6 +1280,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs eventArgs)
     {
+        _voiceFlow.Changed -= VoiceFlow_Changed;
+        _voicePanel.Detach();
         _globalHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
         if (_oscTriggerService is not null)
@@ -1269,6 +1292,7 @@ public partial class MainWindow : Window
         }
 
         _steamVrResultPanel.ScanRequested -= SteamVrResultPanel_ScanRequested;
+        _steamVrResultPanel.ConnectionLost -= SteamVrResultPanel_ConnectionLost;
         _steamVrResultPanel.UserResultClosed -= SteamVrResultPanel_UserResultClosed;
         _steamVrResultPanel.PlacementFallback -= SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.PlacementCalibrationFinished -=
@@ -1324,6 +1348,44 @@ public partial class MainWindow : Window
                 ScanStage.Rendering,
                 ScanFailureCode.Unexpected,
                 exception);
+        }
+    }
+
+    private VrcVaSettings LoadVoiceSettings()
+    {
+        VrcVaSettings loaded = _usageSettings.Reload(_settingsStore);
+        _settings = _settings with { VoiceInput = loaded.VoiceInput, UsageLimits = loaded.UsageLimits };
+        return loaded;
+    }
+
+    private void SaveVoiceSettings(VrcVaSettings updated)
+    {
+        _settingsStore.Save(updated);
+        _usageSettings.Apply(updated);
+        _settings = updated;
+    }
+
+    private async void SteamVrResultPanel_ConnectionLost(object? sender, EventArgs eventArgs)
+    {
+        // Only a previously established connection emits this event. A desktop-only
+        // session never requires SteamVR, and can explicitly restart after a loss.
+        await _voiceFlow.CloseAsync();
+    }
+
+    private void VoiceFlow_Changed(object? sender, EventArgs eventArgs)
+    {
+        if (_closed) { return; }
+        if (_voiceFlow.IsCurrent)
+        {
+            _displayedResultSessionId = Guid.Empty;
+            SourceTextBox.Clear();
+            TranslationTextBox.Clear();
+        }
+        SetScanControls(_execution.IsRunning || _voiceFlow.RequiresRestart);
+        if (_voiceFlow.RequiresRestart)
+        {
+            CancelButton.IsEnabled = false;
+            StatusText.Text = _voiceFlow.Message;
         }
     }
 

@@ -1161,4 +1161,5 @@ internal readonly record struct OpenVrEvent(
     public const uint ImageLoaded = 508;
     public const uint ImageFailed = 517;
     public const uint OverlayClosed = 534;
+    public const uint Quit = 700;
 }
