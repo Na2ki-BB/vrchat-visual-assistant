@@ -13,17 +13,25 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     private readonly IXsOverlayNotificationSink _fallbackNotificationSink;
     private readonly IPrivacySafeLogger _logger;
     private bool _fallbackReported;
+    private readonly Func<Guid, bool>? _canRender;
+    private Guid _displayedOperationId;
+    private Guid _displayedSessionId;
+    private readonly ExecutionCoordinator? _execution;
 
     public SteamVrOverlayResultRenderer(
         Dispatcher dispatcher,
         SteamVrResultPanel panel,
         IXsOverlayNotificationSink fallbackNotificationSink,
-        IPrivacySafeLogger logger)
+        IPrivacySafeLogger logger,
+        Func<Guid, bool>? canRender = null,
+        ExecutionCoordinator? execution = null)
     {
         _dispatcher = dispatcher;
         _panel = panel;
         _fallbackNotificationSink = fallbackNotificationSink;
         _logger = logger;
+        _canRender = canRender;
+        _execution = execution;
         _panel.DisplayFailed += Panel_DisplayFailed;
     }
 
@@ -33,16 +41,24 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     {
         if (progress.Stage == ScanStage.Trigger || progress.Stage == ScanStage.Capture)
         {
-            await _dispatcher.InvokeAsync(_panel.Hide, DispatcherPriority.Normal, cancellationToken);
+            await InvokeAsync(() =>
+            {
+                if (CanRender(progress.CorrelationId, cancellationToken)) { _panel.Hide(); }
+            }, DispatcherPriority.Normal);
             return;
         }
 
         if (progress.Stage == ScanStage.Ocr)
         {
-            await _dispatcher.InvokeAsync(
-                () => _panel.TryShowStatus(ResultPanelTexture.ProcessingCell),
-                DispatcherPriority.Normal,
-                cancellationToken);
+            await InvokeAsync(
+                () =>
+                {
+                    if (CanRender(progress.CorrelationId, cancellationToken))
+                    {
+                        _ = _panel.TryShowStatus(ResultPanelTexture.ProcessingCell);
+                    }
+                },
+                DispatcherPriority.Normal);
         }
     }
 
@@ -52,14 +68,16 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     {
         if (!outcome.IsSuccess || outcome.Result is null)
         {
-            await _dispatcher.InvokeAsync(
+            await InvokeAsync(
                 () =>
                 {
-                    _panel.Hide();
-                    _panel.ReturnToLauncher();
+                    if (CanRender(outcome.CorrelationId, cancellationToken))
+                    {
+                        _panel.Hide();
+                        _panel.ReturnToLauncher();
+                    }
                 },
-                DispatcherPriority.Normal,
-                cancellationToken);
+                DispatcherPriority.Normal);
             return;
         }
 
@@ -69,11 +87,17 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
 
         try
         {
-            bool displayed = await _dispatcher.InvokeAsync(
-                () => _panel.TryShow(title, body),
-                DispatcherPriority.Normal,
-                cancellationToken);
-            if (displayed)
+            bool? displayed = await InvokeAsync(
+                () =>
+                {
+                    if (!CanRender(outcome.CorrelationId, cancellationToken)) { return (bool?)null; }
+                    _displayedOperationId = outcome.CorrelationId;
+                    _displayedSessionId = _execution?.CurrentSessionId ?? Guid.Empty;
+                    return _panel.TryShow(title, body);
+                },
+                DispatcherPriority.Normal);
+            if (displayed is null) { return; }
+            if (displayed.Value)
             {
                 _fallbackReported = false;
                 return;
@@ -89,15 +113,44 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
                 exception);
         }
 
-        await _dispatcher.InvokeAsync(
-            () => _panel.ReturnToLauncher(),
+        await InvokeAsync(
+            () =>
+            {
+                if (CanRender(outcome.CorrelationId, cancellationToken)) { _panel.ReturnToLauncher(); }
+            },
             DispatcherPriority.Normal);
-        await ReportFallbackOnceAsync(cancellationToken);
+        await ReportFallbackOnceAsync(outcome.CorrelationId, cancellationToken);
     }
 
-    private async Task ReportFallbackOnceAsync(CancellationToken cancellationToken)
+    private Task InvokeAsync(Action action, DispatcherPriority priority)
     {
-        if (_fallbackReported)
+        if (_dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return _dispatcher.InvokeAsync(action, priority).Task;
+    }
+
+    private Task<T> InvokeAsync<T>(Func<T> action, DispatcherPriority priority)
+    {
+        if (_dispatcher.CheckAccess()) { return Task.FromResult(action()); }
+        return _dispatcher.InvokeAsync(action, priority).Task;
+    }
+
+    private bool CanRender(Guid operationId, CancellationToken cancellationToken) =>
+        !cancellationToken.IsCancellationRequested && _canRender?.Invoke(operationId) != false;
+
+    private async Task ReportFallbackOnceAsync(
+        Guid operationId,
+        CancellationToken cancellationToken,
+        bool displayedSession = false)
+    {
+        bool current = displayedSession && _execution is not null
+            ? _execution.IsSessionCurrent(_displayedSessionId)
+            : CanRender(operationId, cancellationToken);
+        if (_fallbackReported || !current || cancellationToken.IsCancellationRequested)
         {
             return;
         }
@@ -126,7 +179,7 @@ internal sealed class SteamVrOverlayResultRenderer : IResultRenderer
     {
         try
         {
-            await ReportFallbackOnceAsync(CancellationToken.None);
+            await ReportFallbackOnceAsync(_displayedOperationId, CancellationToken.None, displayedSession: true);
         }
         catch (Exception exception)
         {

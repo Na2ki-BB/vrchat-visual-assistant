@@ -128,18 +128,18 @@ The project count is deliberately small. OpenVR remains a Windows adapter behind
 - `FeatureResult` contains ordered, uniquely identified sections and exactly one primary section. `AnalysisResult` remains the compatibility adapter for existing translation consumers.
 - `ITextModelClient` is the shared text-model boundary. Feature code owns instructions and result mapping; the infrastructure adapter owns HTTP, authentication, parsing, and bounded usage policy.
 
-The I2 foundation distinguishes `FeatureInputKind.CapturedFrame` and `Text`. `ScanRequest.CreateText` carries an immutable, in-memory `TextInputSession` with a nonempty session ID and the original transcript (up to 4,000 UTF-8 bytes, without trimming/truncation). The text route uses `ScanStage.TextHandling` and sets capture source to `none`; the image route and translation compatibility remain unchanged. No text feature is registered by the Windows composition root yet. Audio, search, application-wide gate/session invalidation, and UI wiring remain later tasks.
+The I2 foundation distinguishes `FeatureInputKind.CapturedFrame` and `Text`. `ScanRequest.CreateText` carries an immutable, in-memory `TextInputSession` with a nonempty session ID and the original transcript (up to 4,000 UTF-8 bytes, without trimming/truncation). The text route uses `ScanStage.TextHandling` and sets capture source to `none`; the image route and translation compatibility remain unchanged. No text feature is registered by the Windows composition root yet. I3 adds an application-owned `ExecutionCoordinator` shared by all Windows SCAN pipelines and result copy. Audio/search adapters and their public UI remain later tasks.
 
 Source: [Features.cs](../src/VrcVa.Core/Features.cs), [Models.cs](../src/VrcVa.Core/Models.cs), [ScanPipeline.cs](../src/VrcVa.Core/ScanPipeline.cs), and [OpenAiResponsesTextModelClient.cs](../src/VrcVa.Infrastructure/OpenAiResponsesTextModelClient.cs).
 
 ## Shared execution lifecycle — current implementation
 
 1. The composition root turns a supported explicit trigger into a `ScanRequest` containing the selected feature ID, correlation ID, and timestamp.
-2. `ScanPipeline` enforces its existing per-instance single-flight and resolves the registered feature/input kind before processing.
+2. `ExecutionCoordinator` admits one operation without queuing. The Windows caller holds it before overlay changes and pre-capture waits; `ScanPipeline` borrows that same operation and atomically claims execution once. Standalone callers use the pipeline-owned admission path. Registered feature/input kind is resolved before processing.
 3. For an image request, the capture adapter returns one owned in-memory frame. Owned overlays must remain suppressed during acquisition; the exact current eye-mirror sequence is defined in the translation design. A text request instead passes its original completed session directly to the typed text handler, with no capture/OCR.
 4. The selected image analyzer or text handler receives its typed input, request, progress sink, and cancellation token. The returned feature ID must match the selected descriptor. `FeatureResult` from a text handler passes through the existing `AnalysisResult` compatibility adapter. Cancellation is checked again before accepting the result.
 5. Shared renderers consume progress/outcome and the primary result. Closing, hiding, failure, controller/runtime loss, and disposal release VRCVA interaction without taking VRChat's scene input.
-6. The image frame is disposed after analysis; the text session stays owned by the caller for reuse. Logs retain only bounded metadata and sanitized failures. The application-wide gate and close/re-record generation invalidation are still I3 work.
+6. The image frame is disposed after analysis; the text session stays owned by the caller for reuse. Logs retain only bounded metadata and sanitized failures. The owner releases the shared operation only after adapter/frame cleanup, awaited rendering, and UI-control restoration. Cancel/close invalidates presentation immediately without releasing busy ownership. WPF/OpenVR recheck the operation inside the dispatcher callback; clipboard rechecks before its STA write.
 
 The full current capture → OCR → optional Japanese translation lifecycle, including trigger-specific timing and stable failure concepts, is in [the feature design](DESIGN-JAPANESE-TRANSLATION.md#data-flow-and-lifecycle).
 
@@ -197,13 +197,21 @@ Windows側はマイク取得・停止・メモリバッファの所有、Infrast
 
 I2で `FeatureInputKind.Text`、`TextInputSession`、`FeatureEntry(ITextFeatureHandler)` と `ScanRequest.CreateText` を追加し、`ScanPipeline` は入力種別を実処理前に検証して画像/テキスト経路へ分岐する。音声や文章を偽の `CapturedFrame` に包まず、テキスト機能のためにcapture/OCRを呼ばない。既存翻訳は現行analyzerと互換結果を維持する。具体型・クラス名の確定や全pipelineの一般化は本設計の条件にしない。
 
-I2で `FeatureDataBoundary` をflagsへ拡張し、既存のlocal/抽出text/imageの値を維持したまま `VoiceAudioToOpenAi`、`InputTextToOpenAi`、`SearchTextToYouTube` を区別する。解釈検索は後者2つを組み合わせられ、音声の送信境界とは独立する。metadataはprovider有効化や送信同意ではなく、実通信は未接続である。「抽出テキストのみ」の表示で音声を送らない。認識文は不変のsession IDと本文を持ち、用途の検索語は共通sessionへ保存/上書きしない。用途処理のoperation IDと古い応答/操作の拒否はI3で接続する。
+I2で `FeatureDataBoundary` をflagsへ拡張し、既存のlocal/抽出text/imageの値を維持したまま `VoiceAudioToOpenAi`、`InputTextToOpenAi`、`SearchTextToYouTube` を区別する。解釈検索は後者2つを組み合わせられ、音声の送信境界とは独立する。metadataはprovider有効化や送信同意ではなく、実通信は未接続である。「抽出テキストのみ」の表示で音声を送らない。認識文は不変のsession IDと本文を持ち、用途の検索語は共通sessionへ保存/上書きしない。I3で用途処理のoperation IDと世代、古い応答/操作の拒否を共通gateへ接続した。具体的な検索候補/音声adapterの接続は後続タスクで行う。
 
 テキストセクションだけの `FeatureResult` に、動画候補の型付きデータと選択actionを追加する。タイトルや任意URL文字列をコマンドとして扱わず、現在の候補IDを照合して許可済みのコピーだけを実行する。翻訳のprimary section・互換表示は壊さない。候補の詳細は動画検索設計を正本とする。
 
 ### Cross-feature single-flight and cancellation
 
-現行の `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` はSCAN経路内の制御であり、音声・検索も排他済みとはみなさない。録音、文字起こし、検索語解釈、検索、コピー、および既存翻訳を含めて、**処理は一度に1つ**にする。アプリ単位の共通gateを全入口で通し、runtime再構築や別hotkeyから迂回させない。
+I3で `ScanPipeline._isRunning` とWindowsの `_uiScanRunning` を `ExecutionCoordinator` / `ExecutionOperation` へ置き換えた。MainWindowは1つのgateをアプリ寿命で所有し、desktop/hotkey/OSC/腕SCAN、診断画像、既存結果のコピーに共有する。録音/文字起こし/検索はまだ公開していないが、fake操作で同じ所有境界を検証する。録音、文字起こし、検索語解釈、検索、コピー、および既存翻訳を含めて、**処理は一度に1つ**にする。
+
+- `TryBeginSession` は新しい入力を、`TryBeginOperation` は現在のsessionの検索/コピー等を受け付ける。Busyでは世代/画面を変えずqueueにも積まない。OSCは受信時に判定してからdispatcherへ渡し、腕SCANは受付後にのみlauncherを隠す
+- operation IDは1起動中に再利用せず、同じoperationでpipelineを2回実行できない。認識文/候補の待機中はoperationを解放する。modelの短いメモリ更新はadmissionと原子的に排他し、資格情報の保存/削除とruntime交換は設定用operationを通して一括所有する
+- 中止はoperation世代を失効させ、closeはsessionも終了する。取消tokenを伝えてもownerの回収完了まではBusyを保つ。取消callbackの例外は観測可能な `CancellationFailure` として保持し、Windowsは本文なしで記録する
+- WPF/OpenVRは成功・失敗・進捗をdispatcher実行直前に再検証する。VRの本人によるcloseはcapture用Hideと別のeventで失効し、画像選択dialogも単調な世代で古い操作を拒否する
+- Windows終了はClosingを一度保留し、operationとOSC起動の回収を待つ。最後のCloseを必ずdispatcherへpostしてからpanel/HTTP/CTSを破棄する。captureのhide/boundary/discard/adoptと参照数付きOpenVR所有は変更しない
+
+共通制御と利用quotaは別の所有物で、翻訳10回/解釈10回、音声300秒/30送信の初期値は変更しない。quota runtime接続はI4/J2、音声/検索UIと操作できるVR進捗/失敗画面はJ3/K5/L1以降へ残す。
 
 1. 明示操作でgateを取得し、現在のsession/operationとキャンセルトークンを発行する。録音開始から文字起こし完了までを1処理として占有する
 2. 認識文や候補を表示しているだけの待機状態ではgateを解放する。次の検索・コピー・SCANも同じgateで競合を確認する。他の処理中は新要求をqueueに積まず、現在の画面を壊さない短い処理中表示にする

@@ -52,6 +52,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
     public event EventHandler? Hidden;
     public event EventHandler? ScanRequested;
+    public event EventHandler? UserResultClosed;
     public event EventHandler? DisplayFailed;
     public event EventHandler? PlacementFallback;
     public event EventHandler<ResultPanelPlacementCalibrationEventArgs>? PlacementCalibrationFinished;
@@ -1178,14 +1179,9 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
                 break;
             case WristLauncherAction.Translate:
-                if (_launcherState.BeginScan())
-                {
-                    _scanSessionActive = true;
-                    _resultDesired = false;
-                    _launcherInterop?.Hide();
-                    _activationGate.Reset();
-                    ScanRequested?.Invoke(this, EventArgs.Empty);
-                }
+                // Admission belongs to the application. BeginScan changes presentation
+                // only after the shared gate accepts this request.
+                ScanRequested?.Invoke(this, EventArgs.Empty);
 
                 break;
             case WristLauncherAction.Calibrate:
@@ -1196,6 +1192,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, ID
 
     private void HandleUserResultClose()
     {
+        UserResultClosed?.Invoke(this, EventArgs.Empty);
         Hide();
         ReturnToLauncher();
     }

@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using VrcVa.Core;
 using VrcVa.Infrastructure;
 using VrcVa.Windows.Capture;
+using VrcVa.Windows.Lifecycle;
 using VrcVa.Windows.Ocr;
 using VrcVa.Windows.OpenVr;
 using VrcVa.Windows.Osc;
@@ -31,6 +32,7 @@ public partial class MainWindow : Window
     private readonly VrcVaSettingsStore _settingsStore = new();
     private readonly SteamVrAutoLaunchRegistration _steamVrAutoLaunchRegistration = new();
     private readonly TranslationRequestQuota _translationRequestQuota = new();
+    private readonly ExecutionCoordinator _execution = new();
     private readonly PrivacySafeFileLogger _logger;
     private readonly TranslationRuntimeFactory _translationRuntimeFactory;
     private readonly ReloadableAnalyzer _analyzer;
@@ -56,8 +58,10 @@ public partial class MainWindow : Window
     private GlobalHotKey? _modelToggleHotKey;
     private string? _modelToggleHotKeyDisplayText;
     private OscTriggerService? _oscTriggerService;
-    private CancellationTokenSource? _activeScanCancellation;
-    private int _uiScanRunning;
+    private volatile bool _closed;
+    private bool _shutdownDrained;
+    private Task _oscStartupTask = Task.CompletedTask;
+    private Guid _displayedResultSessionId;
     private string? _startupWarning;
 
     public MainWindow()
@@ -133,6 +137,7 @@ public partial class MainWindow : Window
             _settings.WristLauncher);
         _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.ScanRequested += SteamVrResultPanel_ScanRequested;
+        _steamVrResultPanel.UserResultClosed += SteamVrResultPanel_UserResultClosed;
         _steamVrResultPanel.PlacementCalibrationFinished +=
             SteamVrResultPanel_PlacementCalibrationFinished;
         _steamVrResultPanel.WristLauncherPlacementCalibrationStarted +=
@@ -155,20 +160,24 @@ public partial class MainWindow : Window
             new WpfResultRenderer(
                 Dispatcher,
                 RenderProgress,
-                RenderOutcome),
+                RenderOutcome,
+                _execution.IsCurrent),
             new SteamVrOverlayResultRenderer(
                 Dispatcher,
                 _steamVrResultPanel,
                 _xsOverlayNotificationSink,
-                _logger),
-            new XsOverlayNotificationRenderer(_xsOverlayNotificationSink));
+                _logger,
+                _execution.IsCurrent,
+                _execution),
+            new XsOverlayNotificationRenderer(_xsOverlayNotificationSink, _execution.IsCurrent));
         _vrChatPipeline = new ScanPipeline(
             new FallbackCaptureSource(
                 new OpenVrEyeCaptureSource(Dispatcher, _steamVrResultPanel, eyeOptions),
                 new VrChatWindowCaptureSource()),
             _analyzer,
             _renderer,
-            _logger);
+            _logger,
+            _execution);
 
         InitializeModelSelector();
         InitializeResultPanelPlacementControls();
@@ -176,6 +185,7 @@ public partial class MainWindow : Window
 
         Loaded += MainWindow_Loaded;
         SourceInitialized += MainWindow_SourceInitialized;
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
     }
 
@@ -253,8 +263,11 @@ public partial class MainWindow : Window
 
         if (_oscTriggerOptions?.Enabled == true)
         {
-            await StartOscTriggerAsync(_oscTriggerOptions);
+            _oscStartupTask = StartOscTriggerAsync(_oscTriggerOptions);
+            await _oscStartupTask;
         }
+
+        if (_closed) { return; }
 
         if (!_settings.Onboarding.IsCompleted)
         {
@@ -280,9 +293,16 @@ public partial class MainWindow : Window
     {
         try
         {
-            _oscTriggerService = await OscTriggerService.StartAsync(
+            OscTriggerService service = await OscTriggerService.StartAsync(
                 options,
                 _windowLifetimeCancellation.Token);
+            if (_closed)
+            {
+                service.Dispose();
+                return;
+            }
+
+            _oscTriggerService = service;
             _oscTriggerService.Triggered += OscTriggerService_Triggered;
             _oscTriggerService.Faulted += OscTriggerService_Faulted;
             _oscStatus = $"OSCトリガー: 有効 / 動的ポート {_oscTriggerService.OscPort}";
@@ -320,30 +340,47 @@ public partial class MainWindow : Window
 
     private async void OscTriggerService_Triggered(object? sender, EventArgs eventArgs)
     {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        // Admit on receipt, before posting to WPF. Busy OSC pulses must never become a queue.
+        ScanRequest request = ScanRequest.Create("vrchat-osc");
+        if (!_execution.TryBeginSession(request.CorrelationId, out ExecutionOperation? operation))
         {
+            Guid activeId = _execution.CurrentOperationId;
+            if (!_closed && !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                try
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!_closed && _execution.IsRunning && _execution.CurrentOperationId == activeId)
+                        {
+                            StatusText.Text = "前の処理を実行中です。";
+                        }
+                    });
+                }
+                catch (Exception exception) when (exception is TaskCanceledException or InvalidOperationException)
+                {
+                    _logger.Error("osc.busy_dispatch_failed", request.CorrelationId,
+                        ScanStage.Trigger, ScanFailureCode.Unexpected, exception);
+                }
+            }
+
             return;
         }
 
         try
         {
-            await Dispatcher
-                .InvokeAsync(() => RunPipelineAsync(
-                    _vrChatPipeline,
-                    "vrchat-osc",
-                    OscActionMenuSettleDelay))
-                .Task
-                .Unwrap();
+            await Dispatcher.InvokeAsync(() => RunPipelineAsync(
+                _vrChatPipeline, request, operation, OscActionMenuSettleDelay)).Task.Unwrap();
         }
-        catch (Exception exception) when (
-            exception is TaskCanceledException or InvalidOperationException)
+        catch (Exception exception) when (exception is TaskCanceledException or InvalidOperationException)
         {
-            _logger.Error(
-                "osc.trigger_dispatch_failed",
-                Guid.Empty,
-                ScanStage.Trigger,
-                ScanFailureCode.Unexpected,
-                exception);
+            _logger.Error("osc.trigger_dispatch_failed", request.CorrelationId,
+                ScanStage.Trigger, ScanFailureCode.Unexpected, exception);
+        }
+        finally
+        {
+            // Also handles dispatcher shutdown before the accepted callback could start.
+            operation.Dispose();
         }
     }
 
@@ -408,7 +445,7 @@ public partial class MainWindow : Window
 
     private async void ModelToggleHotKey_Pressed(object? sender, EventArgs eventArgs)
     {
-        if (_uiScanRunning != 0)
+        if (_execution.IsRunning)
         {
             await SendXsOverlayStatusAsync(
                 "モデル切替待ち",
@@ -442,6 +479,13 @@ public partial class MainWindow : Window
 
     private async void ImageButton_Click(object sender, RoutedEventArgs eventArgs)
     {
+        if (_closed || _execution.IsRunning)
+        {
+            if (!_closed) { StatusText.Text = "前の処理を実行中です。"; }
+            return;
+        }
+
+        long receiptGeneration = _execution.CurrentGeneration;
         Microsoft.Win32.OpenFileDialog dialog = new()
         {
             Title = "OCR診断に使う画像を選択",
@@ -449,8 +493,12 @@ public partial class MainWindow : Window
             CheckFileExists = true,
             Multiselect = false,
         };
-        if (dialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog(this) != true) { return; }
+
+        // The dialog pumps WPF messages. Do not queue its old action behind a newer scan.
+        if (_closed || _execution.IsRunning || _execution.CurrentGeneration != receiptGeneration)
         {
+            if (!_closed) { StatusText.Text = "別の処理を開始したため、画像選択を取り消しました。"; }
             return;
         }
 
@@ -458,37 +506,61 @@ public partial class MainWindow : Window
             new ImageFileCaptureSource(dialog.FileName),
             _analyzer,
             _renderer,
-            _logger);
+            _logger,
+            _execution);
         await RunPipelineAsync(imagePipeline, "explicit-image");
     }
 
-    private void CancelButton_Click(object sender, RoutedEventArgs eventArgs) =>
-        _activeScanCancellation?.Cancel();
+    private void CancelButton_Click(object sender, RoutedEventArgs eventArgs)
+    {
+        _execution.CancelCurrentOperation();
+        StatusText.Text = "中止中です。処理とリソースの回収を待っています。";
+        CancelButton.IsEnabled = false;
+    }
+
+    private void SteamVrResultPanel_UserResultClosed(object? sender, EventArgs eventArgs)
+    {
+        _execution.CloseSession();
+        _displayedResultSessionId = Guid.Empty;
+        SourceTextBox.Clear();
+        TranslationTextBox.Clear();
+    }
 
     private void CopyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
         string resultTitle = PrimaryResultGroupBox.Header as string ?? "結果";
-        if (string.IsNullOrWhiteSpace(TranslationTextBox.Text))
+        if (_displayedResultSessionId == Guid.Empty || string.IsNullOrWhiteSpace(TranslationTextBox.Text))
         {
             StatusText.Text = $"コピーできる{resultTitle}がまだありません。";
             return;
         }
 
-        try
+        if (!_execution.TryBeginOperation(_displayedResultSessionId, Guid.NewGuid(), out ExecutionOperation? operation))
         {
-            System.Windows.Clipboard.SetText(TranslationTextBox.Text);
-            StatusText.Text = $"{resultTitle}をクリップボードへコピーしました。";
+            StatusText.Text = _execution.IsRunning
+                ? "前の処理を実行中です。"
+                : "表示結果は終了しています。もう一度SCANしてください。";
+            return;
         }
-        catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
-        {
-            StatusText.Text = "クリップボードへコピーできませんでした。";
-            _logger.Error(
-                "ui.clipboard_failed",
-                Guid.Empty,
-                ScanStage.Rendering,
-                ScanFailureCode.Unexpected,
-                exception);
-        }
+
+        using (operation)
+            try
+            {
+                // WPF/STA, immediately before the write; no await or queued clipboard action.
+                operation.ThrowIfNotCurrent();
+                System.Windows.Clipboard.SetText(TranslationTextBox.Text);
+                StatusText.Text = $"{resultTitle}をクリップボードへコピーしました。";
+            }
+            catch (Exception exception) when (exception is ExternalException or InvalidOperationException)
+            {
+                StatusText.Text = "クリップボードへコピーできませんでした。";
+                _logger.Error(
+                    "ui.clipboard_failed",
+                    Guid.Empty,
+                    ScanStage.Rendering,
+                    ScanFailureCode.Unexpected,
+                    exception);
+            }
     }
 
     private void OpenSetupButton_Click(object sender, RoutedEventArgs eventArgs) =>
@@ -501,7 +573,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (Volatile.Read(ref _uiScanRunning) != 0 || _placementCalibrationActive)
+        if (_execution.IsRunning || _placementCalibrationActive)
         {
             StatusText.Text = "SCANまたはVR位置調整が終わってから初期設定を開いてください。";
             return;
@@ -551,7 +623,7 @@ public partial class MainWindow : Window
         finally
         {
             _setupWindowOpen = false;
-            OpenSetupButton.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+            OpenSetupButton.IsEnabled = !_execution.IsRunning;
         }
     }
 
@@ -630,7 +702,7 @@ public partial class MainWindow : Window
 
     private void SaveOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (Volatile.Read(ref _uiScanRunning) != 0)
+        if (_execution.IsRunning)
         {
             StatusText.Text = "SCAN完了後にAPIキーを保存してください。";
             return;
@@ -675,28 +747,35 @@ public partial class MainWindow : Window
         out TranslationRuntime? runtime)
     {
         runtime = null;
-        try
+        if (!_execution.TryBeginConfiguration(out ExecutionOperation? operation))
         {
-            _openAiCredentialStore.Write(apiKey);
-            runtime = ReloadTranslationRuntime();
-            return true;
-        }
-        catch (Exception exception) when (exception is ArgumentException or ExternalException)
-        {
-            StatusText.Text = "APIキーをWindows資格情報マネージャーへ保存できませんでした。";
-            _logger.Error(
-                "ui.api_key_save_failed",
-                Guid.Empty,
-                ScanStage.Translation,
-                ScanFailureCode.TranslationNotConfigured,
-                exception);
+            StatusText.Text = "処理が開始されたため、APIキーは保存していません。完了後にもう一度お試しください。";
             return false;
         }
+
+        using (operation)
+            try
+            {
+                _openAiCredentialStore.Write(apiKey);
+                runtime = ReloadTranslationRuntime(operation);
+                return true;
+            }
+            catch (Exception exception) when (exception is ArgumentException or ExternalException)
+            {
+                StatusText.Text = "APIキーをWindows資格情報マネージャーへ保存できませんでした。";
+                _logger.Error(
+                    "ui.api_key_save_failed",
+                    Guid.Empty,
+                    ScanStage.Translation,
+                    ScanFailureCode.TranslationNotConfigured,
+                    exception);
+                return false;
+            }
     }
 
     private void DeleteOpenAiApiKeyButton_Click(object sender, RoutedEventArgs eventArgs)
     {
-        if (Volatile.Read(ref _uiScanRunning) != 0)
+        if (_execution.IsRunning)
         {
             StatusText.Text = "SCAN完了後にAPIキーを削除してください。";
             return;
@@ -713,33 +792,34 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (Volatile.Read(ref _uiScanRunning) != 0)
+        if (!_execution.TryBeginConfiguration(out ExecutionOperation? operation))
         {
-            StatusText.Text = "SCANが開始されたため、APIキーは削除していません。完了後にもう一度お試しください。";
+            StatusText.Text = "処理が開始されたため、APIキーは削除していません。完了後にもう一度お試しください。";
             return;
         }
 
-        try
-        {
-            _openAiCredentialStore.Delete();
-            OpenAiApiKeyPasswordBox.Clear();
-            TranslationRuntime runtime = ReloadTranslationRuntime();
-            StatusText.Text = runtime.Warning is null
-                ? runtime.HasEffectiveApiKey
-                    ? "保存済みAPIキーを削除しました。明示設定された環境変数のキーは次回のSCANでも使います。"
-                    : "保存済みAPIキーを削除しました。次回のSCANから外部送信しません。"
-                : runtime.Warning;
-        }
-        catch (ExternalException exception)
-        {
-            StatusText.Text = "OpenAI APIキーを削除できませんでした。";
-            _logger.Error(
-                "ui.api_key_delete_failed",
-                Guid.Empty,
-                ScanStage.Translation,
-                ScanFailureCode.TranslationNotConfigured,
-                exception);
-        }
+        using (operation)
+            try
+            {
+                _openAiCredentialStore.Delete();
+                OpenAiApiKeyPasswordBox.Clear();
+                TranslationRuntime runtime = ReloadTranslationRuntime(operation);
+                StatusText.Text = runtime.Warning is null
+                    ? runtime.HasEffectiveApiKey
+                        ? "保存済みAPIキーを削除しました。明示設定された環境変数のキーは次回のSCANでも使います。"
+                        : "保存済みAPIキーを削除しました。次回のSCANから外部送信しません。"
+                    : runtime.Warning;
+            }
+            catch (ExternalException exception)
+            {
+                StatusText.Text = "OpenAI APIキーを削除できませんでした。";
+                _logger.Error(
+                    "ui.api_key_delete_failed",
+                    Guid.Empty,
+                    ScanStage.Translation,
+                    ScanFailureCode.TranslationNotConfigured,
+                    exception);
+            }
     }
 
     private bool TryClearClipboard()
@@ -828,7 +908,7 @@ public partial class MainWindow : Window
         ResultPanelPlacementCalibrationEventArgs eventArgs)
     {
         _placementCalibrationActive = false;
-        PlacementSettingsExpander.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+        PlacementSettingsExpander.IsEnabled = !_execution.IsRunning;
         _resultPanelPlacement = eventArgs.Placement;
         if (eventArgs.SaveRequested)
         {
@@ -845,7 +925,7 @@ public partial class MainWindow : Window
         WristLauncherPlacementCalibrationEventArgs eventArgs)
     {
         _placementCalibrationActive = false;
-        PlacementSettingsExpander.IsEnabled = Volatile.Read(ref _uiScanRunning) == 0;
+        PlacementSettingsExpander.IsEnabled = !_execution.IsRunning;
         if (!eventArgs.SaveRequested)
         {
             ResultPanelPlacementStatusText.Text =
@@ -992,7 +1072,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        translator.SelectModel(choice.ModelId);
+        if (!_execution.TryUpdateWhenIdle(() => translator.SelectModel(choice.ModelId)))
+        {
+            _modelSelectorInitializing = true;
+            TranslationModelComboBox.SelectedItem = TranslationModelComboBox.Items
+                .Cast<TranslationModelChoice>().FirstOrDefault(item => item.ModelId == translator.Model);
+            _modelSelectorInitializing = false;
+            StatusText.Text = "処理が終わってから翻訳モデルを切り替えてください。";
+            return;
+        }
         _translationStatus = runtime.HasEffectiveApiKey
             ? CreateOpenAiTranslationStatus(choice.ModelId)
             : $"翻訳API: OpenAI / {choice.ModelId} / 専用キー未設定";
@@ -1000,56 +1088,83 @@ public partial class MainWindow : Window
         UpdateEnvironmentDetails();
     }
 
-    private async Task RunPipelineAsync(
+    private Task RunPipelineAsync(
         ScanPipeline pipeline,
         string triggerName,
         TimeSpan preCaptureDelay = default)
     {
-        if (Interlocked.CompareExchange(ref _uiScanRunning, 1, 0) != 0)
+        ScanRequest request = ScanRequest.Create(triggerName);
+        if (!_execution.TryBeginSession(request.CorrelationId, out ExecutionOperation? operation))
         {
-            StatusText.Text = "前のSCANを処理中です。";
-            return;
+            if (!_closed) { StatusText.Text = "前の処理を実行中です。"; }
+            return Task.CompletedTask;
         }
 
-        _activeScanCancellation = new CancellationTokenSource();
-        SetScanControls(isRunning: true);
+        return RunPipelineAsync(pipeline, request, operation, preCaptureDelay);
+    }
 
+    private async Task RunPipelineAsync(
+        ScanPipeline pipeline,
+        ScanRequest request,
+        ExecutionOperation operation,
+        TimeSpan preCaptureDelay)
+    {
         try
         {
+            operation.ThrowIfNotCurrent();
+            SetScanControls(isRunning: true);
             _steamVrResultPanel.BeginScan();
             _steamVrResultPanel.Hide();
 
             if (preCaptureDelay > TimeSpan.Zero)
             {
                 _ = _steamVrResultPanel.TryShowStatus(ResultPanelTexture.WaitingCell);
-
                 StatusText.Text = "SCANを受け付けました。Action Menuを閉じてください。";
                 DetailText.Text = "段階: Trigger / OSCメニュー消去待ち";
-                await Task.Delay(preCaptureDelay, _activeScanCancellation.Token);
+                await Task.Delay(preCaptureDelay, operation.CancellationToken);
+                operation.ThrowIfNotCurrent();
 
                 _steamVrResultPanel.ShowStatus(ResultPanelTexture.CapturingCell);
                 StatusText.Text = "撮影を開始します。";
                 DetailText.Text = "段階: Capture / 撮影開始";
-                await Task.Delay(CaptureNoticeDuration, _activeScanCancellation.Token);
+                await Task.Delay(CaptureNoticeDuration, operation.CancellationToken);
+                operation.ThrowIfNotCurrent();
                 _steamVrResultPanel.Hide();
             }
 
-            await pipeline.RunAsync(
-                ScanRequest.Create(triggerName),
-                _activeScanCancellation.Token);
+            await pipeline.RunAsync(request, operation);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!operation.IsCurrent)
         {
-            _steamVrResultPanel.Hide();
-            _steamVrResultPanel.ReturnToLauncher();
-            StatusText.Text = "SCANをキャンセルしました。";
+            // The invalidated pipeline cannot repaint; cancellation is completed below.
         }
         finally
         {
-            _activeScanCancellation.Dispose();
-            _activeScanCancellation = null;
-            SetScanControls(isRunning: false);
-            Volatile.Write(ref _uiScanRunning, 0);
+            try
+            {
+                if (!_closed && _execution.IsActive(operation))
+                {
+                    if (!operation.IsCurrent)
+                    {
+                        _steamVrResultPanel.Hide();
+                        _steamVrResultPanel.ReturnToLauncher();
+                        StatusText.Text = "SCANをキャンセルしました。";
+                    }
+
+                    SetScanControls(isRunning: false);
+                }
+            }
+            finally
+            {
+                if (operation.CancellationFailure is not null)
+                {
+                    _logger.Error("execution.cancel_callback_failed", operation.OperationId,
+                        ScanStage.Trigger, ScanFailureCode.Unexpected, operation.CancellationFailure);
+                }
+
+                // Release last, after adapter/frame cleanup and UI restoration.
+                operation.Dispose();
+            }
         }
     }
 
@@ -1058,6 +1173,7 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = !isRunning;
         ImageButton.IsEnabled = !isRunning;
         CancelButton.IsEnabled = isRunning;
+        CopyPrimaryResultButton.IsEnabled = !isRunning;
         OpenAiApiKeyPasswordBox.IsEnabled = !isRunning;
         SaveOpenAiApiKeyButton.IsEnabled = !isRunning;
         DeleteOpenAiApiKeyButton.IsEnabled = !isRunning;
@@ -1092,6 +1208,7 @@ public partial class MainWindow : Window
 
         FeatureResultPresentation presentation =
             FeatureResultPresentation.Create(outcome.Result);
+        _displayedResultSessionId = _execution.CurrentSessionId;
         SourceResultGroupBox.Header = presentation.SourceTitle;
         SourceTextBox.Text = presentation.SourceText;
         PrimaryResultGroupBox.Header = presentation.PrimaryTitle;
@@ -1110,11 +1227,25 @@ public partial class MainWindow : Window
             + $" / 相関ID: {outcome.CorrelationId:D}";
     }
 
+    private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs eventArgs)
+    {
+        if (_shutdownDrained) { return; }
+        eventArgs.Cancel = true;
+        if (_closed) { return; }
+
+        // Keep the dispatcher alive while active capture/adapters return their ownership.
+        _closed = true;
+        _execution.Stop();
+        _windowLifetimeCancellation.Cancel();
+        await WindowShutdown.DrainAndPostCloseAsync(Dispatcher, _execution.WhenIdle, _oscStartupTask, () =>
+        {
+            _shutdownDrained = true;
+            Close();
+        });
+    }
+
     private void MainWindow_Closed(object? sender, EventArgs eventArgs)
     {
-        _windowLifetimeCancellation.Cancel();
-        _activeScanCancellation?.Cancel();
-        _activeScanCancellation?.Dispose();
         _globalHotKey?.Dispose();
         _modelToggleHotKey?.Dispose();
         if (_oscTriggerService is not null)
@@ -1124,6 +1255,8 @@ public partial class MainWindow : Window
             _oscTriggerService.Dispose();
         }
 
+        _steamVrResultPanel.ScanRequested -= SteamVrResultPanel_ScanRequested;
+        _steamVrResultPanel.UserResultClosed -= SteamVrResultPanel_UserResultClosed;
         _steamVrResultPanel.PlacementFallback -= SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.PlacementCalibrationFinished -=
             SteamVrResultPanel_PlacementCalibrationFinished;
@@ -1181,8 +1314,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private TranslationRuntime ReloadTranslationRuntime()
+    private TranslationRuntime ReloadTranslationRuntime(ExecutionOperation operation)
     {
+        if (!_execution.IsActive(operation))
+        {
+            throw new InvalidOperationException("Runtime replacement requires active configuration ownership.");
+        }
+
+        operation.ThrowIfNotCurrent();
         string? preferredModel = TranslationModelComboBox.SelectedItem is TranslationModelChoice choice
             ? choice.ModelId
             : null;
@@ -1190,7 +1329,7 @@ public partial class MainWindow : Window
             preferredModel,
             isStartup: false);
         _analyzer.Swap(runtime);
-        UpdateTranslationSettingsUi(runtime);
+        UpdateTranslationSettingsUi(runtime, operation);
         UpdateModelToggleHotKeyRegistration();
         UpdateEnvironmentDetails();
         return runtime;
@@ -1276,7 +1415,7 @@ public partial class MainWindow : Window
         return runtime with { Warning = credentialWarning };
     }
 
-    private void UpdateTranslationSettingsUi(TranslationRuntime runtime)
+    private void UpdateTranslationSettingsUi(TranslationRuntime runtime, ExecutionOperation? configuration = null)
     {
         OpenAiTextTranslator? translator = runtime.OpenAiTranslator;
         _translationStatus = translator is not null && runtime.HasEffectiveApiKey
@@ -1293,7 +1432,8 @@ public partial class MainWindow : Window
                 ? "この起動中だけ有効な環境変数のキーを使用しています。保存すると次回から入力不要です。"
                 : "未登録です。VRCVA専用キーを貼り付け、暗号化して保存してください。";
         TranslationModelComboBox.IsEnabled =
-            Volatile.Read(ref _uiScanRunning) == 0 && translator is not null;
+            (!_execution.IsRunning || (configuration is not null && _execution.IsActive(configuration)))
+            && translator is not null;
         TranslationModelHintText.Text = translator is null
             ? "OpenAIを有効にした場合に選択できます"
             : $"次回のSCANから反映（従量課金・1起動最大{translator.MaxRequestsPerSession}回）";

@@ -81,7 +81,9 @@ public sealed class XsOverlayUdpNotificationSink(int port = 42069)
         string SourceApp);
 }
 
-public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sink)
+public sealed class XsOverlayNotificationRenderer(
+    IXsOverlayNotificationSink sink,
+    Func<Guid, bool>? canRender = null)
     : IResultRenderer
 {
     private const int MaxNotificationCharacters = 700;
@@ -94,6 +96,11 @@ public sealed class XsOverlayNotificationRenderer(IXsOverlayNotificationSink sin
         ScanOutcome outcome,
         CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested || canRender?.Invoke(outcome.CorrelationId) == false)
+        {
+            return Task.CompletedTask;
+        }
+
         if (outcome.IsSuccess && outcome.Result is not null)
         {
             return Task.CompletedTask;
