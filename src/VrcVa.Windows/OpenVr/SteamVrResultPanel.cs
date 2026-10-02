@@ -378,6 +378,12 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         try
         {
+            bool keepVisible = CanUpdateVisiblePresentation(
+                _visible,
+                _texture.Progress,
+                _texture.VoiceSearch,
+                progress,
+                voiceSearch);
             // A long launcher-only session can exhaust the bounded diagnostic
             // budget before a result is shown. Start a fresh bounded window so
             // the result surface itself is always observable during device
@@ -391,8 +397,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             _launcherInterop?.Hide();
             _activationGate.Reset();
             SetPointerEnabled(false);
-            _interop!.Hide();
-            _visible = false;
+            // A same-owner refresh may leave its last committed pixels visible while OpenVR
+            // uploads the replacement. An owner/type change still hides stale content first.
+            if (!keepVisible)
+            {
+                _interop!.Hide();
+                _visible = false;
+            }
             if (_imageUpload.InFlight)
             {
                 QueuePresentation(title, body, progress, voiceSearch);
@@ -413,6 +424,29 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             Disconnect();
             throw;
         }
+    }
+
+    internal static bool CanUpdateVisiblePresentation(
+        bool visible,
+        OperationProgressSnapshot? currentProgress,
+        VrVoiceSearchSnapshot? currentVoiceSearch,
+        OperationProgressSnapshot? nextProgress,
+        VrVoiceSearchSnapshot? nextVoiceSearch)
+    {
+        if (!visible) { return false; }
+        if (currentProgress is not null && nextProgress is not null)
+        {
+            return currentProgress.SessionId != Guid.Empty
+                && currentProgress.OperationId != Guid.Empty
+                && currentProgress.SessionId == nextProgress.SessionId
+                && currentProgress.OperationId == nextProgress.OperationId;
+        }
+
+        Guid? currentSession = currentVoiceSearch?.Input?.SessionId;
+        Guid? nextSession = nextVoiceSearch?.Input?.SessionId;
+        return currentSession is Guid sessionId
+            && sessionId != Guid.Empty
+            && nextSession == sessionId;
     }
 
     internal void QueuePresentation(string title, string body, OperationProgressSnapshot? progress, VrVoiceSearchSnapshot? voiceSearch = null)
