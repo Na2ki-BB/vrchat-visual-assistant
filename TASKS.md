@@ -2,7 +2,7 @@
 
 Status legend: `[x]` complete, `[>]` in progress, `[ ]` pending, `[-]` deliberately deferred.
 
-Design entry point: [DESIGN.md](DESIGN.md). Shared UI/input, feature registration, transport, privacy, and development rules belong to [the foundation design](docs/DESIGN-PLATFORM.md); capture, OCR, Japanese translation, feature costs, and measurement history belong to [the translation design](docs/DESIGN-JAPANESE-TRANSLATION.md). Voice input and video search follow [the approved video-search design](docs/DESIGN-VIDEO-SEARCH.md) and the new [implementation sequence](#voice-input-and-video-search--implementation-sequence) below. This split does not change the completion or device-validation status below.
+Design entry point: [DESIGN.md](DESIGN.md). Shared UI/input, feature registration, transport, privacy, and development rules belong to [the foundation design](docs/DESIGN-PLATFORM.md); capture, OCR, Japanese translation, feature costs, and measurement history belong to [the translation design](docs/DESIGN-JAPANESE-TRANSLATION.md). Voice input and video search follow [the approved video-search design](docs/DESIGN-VIDEO-SEARCH.md) and the new [implementation sequence](#voice-input-and-video-search--implementation-sequence) below. 現在の音声・動画検索は[2026-10-02の本人実機確認](#voice-search-acceptance--2026-10-02)を参照。各マイルストーン内の日付付き実装記録は当時の状態を残し、現在の合格範囲と混同しない。
 
 ## Milestone 0 — Research and decisions
 
@@ -331,7 +331,7 @@ Phase 3 completion requires Windows Release build/tests/format, `git diff --chec
 
 ## Voice input and video search — implementation sequence
 
-Updated: 2026-10-01. **I1〜I4の共通入力/実行/設定/独立quota、J1〜J3の録音/文字起こし/同意・専用資格情報、K1〜K5の直接/解釈検索・候補/コピー、L1/L2の共通進捗・腕マイク・WPF/VR操作まで接続済み**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--implemented-acceptance-pending)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。自動確認の証拠と全体formatの残件は[下記L3記録](#l3-verification-evidence--2026-10-01)を参照。実機/実サービスは未受入で、既存Milestoneの実機証拠を新機能へ流用しない。各項目の「2026-10-01実装」はそのPR時点の履歴であり、当時の「未接続」は現在状態を示さない。
+Updated: 2026-10-02. **I1〜I4の共通入力/実行/設定/独立quota、J1〜J3の録音/文字起こし/同意・専用資格情報、K1〜K5の直接/解釈検索・候補/コピー、L1/L2の共通進捗・腕マイク・WPF/VR操作まで接続済み**。正本は[共通音声入力](docs/DESIGN-PLATFORM.md#shared-voice-input--implemented-and-accepted-main-flow)と[動画検索設計](docs/DESIGN-VIDEO-SEARCH.md)。最新のCI・本人実機確認・追加検証は[2026-10-02の記録](#voice-search-acceptance--2026-10-02)を参照。主要経路は本人確認済み。既存Milestoneの実機証拠を新機能の全項目へ流用しない。各項目の「2026-10-01実装」はそのPR時点の履歴であり、当時の「未接続」は現在状態を示さない。
 
 翻訳時の「Milestone → チェックリスト → Exit」を継続し、新規タスクには依存先と確認条件を添える。I1〜L3の各項目を小さなPRの目安とし、対応するテストまで同じPRに含める。実装とWindows/Quest実機・有料APIの受入は別に完了を記録する。共通制御とVR画面を一度に置き換えず、未接続のadapterはfakeで検証してから公開入口へつなぐ。
 
@@ -380,12 +380,12 @@ Exit: 既存翻訳の回帰を通し、fakeのテキスト機能を画像取得�
   - 確認: fakeの全経路で成功後に音声を解放し、失敗の明示再試行だけ期限内音声を利用する。録り直し/閉じる/期限切れで破棄し、音声・本文・キーを設定やファイルに保存しない。キー保存済みでも音声未同意なら録音/送信0回。VRがなくてもWPFで中止・回復できる。
   - 2026-10-01実装: WPFの音声専用タブへ明示同意/専用キー/送信先・参考料金・保持条件/周囲の声の注意、録音→文字起こし→全文、手動再送/中止/閉じる/録り直しを接続。アプリ所有の共通gate/音声quotaとJ1の期限/leaseを維持し、他のSCAN・SteamVR接続喪失・終了でも旧内容を破棄する。native cleanup失敗の停止案内と再送取消後の遅延失敗を独立レビューで修正しfake回帰を追加。用途actionの空hostのみで、検索ボタン/VR音声UIは未追加。Linux Release cross-buildとCore/Infrastructure回帰、source-linked音声フロー20件が通過。WPF/Windows全体はCIで別確認し、実キー・実マイク・有料API・Quest受入は未実施。
 
-Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音声枠とバッファ寿命を証明できる。Windows実マイク・実API精度は未確認のままL2/L3に残す。
+Exit: fakeマイク/HTTPで共有音声フローが完走し、独立した音声枠とバッファ寿命を証明できる。J完了時点の実マイク・実API確認はL2/L3へ分け、その後の主要経路合格は[最新記録](#voice-search-acceptance--2026-10-02)に残す。
 
 ## Post-MVP Milestone K — bounded video search and desktop flow
 
 - [x] **K1 — 型付き候補と直接検索の契約を作る**（依存: I2、I3）
-  - 範囲: text handler、検索provider境界、session/operation/候補ID/動画ID/title/任意thumbnail/正規watch URLの対応と許可された選択actionを定義する。「そのまま検索」は認識文を変更せず渡し、空白のみ/長さ超過は送信前に拒否する。
+  - 範囲: text handler、検索provider境界、session/operation/候補ID/動画ID/title/任意thumbnail/正規watch URLの対応と許可された選択actionを定義する。「そのまま検索」は共通認識文を保持し、現在は検索語の末尾句点「。」1文字だけを除いて渡す（PR50）。除去後の空白のみ/長さ超過は送信前に拒否する。
   - 確認: fake検索でAI/capture/OCRが0回、認識文不変、未知action/古いsession拒否。0/1/5/6/10件、5件ずつ最大2ページ、ページ送りで追加検索0回を検証。新検索/録り直しでは旧候補を選べない。
   - 2026-10-01実装: `IVideoSearchProvider` / `VideoSearchRequest` / `VideoSearchBatch` と `DirectVideoSearchHandler` を追加。認識文は空白・改行込みでそのまま1回のmetadata検索へ渡し、原文・検索語・候補を別の不変snapshotとして保持する。10件上限/5件ページ、session・検索operation・候補ID、コピーだけの選択actionと正規watch URLを型付きにし、`FeatureResult` の互換projection/等価性でも検索identityを維持する。Coreの `VideoSearchSession` は共通gateのactive leaseを借用し、取消・閉じる・録り直し・新検索後の遅延候補/古い選択を拒否。ASCII動画ID、4,000 UTF-8 byte title、HTTPS許可URL/ID対応、parser正規化回避と任意thumbnail originを検証する。Linux .NET 8.0.422の新規fake139件、Core294件/Infrastructure108件の全回帰、solution Release cross-build（0 warnings/errors）が通過。変更C#10ファイルのtargeted formatとdiff/secret検査が通過し、全体formatは既存Windows5ファイルの違反を残す。Windows全testsはCIで別確認する。yt-dlp実行（K2）・AI解釈（K3）・thumbnail取得/clipboard書込み（K4）・公開UI（K5）・実サービス/Quest評価は追加しない。
 
@@ -422,11 +422,12 @@ Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完�
 
   - 2026-10-01実装: `OperationProgressController`がWPFと同じ音声flow/gateへ停止・中止・期限内再送・録音失敗の録り直しを接続し、画像翻訳の進捗/取消回収/typed failure/明示再SCANも共有する。既存overlayをfull 1280×720で再利用し、4つのbody rail共通矩形・表示専用header・押しっぱなし無効化を維持する。capture非表示中のWPF中止、遅延snapshot拒否、native/HTTP回収、切断/終了、quota再送をfakeで検証する。Linux .NET 8.0.422でsolution Release cross-build（0 warnings/errors）、K4統合後のCore362/Infrastructure412、同一sourceのportable voice/controller40件が通過。全状態/全controlの中心/端/角/±1px・enabled/disabled・held hoverを統合full-viewで検証するWindows testsはexact-head CIで確認する。既存5ファイルの全体format違反は変更せず、変更C#のtargeted formatを別確認する。独立reviewでcalibrationと進捗の切替、成功表示からowner回収までの取消競合を修正し、再review/Windows CI結果はPRへ記録し、腕マイク/認識文/候補と実マイク/API/Quest受入はL2/L3に残す。
 
-- [ ] **L2 — 腕マイク・認識文・候補カードをVRへ接続する**（依存: K5、L1）
+- [x] **L2 — 腕マイク・認識文・候補カードをVRへ接続する（主要経路の本人受入完了）**（依存: K5、L1）
   - 範囲: `WristLauncherStateMachine` / `WristLauncherTexture`へマイク入口を追加し、認識文直下の2ボタン、5カード×2ページとbody railをWPFと同じsession/actionへ接続。長文/title/検索語のレイアウトを確認する。既存校正/配置保存、SCAN回復を維持する。
   - [x] 実装/自動確認: 両ページ全候補/前次/戻る/閉じると認識文の全操作をraw intersection → 同一view逆変換 → logical hit-test → actionで検証。ページ境界、連打、閉じた後/録り直し後の遅延結果・画像・選択を確認する。
-  - 2026-10-01実装: 腕メニューへマイクを追加し、録音中はL1の「マイク停止 → 認識」を表示。`VrVoiceSearchController` がWPFと同じ音声/検索flow・不変session・候補actionを利用し、全文認識文の前次と直下2方式、5候補×2ページ、検索語/partial/コピー状態、再試行/録り直し/中止/閉じるをfull 1280×720の共通矩形へ接続する。title/queryはVRでは省略し、全文はWPFに保持。queue優先の表示所有者照合、古い画像/クリック拒否、両flowのawait前失効、閉じたterminal失敗の再表示防止を追加。Linux Release cross-build（0 warnings/errors）、Core365/Infrastructure412、source-linked controller12件と5回反復、変更C#のtargeted formatと独立reviewを確認。全体formatの既存5ファイル違反は残す。Windows [CI97](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36903308079)（PR39 head `3d699067`）で座標/rasterを含むCore365/Infrastructure412/Windows667の全1,444件と別実行cold shutdown3件が成功。初回CI96の長title fixture改行だけを有効な空白へ修正し、候補状態/件数assertionを強化した。productionのmetadata検証やtimeoutは変更しない。下の実機ゲートとL2全体は未完了のまま維持する。
-  - [ ] **実機ゲート（未実施）**: 現行Windows Release + SteamVR + Quest 3Sで以下を本人が確認し、commit・実施日時・Windows/SteamVR/接続方式と実/fakeの範囲を記録する。自動テスト用fakeは存在するが、通常版へ切り替える公開fakeデモはない。録音停止・上限到達は有料APIへ進むため、実マイクの開始前にL3の対象provider/自作サンプル/試行数/予算を合意する。未確認ならL2全体は完了にしない。
+  - 2026-10-01実装: 腕メニューへマイクを追加し、録音中はL1の「マイク停止 → 認識」を表示。`VrVoiceSearchController` がWPFと同じ音声/検索flow・不変session・候補actionを利用し、全文認識文の前次と直下2方式、5候補×2ページ、検索語/partial/コピー状態、再試行/録り直し/中止/閉じるをfull 1280×720の共通矩形へ接続する。title/queryはVRでは省略し、全文はWPFに保持。queue優先の表示所有者照合、古い画像/クリック拒否、両flowのawait前失効、閉じたterminal失敗の再表示防止を追加。Linux Release cross-build（0 warnings/errors）、Core365/Infrastructure412、source-linked controller12件と5回反復、変更C#のtargeted formatと独立reviewを確認。全体formatの既存5ファイル違反は残す。Windows [CI97](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36903308079)（PR39 head `3d699067`）で座標/rasterを含むCore365/Infrastructure412/Windows667の全1,444件と別実行cold shutdown3件が成功。初回CI96の長title fixture改行だけを有効な空白へ修正し、候補状態/件数assertionを強化した。productionのmetadata検証やtimeoutは変更しない。この時点では実機未確認だった。2026-10-02に下記の主要経路が本人実機で合格し、追加確認は分けて保持する。
+  - [x] **主要経路の本人実機確認（2026-10-02）**: 音声文字起こし、直接/解釈検索、10候補と画像、URLコピー、VR内主要操作、独立した位置調整、ちらつき解消、末尾句点除去と実送信検索語表示が合格。実装commitと範囲は[最新記録](#voice-search-acceptance--2026-10-02)を参照。
+  - **追加の網羅確認（今回の完了条件とは別）**: 下の複合項目は全条件の実施証拠がないため未確認のまま残す。主要経路で成功した一部だけを根拠に全項目を合格にしない。追加の実送信を助手へ任せる場合も、内容・送信先・回数/秒数・予算を先に合意する。
     - [ ] 音声無効/専用キーなしでは開始しない。初回画面の同意・送信先・費用・3枠の上限・既定通信マイクを確認
     - [ ] 承認後に腕マイク開始、パネルの「マイク停止 → 認識」、上限到達、残り秒、中止、入力device切断を確認。VRChat内ミュートとOS/物理マイクミュートを区別し、周囲の声を含めない
     - [ ] 認識文の全文前次・直下2方式、5枚×両ページの全カード、前/次/入力へ戻る/録り直し/中止/やり直し/閉じるを確認。無効状態・連打・押しっぱなしでも別操作が発火しない
@@ -435,17 +436,37 @@ Exit: WPFのfake end-to-endで録音から正しい候補URLコピーまで完�
     - [ ] 閉じる・録り直し・切断/再接続で古い画像/候補/コピーを採用せず、新しい録音/SCANを妨げない。WPFからも中止できる
     - [ ] 次SCANで音声/検索/進捗overlayが混入しない。既存の配置調整/保存と左手追従、終了時の資源回収を確認
 
-- [ ] **L3 — 全体検証と任意の実サービス評価を記録する**（依存: L2の実装/自動確認。全体の自動検証は実機待ちでも進める）
-  - [ ] 自動/静的確認全体: 下記証拠のWindows restore/Release build/全testsとLinux再検証は通過。全体formatは既存5ファイルの違反を残し、Windowsでのformatは未実行。公開差分のsecret確認と独立レビューを含め、通過・失敗・未実施を別記する。fakeの内容非保存、OCR-only外部API 0回、翻訳・独立quota・capture順序・runtime解放の回帰を含める。CI通過をformat/実機の合格と混同しない。
-  - [ ] **実サービスゲート（未実施・別途許可後）**: 最新の価格/保持条件を確認し、対象API・試行回数・予算・送信する自作サンプルを明示して承認を得てからGPT Transcribe/GPT-6 Lunaを評価する。固定版yt-dlpの実検索、metadata/thumbnail互換とファイル非生成も確認する。失敗を含む回数・音声秒数、段階別遅延/負荷、認識と補足指示の精度を内容を残さず記録し、未実施なら評価済みとしない。
-  - [ ] 引渡し: READMEにRelease/ZIP起動から音声・動画検索までの短い手順、固定yt-dlpの導入/hash確認/更新、音声opt-inと別資格情報、3枠、失敗回復、手動貼り付けを整備。設計/SECURITYの現状も整合。最終差分の独立レビューとPRのexact-head CI確認後に引き渡す。許可待ちの実API評価、未実施の実機ゲートとformatの残件は未完了のまま明示する。
+- [x] **L3 — 主要経路の検証・引渡しを記録する**（自動検証、本人実機確認、追加評価を区別）
+  - [x] 自動検証の記録: [最新mainのWindows CI](#voice-search-acceptance--2026-10-02)でRelease build・全1,508tests・別実行のWPF終了3件が成功。過去のLinux再検証と独立レビューの履歴は下に残す。CI通過をformatや実機の合格と混同しない。
+  - [-] 全体formatの既存残件: 最新Linux確認では6ファイルの違反（下記旧記録の5ファイルに`src/VrcVa.Windows/Video/VideoSearchPanel.xaml.cs`の不要usingを追加）を確認。Windowsでのformatは未実行。無関係な整形は今回の機能完了に含めない。
+  - [x] 実サービスの主要経路: GPT Transcribe、GPT-6 Lunaによる解釈、固定yt-dlpの実検索、候補画像、URLコピーを本人確認済み。
+  - [-] **追加の定量/異常系評価（未実施）**: 全試行の回数・音声秒数、段階別遅延/負荷、精度・費用、実行時の内容ファイル非生成の観測は未取得。追加実施時は価格/保持条件と対象provider・自作サンプル・回数/秒数・予算を確認し、未実施の項目を評価済みにしない。
+  - [x] 利用手順: README/ローカル導入ガイドにRelease/ZIP起動、固定yt-dlp、音声opt-inと別資格情報、3枠、失敗回復、手動貼り付けを整備。現在の操作・設定version・実機合格範囲へ文書を同期する。文書変更の公開前には独立レビューとその差分のexact-head CIを別途確認する。
 
-Exit: 新しい画面/マイクの実機証拠と有料APIの評価を、それぞれ現在のビルド・実施条件付きで記録する。過去の翻訳の成功やfakeテストだけで新機能の実用性を確認済みにしない。新しいアカウント/課金設定、常時録音、動画ダウンロード、VRキーボード、動的plugin、任意tool、自動貼り付け/再生は追加しない。
+Exit: 主要経路は本人実機で合格し、今回機能の必須実装・受入作業は完了。ビルド・確認範囲を記録し、追加の網羅/定量検証や既存format残件を合格へ繰り上げない。過去の翻訳の成功やfakeテストだけで新機能の実用性を確認済みにしない。新しいアカウント/課金設定、常時録音、動画ダウンロード、VRキーボード、動的plugin、任意tool、自動貼り付け/再生は追加しない。
 
+
+### Voice search acceptance — 2026-10-02
+
+**今回機能の主要経路は本人実機で合格。必須の実装・受入作業は完了**。確認環境はWindows + SteamVR + Meta Quest 3SのPCVR。1人・1環境の結果であり、全環境・全ワールド・全異常系への保証ではない。
+
+- 最終実装基準: main [`5469b555a347ebb004edc16b8beba5ba15558a86`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/5469b555a347ebb004edc16b8beba5ba15558a86)、tree `16bef43d54c80213cb0e98c03d8c501549d44623`。同内容のWindows版を配置し、2026-10-02 **22:58 JST**に最新の検索語修正を本人が合格とした
+- 主要経路: 実マイクからの文字起こし、直接検索、解釈検索、10候補とサムネイル表示、URLコピー、VR内での一連の主要操作を本人確認済み
+- [PR47](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/47): 録音・認識文・動画候補パネルの「位置調整」をVR内に追加。翻訳結果と別の`VoicePanel`配置をsettings version 7へ保存。本人実機確認済み
+- [PR49](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/49): D3D11共有テクスチャ更新へ変更し、パネルのちらつき解消を本人が確認
+- [PR50](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/50): 直接検索語の最後の非空白文字が日本語句点「。」なら1文字だけ除く。末尾空白、内部の句点、その他の文字は保持。共通認識文とAI解釈へ渡す入力は原文のまま
+- [PR51](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/51): PC/VRの「検索語」を実際にproviderへ渡した語に統一。入力へ戻ると原文を表示。PR50/51を含む最終版を本人確認済み
+- 自動検証: [同mainのWindows CI](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/37014966469)でrestore/Release build **0 warnings/errors**、Core **378** / Infrastructure **416** / Windows **714** = **1,508件成功、failed/skipped 0**。別実行のWPF終了チェック **3件成功**。CIは実マイク/API/YouTube/ヘッドセットを使わない
+
+**残す制約・未確認:** 上のL2追加項目の全control/全候補・異常系の網羅確認、長時間運転や他PC/接続方式の互換性、API精度・段階別遅延・送信回数/秒数・費用の定量記録、実Windowsのpagefile/dumpやyt-dlp実行時の一時領域/内容ファイル非生成の観測は未取得。最新Linux確認の6ファイルの全体format残件も合格扱いにしない。動画プレイヤーへの貼り付け・再生は本人操作であり、ワールド側のURL許可や権限に依存する。
+
+この記録は既存の本人確認とCI結果を文書へ反映したもの。文書整理ではコード・設定・料金モデルを変更せず、新しい録音・API送信・実機試験を行わない。キー・音声・認識文・検索語・URL・個人のPCパスは公開記録へ追加しない。文書変更自体の独立レビューとexact-head CIは、そのPRで別に記録する。
 
 ### L3 verification evidence — 2026-10-01
 
-実装の確認基準は [`560f4a09c11ddb6632939d363933c696d3848456`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/560f4a09c11ddb6632939d363933c696d3848456)（[PR41](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/41) merge、tree `4bb33911`）。production実装はPR39の `9df98ed3` から変えず、PR41は下記のtest同期修正だけを追加した。この引渡し変更は文書のみで、実行コード/テスト/CI workflowを変更しない。文書PR自身のexact-head CIと独立差分レビューはPRへ別記する。
+以下は2026-10-01時点の履歴であり、当時の「未実施」「未承認」は現在の状態を示さない。最新状態は[2026-10-02の本人実機確認](#voice-search-acceptance--2026-10-02)を参照。
+
+当時の実装の確認基準は [`560f4a09c11ddb6632939d363933c696d3848456`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/560f4a09c11ddb6632939d363933c696d3848456)（[PR41](https://github.com/Na2ki-BB/vrchat-visual-assistant/pull/41) merge、tree `4bb33911`）。production実装はPR39の `9df98ed3` から変えず、PR41は下記のtest同期修正だけを追加した。この引渡し変更は文書のみで、実行コード/テスト/CI workflowを変更しない。文書PR自身のexact-head CIと独立差分レビューはPRへ別記する。
 
 | 確認 | 結果と限界 |
 | --- | --- |
@@ -472,3 +493,13 @@ Exit: 新しい画面/マイクの実機証拠と有料APIの評価を、それ�
 この確認はアプリが内容ファイルを作らない境界をsource/fakeで確かめたもので、実Windowsのpagefile/dumpや実yt-dlp起動後の一時領域を観測した証拠ではない。公式one-fileの実行用一時展開、実YouTubeのmetadata/thumbnail互換と内容ファイル非生成、実マイク/API/clipboard/Quest受入は上の別ゲートへ残す。
 
 実サービス評価前の合意欄（未承認・未実施）: 対象provider/model、外部へ送る自作音声/文と検索語、各段階の最大試行数（失敗・再送込み）/音声秒数、総予算と通貨、実施者/実施buildを確定する。OpenAI、YouTube、画像配信先とclipboard上書きを区別し、新しいアカウント/課金/資格情報設定をこの確認から自動承認しない。評価時は内容を保存せず、段階別成否・遅延・回数・秒数・費用のみ記録する。
+
+
+### Local preparation history — 2026-10-01 UTC / 2026-10-02 JST
+
+導入ガイドにあった初回準備の記録を保持する。対象は旧commit [`f8c5da1babcef2b547dd778ab807d31d72147f23`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/f8c5da1babcef2b547dd778ab807d31d72147f23)で、現在の実機合格範囲とは分ける。
+
+- [mainのWindows CI104](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36908642593): Release build warnings/errors 0、単体テスト1,445件と別実行のcold shutdown3件が成功
+- ローカルPC: 同commitのWindows Release build warnings/errors 0、単体テスト1,445件成功。自己完結ZIPの作成、最小化起動と準備完了を確認
+- SteamVR接続・パネル初期化と`en-US` OCR認識器を確認。固定yt-dlp 2026.08.19の公式digest/SHA一覧/実ファイルhash・version一致を確認
+- 旧ソースと設定を維持し、復元用backupを作成。この準備段階では実録音・API送信・実検索・ヘッドセット内の操作確認は行わず、後日の本人実機確認へ分離した
