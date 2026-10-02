@@ -178,19 +178,22 @@ internal sealed class WinMmMicrophone : IMicrophone
         try
         {
             _openToken.ThrowIfCancellationRequested();
-            WinMmInterop.WaveFormat format = WinMmInterop.CreateFormat();
-            WinMmInterop.Check(_api.Open(out _, WinMmInterop.WaveMapper, ref format, 0,
-                WinMmInterop.WaveFormatQuery | WinMmInterop.DefaultCommunicationDevice));
+            WinMmRecordingDevice device = WinMmInterop.ResolveCommunicationDevice(_api);
+            endpoint = _createEndpoint(device.EndpointId);
+            EnsureEndpoint(endpoint, recording: false);
             _openToken.ThrowIfCancellationRequested();
-            WinMmInterop.Check(_api.Open(out _handle, WinMmInterop.WaveMapper, ref format,
-                (nuint)_driverEvent.SafeWaitHandle.DangerousGetHandle(),
-                WinMmInterop.CallbackEvent | WinMmInterop.DefaultCommunicationDevice));
+            WinMmInterop.WaveFormat format = WinMmInterop.CreateFormat();
+            WinMmInterop.Check(_api.Open(out _, device.DeviceId, ref format, 0,
+                WinMmInterop.WaveFormatQuery));
+            EnsureEndpoint(endpoint, recording: false);
+            _openToken.ThrowIfCancellationRequested();
+            WinMmInterop.Check(_api.Open(out _handle, device.DeviceId, ref format,
+                (nuint)_driverEvent.SafeWaitHandle.DangerousGetHandle(), WinMmInterop.CallbackEvent));
             if (_handle == 0)
             {
                 throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
             }
 
-            endpoint = _createEndpoint(WinMmInterop.GetEndpointId(_api, _handle));
             EnsureEndpoint(endpoint, recording: false);
             _openToken.ThrowIfCancellationRequested();
             opened = true;

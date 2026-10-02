@@ -253,7 +253,7 @@ internal sealed class VoiceInputFlow : IAsyncDisposable
         {
             VoiceInputFailureCode.Disabled => "音声入力への明示的な同意が必要です。録音・送信は行いません。",
             VoiceInputFailureCode.VoiceKeyUnavailable => "音声専用APIキーを保存してください。翻訳用キーは使用しません。",
-            VoiceInputFailureCode.DeviceUnavailable => "Windowsの既定の通信入力デバイスがありません。マイク設定を確認してください。",
+            VoiceInputFailureCode.DeviceUnavailable => "Windowsの既定の通信入力デバイスを利用できません。接続、既定の通信デバイス、マイク設定を確認してください。",
             VoiceInputFailureCode.MicrophoneAccessDenied => "Windowsのマイクへのアクセスが拒否されました。プライバシー設定を確認してください。",
             VoiceInputFailureCode.FormatUnsupported => "既定の通信マイクが対応する音声形式を確認できません。",
             VoiceInputFailureCode.DeviceLost => "録音中にマイクが切断されました。接続を確認して録り直してください。",
