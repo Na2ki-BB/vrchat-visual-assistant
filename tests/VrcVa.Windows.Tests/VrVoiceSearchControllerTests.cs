@@ -100,13 +100,16 @@ public sealed class VrVoiceSearchControllerTests
     }
 
     [Fact]
-    public async Task DirectSearch_StripsTerminalJapaneseFullStopOnlyAtProviderBoundary_AndPreservesVrText()
+    public async Task DirectSearchAndRetry_ShowActualQuery_AndBackPreservesVrTranscript()
     {
         await VrFlowTestThread.RunAsync(async () =>
         {
             const string transcript = "内部。句点。 \r\n";
+            const string query = "内部。句点 \r\n";
             await using SearchFlowFixture fixture = new();
             fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+            fixture.SearchResponse = (_, _) => throw new ScanException(
+                ScanFailureCode.VideoSearchTimedOut, ScanStage.TextHandling, "private provider data");
             VrSearchView view = new();
             using VrVoiceSearchController controller = new(
                 fixture.Voice.Execution, fixture.Voice.Flow, fixture.Flow, view);
@@ -115,11 +118,80 @@ public sealed class VrVoiceSearchControllerTests
             view.Activate(VrVoiceSearchAction.DirectSearch);
             await fixture.Flow.WhenIdle;
 
-            Assert.Equal(["内部。句点 \r\n"], fixture.Queries);
+            Assert.Equal([query], fixture.Queries);
             Assert.Equal(0, fixture.Interpretations);
-            Assert.Equal(transcript, view.Current!.Query);
+            Assert.Equal(query, view.Current!.Query);
             Assert.Equal(transcript, view.Current.Input!.Transcript);
+            Assert.Equal(VideoSearchFlowState.Failed, view.Current.State);
+
+            fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(1));
+            view.Activate(VrVoiceSearchAction.Retry);
+            await fixture.Flow.WhenIdle;
+            Assert.Equal([query, query], fixture.Queries);
+            Assert.Equal(query, view.Current!.Query);
+            Assert.Equal(query, view.Current.Result!.Query);
             Assert.Equal(VideoSearchFlowState.Candidates, view.Current.State);
+            Assert.Equal(0, fixture.Interpretations);
+
+            view.Activate(VrVoiceSearchAction.Back);
+            Assert.True(view.Current!.IsInput);
+            Assert.Empty(view.Current.Query);
+            Assert.Empty(view.Current.Cards);
+            Assert.Equal(transcript, view.Current.Input!.Transcript);
+            fixture.InterpretResponse = (input, _) =>
+            {
+                Assert.Equal(transcript, input.Transcript);
+                return Task.FromResult(new SearchQueryInterpretation("解釈済み。"));
+            };
+            view.Activate(VrVoiceSearchAction.InterpretedSearch);
+            await fixture.Flow.WhenIdle;
+            Assert.Equal("解釈済み。", fixture.Queries[^1]);
+            Assert.Equal("解釈済み。", view.Current!.Query);
+            Assert.Equal(transcript, view.Current.Input!.Transcript);
+            Assert.Equal(1, fixture.Interpretations);
+            Assert.Equal(1, fixture.Voice.Requests);
+        });
+    }
+
+    [Theory]
+    [InlineData("。")]
+    [InlineData("  。 \r\n")]
+    public async Task EmptyDirectQueryAndRetry_ShowNoQueryOrStaleCandidates(string transcript)
+    {
+        await VrFlowTestThread.RunAsync(async () =>
+        {
+            await using SearchFlowFixture fixture = new();
+            fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+            VrSearchView view = new();
+            using VrVoiceSearchController controller = new(
+                fixture.Voice.Execution, fixture.Voice.Flow, fixture.Flow, view);
+            await fixture.Voice.RecordAsync();
+            view.Activate(VrVoiceSearchAction.InterpretedSearch);
+            await fixture.Flow.WhenIdle;
+            Assert.Equal("synthetic interpreted query", view.Current!.Query);
+            Assert.NotEmpty(view.Current.Cards);
+            view.Activate(VrVoiceSearchAction.Back);
+            Assert.Empty(view.Current!.Query);
+
+            view.Activate(VrVoiceSearchAction.DirectSearch);
+            await fixture.Flow.WhenIdle;
+            Assert.Equal(VideoSearchFlowState.Failed, view.Current!.State);
+            Assert.Empty(view.Current.Query);
+            Assert.Empty(view.Current.Cards);
+            Assert.Null(view.Current.Result);
+            Assert.Equal(transcript, view.Current.Input!.Transcript);
+            Assert.Equal(1, fixture.Searches);
+            Assert.Equal(1, fixture.Interpretations);
+
+            view.Activate(VrVoiceSearchAction.Retry);
+            await fixture.Flow.WhenIdle;
+            Assert.Empty(view.Current!.Query);
+            Assert.Equal(1, fixture.Searches);
+            Assert.Equal(1, fixture.Interpretations);
+            view.Activate(VrVoiceSearchAction.Back);
+            Assert.True(view.Current!.IsInput);
+            Assert.Equal(transcript, view.Current.Input!.Transcript);
+            Assert.Empty(view.Current.Query);
         });
     }
 
@@ -165,6 +237,7 @@ public sealed class VrVoiceSearchControllerTests
             view.Activate(VrVoiceSearchAction.InterpretedSearch);
             await fixture.Flow.WhenIdle;
             Assert.True(view.Current!.CanRetry);
+            Assert.Equal("synthetic interpreted query", view.Current.Query);
             Assert.True(view.Current.CanBack);
             Assert.DoesNotContain("private", view.Current.Message, StringComparison.Ordinal);
             fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(0));
@@ -173,10 +246,13 @@ public sealed class VrVoiceSearchControllerTests
             Assert.Equal(1, fixture.Interpretations);
             Assert.Equal(1, fixture.Voice.Requests);
             Assert.Equal(2, fixture.Searches);
-            Assert.Empty(view.Current!.Cards);
+            Assert.All(fixture.Queries, query => Assert.Equal("synthetic interpreted query", query));
+            Assert.Equal("synthetic interpreted query", view.Current!.Query);
+            Assert.Empty(view.Current.Cards);
             Assert.Contains("0件", view.Current.Message, StringComparison.Ordinal);
             view.Activate(VrVoiceSearchAction.Back);
             Assert.True(view.Current!.IsInput);
+            Assert.Empty(view.Current.Query);
 
         });
     }
@@ -243,6 +319,7 @@ public sealed class VrVoiceSearchControllerTests
             Assert.True(view.Current!.IsInput);
             Assert.NotEqual(old.Input!.SessionId, view.Current.Input!.SessionId);
             Assert.Empty(view.Current.Cards);
+            Assert.Empty(view.Current.Query);
 
         });
     }

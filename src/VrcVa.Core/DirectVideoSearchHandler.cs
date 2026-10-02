@@ -43,17 +43,21 @@ public sealed class DirectVideoSearchHandler : ITextFeatureHandler
         VideoSearchRequest search = new(input.SessionId, request.CorrelationId, providerQuery);
         using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             operation.CancellationToken, cancellationToken);
+        using CancellationTokenRegistration cancellationRegistration = cancellation.Token.Register(
+            () => _session.CancelSearch(operation));
         operation.ThrowIfNotCurrent();
+        _session.AcceptSearchRequest(operation, search, cancellation.Token);
+        progress?.Report(new ScanProgress(request.CorrelationId, ScanStage.TextHandling, "動画を検索しています。", TimeSpan.Zero));
         Stopwatch timer = Stopwatch.StartNew();
         VideoSearchBatch batch = await _provider.SearchAsync(search, cancellation.Token).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(batch);
         timer.Stop();
         VideoSearchResult result = _session.CompleteSearch(
-            search, batch, timer.Elapsed, cancellation.Token, displayQuery: input.Transcript);
+            search, batch, timer.Elapsed, cancellation.Token);
         return new FeatureResult(FeatureIds.DirectVideoSearch,
         [
             new ResultSection(TranslationResultSectionIds.SourceText, "認識文", input.Transcript),
-            new ResultSection("search-query", "検索語", input.Transcript, ResultSectionRole.Primary),
+            new ResultSection("search-query", "検索語", search.Query, ResultSectionRole.Primary),
         ], videoSearch: result)
         {
             CaptureSourceKind = "none",

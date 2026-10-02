@@ -57,6 +57,101 @@ public sealed class VideoSearchPanelTests
         finally { voice.Detach(); }
     });
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task SearchQueryLabel_MatchesProviderAcrossRetryBackAndModeChange(bool interpreted) => OnDispatcher(async () =>
+    {
+        const string transcript = "内部。句点。 \r\n";
+        const string directQuery = "内部。句点 \r\n";
+        const string interpretedQuery = "解釈済み。";
+        string expectedQuery = interpreted ? interpretedQuery : directQuery;
+        await using SearchFlowFixture fixture = new();
+        fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+        fixture.InterpretResponse = (input, _) =>
+        {
+            Assert.Equal(transcript, input.Transcript);
+            return Task.FromResult(new SearchQueryInterpretation(interpretedQuery));
+        };
+        fixture.SearchResponse = (_, _) => throw new ScanException(
+            ScanFailureCode.VideoSearchTimedOut, ScanStage.TextHandling, "private provider data");
+        VoiceInputPanel voice = CreateVoicePanel(fixture);
+        VideoSearchPanel panel = Assert.IsType<VideoSearchPanel>(voice.ResultActions.Content);
+        try
+        {
+            await fixture.Voice.RecordAsync();
+            TextInputSession input = fixture.Voice.Flow.CurrentInput!;
+            Assert.Empty(Find<TextBlock>(panel, "QueryText").Text);
+            Click(Find<Button>(panel, interpreted ? "InterpretedSearchButton" : "DirectSearchButton"));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal(VideoSearchFlowState.Failed, fixture.Flow.State);
+            Assert.Equal(expectedQuery, Assert.Single(fixture.Queries));
+            Assert.Equal("検索語: " + expectedQuery, Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Equal(transcript, Find<TextBox>(voice, "TranscriptBox").Text);
+
+            fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(1));
+            Click(Find<Button>(panel, "RetrySearchButton"));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal([expectedQuery, expectedQuery], fixture.Queries);
+            Assert.Equal("検索語: " + expectedQuery, Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Single(Find<ItemsControl>(panel, "CandidateCards").Items);
+            Assert.Equal(interpreted ? 1 : 0, fixture.Interpretations);
+
+            Click(Find<Button>(panel, "BackToInputButton"));
+            Assert.Empty(Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Empty(Find<ItemsControl>(panel, "CandidateCards").Items);
+            Assert.Equal(transcript, Find<TextBox>(voice, "TranscriptBox").Text);
+            Click(Find<Button>(panel, interpreted ? "DirectSearchButton" : "InterpretedSearchButton"));
+            await fixture.Flow.WhenIdle;
+            string nextQuery = interpreted ? directQuery : interpretedQuery;
+            Assert.Equal(nextQuery, fixture.Queries[^1]);
+            Assert.Equal("検索語: " + nextQuery, Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Equal(transcript, Find<TextBox>(voice, "TranscriptBox").Text);
+            Assert.Same(input, fixture.Voice.Flow.CurrentInput);
+            Assert.Equal(1, fixture.Interpretations);
+            Assert.Equal(1, fixture.Voice.Requests);
+        }
+        finally { voice.Detach(); }
+    });
+
+    [Theory]
+    [InlineData("。")]
+    [InlineData("  。 \r\n")]
+    public Task EmptyDirectQuery_ClearsPreviousLabelAndCandidatesWithoutSearching(string transcript) => OnDispatcher(async () =>
+    {
+        await using SearchFlowFixture fixture = new();
+        fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+        VoiceInputPanel voice = CreateVoicePanel(fixture);
+        VideoSearchPanel panel = Assert.IsType<VideoSearchPanel>(voice.ResultActions.Content);
+        try
+        {
+            await fixture.Voice.RecordAsync();
+            Click(Find<Button>(panel, "InterpretedSearchButton"));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal("検索語: synthetic interpreted query", Find<TextBlock>(panel, "QueryText").Text);
+            Assert.NotEmpty(Find<ItemsControl>(panel, "CandidateCards").Items);
+
+            Click(Find<Button>(panel, "DirectSearchButton"));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal(VideoSearchFlowState.Failed, fixture.Flow.State);
+            Assert.Empty(Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Empty(Find<ItemsControl>(panel, "CandidateCards").Items);
+            Assert.Equal(transcript, Find<TextBox>(voice, "TranscriptBox").Text);
+            Assert.Equal(1, fixture.Searches);
+            Assert.Equal(1, fixture.Interpretations);
+
+            Click(Find<Button>(panel, "RetrySearchButton"));
+            await fixture.Flow.WhenIdle;
+            Assert.Empty(Find<TextBlock>(panel, "QueryText").Text);
+            Assert.Equal(1, fixture.Searches);
+            Assert.Equal(1, fixture.Interpretations);
+            Click(Find<Button>(panel, "BackToInputButton"));
+            Assert.Equal(transcript, Find<TextBox>(voice, "TranscriptBox").Text);
+            Assert.Empty(Find<TextBlock>(panel, "QueryText").Text);
+        }
+        finally { voice.Detach(); }
+    });
+
     [Fact]
     public Task LongTextWrapsAndThumbnailFailureLeavesLiteralTitleAndCopyAction() => OnDispatcher(async () =>
     {

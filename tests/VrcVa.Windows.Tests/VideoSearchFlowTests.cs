@@ -58,12 +58,13 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public Task DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQuery() =>
-        VrFlowTestThread.RunAsync(DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQueryCore);
+    public Task DirectSearchAndRetry_DisplayActualQueryAndPreserveTranscript() =>
+        VrFlowTestThread.RunAsync(DirectSearchAndRetry_DisplayActualQueryAndPreserveTranscriptCore);
 
-    private static async Task DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQueryCore()
+    private static async Task DirectSearchAndRetry_DisplayActualQueryAndPreserveTranscriptCore()
     {
         const string transcript = "内部。句点。 \r\n";
+        const string query = "内部。句点 \r\n";
         await using SearchFlowFixture fixture = new();
         fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
         fixture.SearchResponse = (_, _) => throw new ScanException(
@@ -73,18 +74,22 @@ public sealed class VideoSearchFlowTests
         Assert.True(fixture.Flow.TrySearch(false));
         await fixture.Flow.WhenIdle;
         Assert.Equal(VideoSearchFlowState.Failed, fixture.Flow.State);
-        Assert.Equal(transcript, fixture.Flow.Query);
-        Assert.Equal(["内部。句点 \r\n"], fixture.Queries);
+        Assert.Equal(query, fixture.Flow.Query);
+        Assert.Equal([query], fixture.Queries);
         Assert.Equal(0, fixture.Interpretations);
 
         fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(1));
         Assert.True(fixture.Flow.TrySearch(false, retry: true));
         await fixture.Flow.WhenIdle;
         Assert.Equal(VideoSearchFlowState.Candidates, fixture.Flow.State);
-        Assert.Equal(transcript, fixture.Flow.Query);
-        Assert.Equal(["内部。句点 \r\n", "内部。句点 \r\n"], fixture.Queries);
+        Assert.Equal(query, fixture.Flow.Query);
+        Assert.Equal(query, fixture.Flow.Result!.Query);
+        Assert.Equal([query, query], fixture.Queries);
         Assert.Equal(transcript, fixture.Voice.Flow.CurrentInput!.Transcript);
         Assert.Equal(0, fixture.Interpretations);
+        fixture.Flow.BackToInput();
+        Assert.Empty(fixture.Flow.Query);
+        Assert.Equal(transcript, fixture.Voice.Flow.CurrentInput.Transcript);
     }
 
     [Theory]
@@ -360,6 +365,43 @@ public sealed class VideoSearchFlowTests
         Assert.Equal(VideoSearchFlowState.Failed, fixture.Flow.State);
         Assert.Contains("再起動", fixture.Flow.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public Task SearchQuery_TracksPendingRequestAndClearsAfterCancelOrPreparationFailure() =>
+        VrFlowTestThread.RunAsync(async () =>
+        {
+            await using SearchFlowFixture fixture = new();
+            fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success("検索語。"));
+            TaskCompletionSource<VideoSearchBatch> finish = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.SearchResponse = (_, _) => finish.Task;
+            TaskCompletionSource queryShown = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Flow.Changed += (_, _) =>
+            {
+                if (fixture.Flow.Query == "検索語") { queryShown.TrySetResult(); }
+            };
+            await fixture.Voice.RecordAsync();
+            Assert.True(fixture.Flow.TrySearch(false));
+            try { await queryShown.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch { finish.TrySetResult(SearchFlowFixture.Batch(1)); throw; }
+            Assert.Equal(["検索語"], fixture.Queries);
+            fixture.Flow.Cancel();
+            finish.SetResult(SearchFlowFixture.Batch(1));
+            await fixture.Flow.WhenIdle;
+            Assert.Empty(fixture.Flow.Query);
+
+            fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(1));
+            Assert.True(fixture.Flow.TrySearch(false));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal("検索語", fixture.Flow.Query);
+            fixture.FailPrepare = true;
+            Assert.True(fixture.Flow.TrySearch(false));
+            await fixture.Flow.WhenIdle;
+            Assert.Equal(ScanStage.Trigger, fixture.Flow.FailureStage);
+            Assert.Empty(fixture.Flow.Query);
+            Assert.Null(fixture.Flow.Result);
+            Assert.Equal(2, fixture.Searches);
+            Assert.Equal("検索語。", fixture.Voice.Flow.CurrentInput!.Transcript);
+        });
 
     [Fact]
     public Task InvalidSettingsPreventsSearchAndPaidInterpretation() =>

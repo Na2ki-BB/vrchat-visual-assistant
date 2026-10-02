@@ -14,6 +14,8 @@ public sealed class InterpretedVideoSearchHandlerTests
         Assert.Equal(h.Input.Transcript, h.Interpreter.Input!.Transcript);
         Assert.Equal("解釈済み。", h.Provider.Requests.Single().Query);
         Assert.Equal("解釈済み。", result.VideoSearch!.Query);
+        Assert.Equal(h.Provider.Requests.Single().Query, result.PrimarySection.Text);
+        Assert.Same(h.Provider.Requests.Single(), h.Session.CurrentSearchRequest);
         Assert.Equal("解釈済み。", h.Session.CurrentInterpretedQuery!.Query);
         Assert.Null(h.Session.RetryableSearchOperationId);
         Assert.Equal(FeatureIds.InterpretedVideoSearch, result.FeatureId);
@@ -39,6 +41,9 @@ public sealed class InterpretedVideoSearchHandlerTests
         Assert.Equal(3, h.Provider.Calls);
         Assert.All(h.Provider.Requests, search => Assert.Equal("架空曲 2024 ライブ", search.Query));
         Assert.Equal(h.Input.Transcript, result.Sections[0].Text);
+        Assert.Equal(h.Provider.Requests.Last().Query, result.VideoSearch!.Query);
+        Assert.Equal(result.VideoSearch.Query, result.PrimarySection.Text);
+        Assert.Same(h.Provider.Requests.Last(), h.Session.CurrentSearchRequest);
         Assert.Null(h.Session.RetryableSearchOperationId);
     }
 
@@ -126,6 +131,7 @@ public sealed class InterpretedVideoSearchHandlerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Run());
         Assert.Equal(interpretation ? 0 : 1, h.Provider.Calls);
         Assert.Null(h.Session.CurrentResult);
+        Assert.Null(h.Session.CurrentSearchRequest);
         Assert.Null(h.Session.CurrentInterpretedQuery);
         Assert.Null(h.Session.RetryableSearchOperationId);
         Assert.False(h.Execution.IsRunning);
@@ -149,6 +155,7 @@ public sealed class InterpretedVideoSearchHandlerTests
         h.Provider.Callback = cancellation.Cancel;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Run(request, cancellation.Token));
         Assert.Null(h.Session.CurrentResult);
+        Assert.Null(h.Session.CurrentSearchRequest);
         Assert.Null(h.Session.CurrentInterpretedQuery);
         Assert.Null(h.Session.RetryableSearchOperationId);
         Assert.Equal(1, h.Interpreter.Calls);
@@ -209,6 +216,7 @@ public sealed class InterpretedVideoSearchHandlerTests
         }
 
         Assert.Null(h.Session.CurrentResult);
+        Assert.Null(h.Session.CurrentSearchRequest);
         Assert.Null(h.Session.CurrentInterpretedQuery);
         Assert.Null(h.Session.RetryableSearchOperationId);
         Assert.Equal(providerCalls, h.Provider.Calls);
