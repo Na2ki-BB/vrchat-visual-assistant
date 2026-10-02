@@ -101,11 +101,15 @@ public sealed class VideoSearchResult
 {
     public const int CandidatesPerPage = 5;
 
-    internal VideoSearchResult(VideoSearchRequest request, VideoSearchBatch batch, TimeSpan searchDuration)
+    internal VideoSearchResult(
+        VideoSearchRequest request,
+        VideoSearchBatch batch,
+        TimeSpan searchDuration,
+        string? displayQuery = null)
     {
         SessionId = request.SessionId;
         OperationId = request.OperationId;
-        Query = request.Query;
+        Query = displayQuery ?? request.Query;
         SearchDuration = searchDuration;
         IsPartial = batch.IsPartial;
         Candidates = Array.AsReadOnly(batch.Videos.Select(video =>

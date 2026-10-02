@@ -100,6 +100,30 @@ public sealed class VrVoiceSearchControllerTests
     }
 
     [Fact]
+    public async Task DirectSearch_StripsTerminalJapaneseFullStopOnlyAtProviderBoundary_AndPreservesVrText()
+    {
+        await VrFlowTestThread.RunAsync(async () =>
+        {
+            const string transcript = "内部。句点。 \r\n";
+            await using SearchFlowFixture fixture = new();
+            fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+            VrSearchView view = new();
+            using VrVoiceSearchController controller = new(
+                fixture.Voice.Execution, fixture.Voice.Flow, fixture.Flow, view);
+            await fixture.Voice.RecordAsync();
+
+            view.Activate(VrVoiceSearchAction.DirectSearch);
+            await fixture.Flow.WhenIdle;
+
+            Assert.Equal(["内部。句点 \r\n"], fixture.Queries);
+            Assert.Equal(0, fixture.Interpretations);
+            Assert.Equal(transcript, view.Current!.Query);
+            Assert.Equal(transcript, view.Current.Input!.Transcript);
+            Assert.Equal(VideoSearchFlowState.Candidates, view.Current.State);
+        });
+    }
+
+    [Fact]
     public async Task TranscriptPagingAndPeriodicRefresh_PreserveSnapshotUntilSomethingChanges()
     {
         await VrFlowTestThread.RunAsync(async () =>

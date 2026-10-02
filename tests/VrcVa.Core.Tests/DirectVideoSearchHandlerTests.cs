@@ -64,6 +64,51 @@ public sealed class DirectVideoSearchHandlerTests
         Assert.DoesNotContain(harness.Renderer.Progress, value => value.Stage is ScanStage.Capture or ScanStage.Ocr);
     }
 
+    [Theory]
+    [InlineData("猫。", "猫")]
+    [InlineData("猫。犬。", "猫。犬")]
+    [InlineData("猫。。", "猫。")]
+    [InlineData("cat.", "cat.")]
+    [InlineData("猫。 \r\n", "猫 \r\n")]
+    [InlineData("猫. \r\n", "猫. \r\n")]
+    [InlineData("猫！", "猫！")]
+    public async Task DirectSearch_StripsOnlyTerminalJapaneseFullStopsFromProviderQuery(
+        string transcript, string expectedProviderQuery)
+    {
+        Harness harness = new(1);
+        TextInputSession input = TextInputSession.Create(transcript);
+        ScanRequest request = ScanRequest.CreateText("test", FeatureIds.DirectVideoSearch, input);
+
+        ScanOutcome outcome = await harness.Pipeline.RunAsync(request);
+
+        Assert.True(outcome.IsSuccess);
+        Assert.Equal(expectedProviderQuery, harness.Provider.Request!.Query);
+        Assert.Equal(transcript, input.Transcript);
+        Assert.Equal(transcript, outcome.Result!.SourceText);
+        Assert.Equal(transcript, outcome.Result.PrimarySection.Text);
+        Assert.Equal(transcript, outcome.Result.FeatureResult.VideoSearch!.Query);
+        Assert.Equal(0, harness.Ai.Calls);
+    }
+
+    [Theory]
+    [InlineData("。")]
+    [InlineData("  。")]
+    [InlineData("。 \r\n")]
+    public async Task DirectSearch_TerminalFullStopRemovalCannotCreateEmptyProviderQuery(string transcript)
+    {
+        Harness harness = new(1);
+        TextInputSession input = TextInputSession.Create(transcript);
+        ScanRequest request = ScanRequest.CreateText("test", FeatureIds.DirectVideoSearch, input);
+
+        ScanOutcome outcome = await harness.Pipeline.RunAsync(request);
+
+        Assert.False(outcome.IsSuccess);
+        Assert.Equal(ScanFailureCode.Unexpected, outcome.Failure?.Code);
+        Assert.Equal(0, harness.Provider.Calls);
+        Assert.Null(harness.Session.CurrentResult);
+        Assert.Equal(transcript, input.Transcript);
+    }
+
     [Fact]
     public async Task PartialProviderBatch_PropagatesThroughTypedSnapshotAndCompatibilityProjection()
     {
