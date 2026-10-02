@@ -28,7 +28,7 @@ public sealed class OperationProgressGeometryTests
         Assert.Equal(1, view.UpperLeftTextureBounds.UMax);
         Assert.Equal(1, view.UpperLeftTextureBounds.VMax);
         IReadOnlyList<OperationProgressButton> buttons = ResultPanelTexture.ProgressControls(snapshot);
-        Assert.Equal(4, buttons.Count);
+        Assert.Equal(5, buttons.Count);
         foreach (OperationProgressButton button in buttons)
         {
             Assert.True(button.Bounds.Top > ResultPanelTexture.HeaderHeight);
@@ -85,7 +85,14 @@ public sealed class OperationProgressGeometryTests
             float y = (float)(button.Bounds.Top + button.Bounds.Height / 2);
             Assert.Equal(OperationProgressAction.None, texture.HitTestProgress(x, y));
             Assert.Equal(0, gate.Update(0, true, true, true));
-            texture.SetProgress(disabled with { CanStop = true, CanCancel = true, CanRetry = true, CanClose = true });
+            texture.SetProgress(disabled with
+            {
+                CanStop = true,
+                CanCancel = true,
+                CanRetry = true,
+                CanAdjustPlacement = true,
+                CanClose = true,
+            });
             int target = 500 + (int)texture.HitTestProgress(x, y);
             Assert.Equal(0, gate.Update(target, true, true, false));
             Assert.Equal(0, gate.Update(target, true, true, true));

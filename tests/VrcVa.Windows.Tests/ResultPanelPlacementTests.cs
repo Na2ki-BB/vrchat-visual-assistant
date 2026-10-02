@@ -352,6 +352,35 @@ public sealed class ResultPanelPlacementTests
         Assert.Equal(original.WidthMeters + widthChange, updated.WidthMeters, precision: 5);
     }
 
+    [Theory]
+    [InlineData((int)ResultPanelCalibrationAction.DecreasePitch, -5, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.IncreasePitch, 5, 0, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.DecreaseYaw, 0, -5, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.IncreaseYaw, 0, 5, 0)]
+    [InlineData((int)ResultPanelCalibrationAction.DecreaseRoll, 0, 0, -5)]
+    [InlineData((int)ResultPanelCalibrationAction.IncreaseRoll, 0, 0, 5)]
+    public void CalibrationApply_UsesFiveDegreeRotationSteps(
+        int actionValue,
+        double pitchChange,
+        double yawChange,
+        double rollChange)
+    {
+        ResultPanelPlacement original = ResultPanelPlacement.Default with
+        {
+            PitchDegrees = 10,
+            YawDegrees = -20,
+            RollDegrees = 30,
+        };
+
+        ResultPanelPlacement updated = ResultPanelCalibration.Apply(
+            original,
+            (ResultPanelCalibrationAction)actionValue);
+
+        Assert.Equal(original.PitchDegrees + pitchChange, updated.PitchDegrees);
+        Assert.Equal(original.YawDegrees + yawChange, updated.YawDegrees);
+        Assert.Equal(original.RollDegrees + rollChange, updated.RollDegrees);
+    }
+
     [Fact]
     public void CalibrationApply_ClampsAtSafetyBounds()
     {

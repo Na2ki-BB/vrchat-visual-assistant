@@ -107,7 +107,7 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
-    public void SaveAndLoad_Version6RoundTripsNonSecretSettingsWithoutTemporaryFile()
+    public void SaveAndLoad_Version7RoundTripsNonSecretSettingsWithoutTemporaryFile()
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -125,6 +125,12 @@ public sealed class VrcVaSettingsStoreTests
                     MenuWidthMeters = 0.44,
                 })
             {
+                VoicePanel = ResultPanelPlacement.CreateDefault(ResultPanelAnchor.RightHand) with
+                {
+                    X = 0.18,
+                    PitchDegrees = 15,
+                    WidthMeters = 0.81,
+                },
                 VoiceInput = new VoiceInputOptions
                 {
                     IsEnabled = true,
@@ -146,7 +152,7 @@ public sealed class VrcVaSettingsStoreTests
             Assert.Equal(expected, store.Load());
             Assert.Empty(Directory.EnumerateFiles(directory, "*.tmp"));
             string json = File.ReadAllText(path);
-            Assert.Contains("\"Version\": 6", json, StringComparison.Ordinal);
+            Assert.Contains("\"Version\": 7", json, StringComparison.Ordinal);
             Assert.DoesNotContain("ChipWidthMeters", json, StringComparison.Ordinal);
             Assert.DoesNotContain("ApiKey", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("SourceText", json, StringComparison.OrdinalIgnoreCase);
@@ -156,7 +162,7 @@ public sealed class VrcVaSettingsStoreTests
             Assert.DoesNotContain("Consumed", json, StringComparison.OrdinalIgnoreCase);
             using JsonDocument document = JsonDocument.Parse(json);
             Assert.Equal(
-                ["Version", "ResultPanel", "Onboarding", "WristLauncher", "VoiceInput", "UsageLimits"],
+                ["Version", "ResultPanel", "VoicePanel", "Onboarding", "WristLauncher", "VoiceInput", "UsageLimits"],
                 document.RootElement.EnumerateObject().Select(property => property.Name));
             Assert.Equal(
                 ["IsEnabled", "MaximumRecordingSeconds", "FailedAudioRetentionSeconds"],
@@ -179,7 +185,39 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
-    public void SaveAndLoad_Version6IsIdempotentAndDoesNotRealignLeftHandResult()
+    public void Load_Version6_InitializesVoicePanelFromExistingResultPlacement()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "settings.json");
+            VrcVaSettingsStore store = new(path);
+            ResultPanelPlacement existing = ResultPanelPlacement.CreateDefault(
+                ResultPanelAnchor.RightHand) with
+            {
+                X = 0.21,
+                YawDegrees = -35,
+                WidthMeters = 0.83,
+            };
+            store.Save(VrcVaSettings.Default with { ResultPanel = existing });
+            JsonObject root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            root["Version"] = 6;
+            Assert.True(root.Remove("VoicePanel"));
+            File.WriteAllText(path, root.ToJsonString());
+
+            VrcVaSettings migrated = store.Load();
+
+            Assert.Equal(existing, migrated.ResultPanel);
+            Assert.Equal(existing, migrated.VoicePanel);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveAndLoad_Version7IsIdempotentAndDoesNotRealignLeftHandResult()
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -228,7 +266,7 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
-    public void SaveAndLoad_Version6LauncherChange_PersistsFollowingResultPoseAndWidth()
+    public void SaveAndLoad_Version7LauncherChange_PersistsFollowingResultPoseAndWidth()
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -277,13 +315,37 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Fact]
+    public void LauncherAndOcrPlacementChanges_DoNotModifyVoicePanelPlacement()
+    {
+        ResultPanelPlacement voicePlacement = ResultPanelPlacement.CreateDefault(
+            ResultPanelAnchor.Headset) with
+        {
+            Y = 0.19,
+            PitchDegrees = -25,
+            WidthMeters = 0.88,
+        };
+        VrcVaSettings settings = VrcVaSettings.Default with
+        {
+            VoicePanel = voicePlacement,
+        };
+
+        VrcVaSettings updated = settings with
+        {
+            ResultPanel = ResultPanelPlacement.CreateDefault(ResultPanelAnchor.RightHand),
+            WristLauncher = WristLauncherPlacement.Default with { X = 0.31 },
+        };
+
+        Assert.Equal(voicePlacement, updated.VoicePanel);
+    }
+
+    [Fact]
     public void Load_RejectsUnknownFutureVersion()
     {
         string directory = CreateTemporaryDirectory();
         try
         {
             string path = Path.Combine(directory, "settings.json");
-            File.WriteAllText(path, "{\"Version\":7}");
+            File.WriteAllText(path, "{\"Version\":8}");
 
             InvalidDataException exception = Assert.Throws<InvalidDataException>(
                 () => new VrcVaSettingsStore(path).Load());
@@ -611,11 +673,13 @@ public sealed class VrcVaSettingsStoreTests
                     migrated.ResultPanel.CreateTransform());
             }
 
+            Assert.Equal(migrated.ResultPanel, migrated.VoicePanel);
+
             store.Save(migrated);
 
             Assert.Equal(migrated, store.Load());
             using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-            Assert.Equal(6, document.RootElement.GetProperty("Version").GetInt32());
+            Assert.Equal(7, document.RootElement.GetProperty("Version").GetInt32());
         }
         finally
         {
@@ -624,8 +688,8 @@ public sealed class VrcVaSettingsStoreTests
     }
 
     [Theory]
-    [MemberData(nameof(RequiredVersion6Fields))]
-    public void Load_Version6RequiresEveryFieldWithoutPartialDefaults(string field, bool useNull)
+    [MemberData(nameof(RequiredVersion7Fields))]
+    public void Load_Version7RequiresEveryFieldWithoutPartialDefaults(string field, bool useNull)
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -659,7 +723,7 @@ public sealed class VrcVaSettingsStoreTests
 
     [Theory]
     [MemberData(nameof(IntegerPreferenceRanges))]
-    public void SaveAndLoad_Version6AcceptsInclusivePreferenceBoundaries(
+    public void SaveAndLoad_Version7AcceptsInclusivePreferenceBoundaries(
         string field,
         int minimum,
         int maximum)
@@ -686,7 +750,7 @@ public sealed class VrcVaSettingsStoreTests
 
     [Theory]
     [MemberData(nameof(IntegerPreferenceRanges))]
-    public void Load_Version6RejectsInvalidIntegerPreferences(
+    public void Load_Version7RejectsInvalidIntegerPreferences(
         string field,
         int minimum,
         int maximum)
@@ -738,7 +802,7 @@ public sealed class VrcVaSettingsStoreTests
     [InlineData("ResultPanel", "[]")]
     [InlineData("WristLauncher", "true")]
     [InlineData("WristLauncher.Rotation", "[]")]
-    public void Load_Version6RejectsMalformedObjectsAndBooleans(string field, string value)
+    public void Load_Version7RejectsMalformedObjectsAndBooleans(string field, string value)
     {
         string directory = CreateTemporaryDirectory();
         try
@@ -845,14 +909,16 @@ public sealed class VrcVaSettingsStoreTests
         }
     }
 
-    public static IEnumerable<object[]> RequiredVersion6Fields()
+    public static IEnumerable<object[]> RequiredVersion7Fields()
     {
         string[] fields =
         [
-            "Version", "ResultPanel", "Onboarding", "WristLauncher", "VoiceInput", "UsageLimits",
+            "Version", "ResultPanel", "VoicePanel", "Onboarding", "WristLauncher", "VoiceInput", "UsageLimits",
             "ResultPanel.Anchor", "ResultPanel.X", "ResultPanel.Y", "ResultPanel.Z",
             "ResultPanel.PitchDegrees", "ResultPanel.YawDegrees", "ResultPanel.RollDegrees",
-            "ResultPanel.WidthMeters", "Onboarding.IsCompleted", "Onboarding.SteamVrAutoLaunchEnabled",
+            "ResultPanel.WidthMeters", "VoicePanel.Anchor", "VoicePanel.X", "VoicePanel.Y", "VoicePanel.Z",
+            "VoicePanel.PitchDegrees", "VoicePanel.YawDegrees", "VoicePanel.RollDegrees",
+            "VoicePanel.WidthMeters", "Onboarding.IsCompleted", "Onboarding.SteamVrAutoLaunchEnabled",
             "WristLauncher.X", "WristLauncher.Y", "WristLauncher.Z", "WristLauncher.MenuWidthMeters",
             "WristLauncher.Rotation", "WristLauncher.Rotation.X", "WristLauncher.Rotation.Y",
             "WristLauncher.Rotation.Z", "WristLauncher.Rotation.W", "VoiceInput.IsEnabled",

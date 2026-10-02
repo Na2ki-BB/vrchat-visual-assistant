@@ -12,10 +12,11 @@ internal sealed partial class ResultPanelTexture
 {
     // Full-size, fixed body rail. Rendering and hit testing enumerate this same
     // collection; every state retains visible but explicitly disabled controls.
-    internal static readonly Rect StopProgressBounds = new(54, 580, 310, 80);
-    internal static readonly Rect CancelProgressBounds = new(380, 580, 230, 80);
-    internal static readonly Rect RetryProgressBounds = new(626, 580, 310, 80);
-    internal static readonly Rect CloseProgressBounds = new(952, 580, 228, 80);
+    internal static readonly Rect StopProgressBounds = new(54, 580, 250, 80);
+    internal static readonly Rect CancelProgressBounds = new(318, 580, 180, 80);
+    internal static readonly Rect RetryProgressBounds = new(512, 580, 220, 80);
+    internal static readonly Rect AdjustProgressPlacementBounds = new(746, 580, 220, 80);
+    internal static readonly Rect CloseProgressBounds = new(980, 580, 200, 80);
     internal OperationProgressSnapshot? Progress { get; private set; }
 
     internal void SetProgress(OperationProgressSnapshot snapshot)
@@ -33,6 +34,7 @@ internal sealed partial class ResultPanelTexture
         new(OperationProgressAction.Stop, StopProgressBounds, "マイク停止 → 認識", snapshot.CanStop),
         new(OperationProgressAction.Cancel, CancelProgressBounds, "中止", snapshot.CanCancel),
         new(OperationProgressAction.Retry, RetryProgressBounds, snapshot.RetryLabel, snapshot.CanRetry),
+        new(OperationProgressAction.AdjustPlacement, AdjustProgressPlacementBounds, "位置調整", snapshot.CanAdjustPlacement),
         new(OperationProgressAction.Close, CloseProgressBounds, "閉じる", snapshot.CanClose),
     ];
 

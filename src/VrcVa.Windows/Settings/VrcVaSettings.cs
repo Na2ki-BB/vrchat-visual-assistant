@@ -12,6 +12,8 @@ internal sealed record VrcVaSettings(
     VrcVaOnboardingSettings Onboarding,
     WristLauncherPlacement WristLauncher)
 {
+    public ResultPanelPlacement VoicePanel { get; init; } = ResultPanel;
+
     public VoiceInputOptions VoiceInput { get; init; } = new();
 
     public FeatureUsageLimits UsageLimits { get; init; } = new();
@@ -31,11 +33,13 @@ internal sealed record VrcVaSettings(
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ResultPanel);
+        ArgumentNullException.ThrowIfNull(VoicePanel);
         ArgumentNullException.ThrowIfNull(Onboarding);
         ArgumentNullException.ThrowIfNull(WristLauncher);
         ArgumentNullException.ThrowIfNull(VoiceInput);
         ArgumentNullException.ThrowIfNull(UsageLimits);
         ResultPanel.Validate();
+        VoicePanel.Validate();
         WristLauncher.Validate();
         VoiceInput.Validate();
         UsageLimits.Validate();

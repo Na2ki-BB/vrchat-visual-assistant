@@ -54,13 +54,14 @@ internal sealed partial class ResultPanelTexture
         {
             Add(VrVoiceSearchAction.Candidate1 + index, new Rect(54, 218 + index * 70, 1126, 62), snapshot.Cards[index].Candidate.Title);
         }
-        Add(VrVoiceSearchAction.Previous, new Rect(54, 580, 148, 80), "前へ");
-        Add(VrVoiceSearchAction.Next, new Rect(217, 580, 148, 80), "次へ");
-        Add(VrVoiceSearchAction.Back, new Rect(380, 580, 148, 80), "入力へ");
-        Add(VrVoiceSearchAction.Rerecord, new Rect(543, 580, 148, 80), "録り直す");
-        Add(VrVoiceSearchAction.Retry, new Rect(706, 580, 148, 80), "やり直す");
-        Add(VrVoiceSearchAction.Cancel, new Rect(869, 580, 148, 80), "中止");
-        Add(VrVoiceSearchAction.Close, new Rect(1032, 580, 148, 80), "閉じる");
+        Add(VrVoiceSearchAction.Previous, new Rect(54, 580, 130, 80), "前へ");
+        Add(VrVoiceSearchAction.Next, new Rect(196, 580, 130, 80), "次へ");
+        Add(VrVoiceSearchAction.Back, new Rect(338, 580, 130, 80), "入力へ");
+        Add(VrVoiceSearchAction.Rerecord, new Rect(480, 580, 130, 80), "録り直す");
+        Add(VrVoiceSearchAction.Retry, new Rect(622, 580, 130, 80), "やり直す");
+        Add(VrVoiceSearchAction.Cancel, new Rect(764, 580, 130, 80), "中止");
+        Add(VrVoiceSearchAction.AdjustPlacement, new Rect(906, 580, 130, 80), "位置調整");
+        Add(VrVoiceSearchAction.Close, new Rect(1048, 580, 132, 80), "閉じる");
         return controls;
     }
 
