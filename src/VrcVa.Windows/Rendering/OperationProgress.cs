@@ -4,7 +4,7 @@ using VrcVa.Windows.Voice;
 namespace VrcVa.Windows.Rendering;
 
 internal enum OperationProgressState { Recording, Transcribing, Processing, Cancelling, Failed, Cancelled }
-internal enum OperationProgressAction { None, Stop, Cancel, Retry, Close }
+internal enum OperationProgressAction { None, Stop, Cancel, Retry, AdjustPlacement, Close }
 
 internal sealed record OperationProgressSnapshot(
     Guid SessionId,
@@ -17,13 +17,16 @@ internal sealed record OperationProgressSnapshot(
     bool CanCancel = false,
     bool CanRetry = false,
     bool CanClose = false,
-    string RetryLabel = "再試行")
+    string RetryLabel = "再試行",
+    bool CanAdjustPlacement = false,
+    bool UsesVoicePlacement = false)
 {
     public bool Allows(OperationProgressAction action) => action switch
     {
         OperationProgressAction.Stop => CanStop,
         OperationProgressAction.Cancel => CanCancel,
         OperationProgressAction.Retry => CanRetry,
+        OperationProgressAction.AdjustPlacement => CanAdjustPlacement,
         OperationProgressAction.Close => CanClose,
         _ => false,
     };
@@ -33,6 +36,7 @@ internal interface IOperationProgressView
 {
     event EventHandler<OperationProgressActionEventArgs>? ProgressActionRequested;
     bool TryShowProgress(OperationProgressSnapshot snapshot);
+    bool TryShowVoicePlacementCalibration(OperationProgressSnapshot snapshot) => false;
     void Hide();
     void ReturnToLauncher();
     void DismissProgress() { Hide(); ReturnToLauncher(); }
@@ -221,19 +225,26 @@ internal sealed class OperationProgressController : IDisposable
         {
             VoiceFlowState.Recording => new(voice.SessionId, _execution.CurrentOperationId,
                 OperationProgressState.Recording, voice.CanStop ? $"録音中 / 残り {voice.RemainingSeconds} 秒" : "録音を停止中",
-                voice.Message, "停止するとOpenAIへ音声を送信し、文字起こしします。",
-                CanStop: voice.CanStop, CanCancel: voice.IsCurrent),
+                voice.Message, "停止するとOpenAIへ音声を送信し、文字起こしします。\n位置調整は録音停止後に利用できます。",
+                CanStop: voice.CanStop, CanCancel: voice.IsCurrent,
+                UsesVoicePlacement: true),
             VoiceFlowState.Transcribing => new(voice.SessionId, _execution.CurrentOperationId,
                 OperationProgressState.Transcribing, "文字起こし中", voice.Message,
-                "中止しても、送信済みの音声の利用料金は取り消されない場合があります。", CanCancel: voice.IsCurrent),
+                "中止しても、送信済みの音声の利用料金は取り消されない場合があります。\n位置調整は処理完了後に利用できます。",
+                CanCancel: voice.IsCurrent, UsesVoicePlacement: true),
             VoiceFlowState.Cancelling => new(voice.SessionId, Guid.Empty, OperationProgressState.Cancelling,
-                "中止中", voice.Message, "音声と処理の回収後に次の操作が可能になります。"),
+                "中止中", voice.Message, "音声と処理の回収後に次の操作が可能になります。",
+                UsesVoicePlacement: true),
             VoiceFlowState.Cancelled => new(voice.SessionId, Guid.Empty, OperationProgressState.Cancelled,
-                "中止しました", voice.Message, "音声は破棄済みです。", CanClose: !voice.IsBusy),
+                "中止しました", voice.Message, "音声は破棄済みです。", CanClose: !voice.IsBusy,
+                CanAdjustPlacement: !voice.IsBusy && voice.SessionId != Guid.Empty,
+                UsesVoicePlacement: true),
             VoiceFlowState.Failed => new(voice.SessionId, _execution.CurrentOperationId, OperationProgressState.Failed,
                 "音声入力に失敗しました", voice.Message, $"失敗: {voice.FailureCode ?? "ConfigurationUnavailable"}\n再送は音声の秒数・回数枠を消費します。",
                 CanRetry: voice.CanRetry || voice.CanRestartRecording, CanClose: !voice.IsBusy,
-                RetryLabel: voice.CanRestartRecording ? "録り直す" : "音声を再送"),
+                RetryLabel: voice.CanRestartRecording ? "録り直す" : "音声を再送",
+                CanAdjustPlacement: !voice.IsBusy && voice.SessionId != Guid.Empty,
+                UsesVoicePlacement: true),
             _ => null,
         };
     }
@@ -291,6 +302,9 @@ internal sealed class OperationProgressController : IDisposable
                         }
                     }
                 }
+                break;
+            case OperationProgressAction.AdjustPlacement:
+                _view.TryShowVoicePlacementCalibration(_shown);
                 break;
             case OperationProgressAction.Close:
                 _shown = null;

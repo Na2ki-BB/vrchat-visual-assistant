@@ -89,31 +89,23 @@ public sealed class OpenVrOverlayCaptureSequenceTests
 
 public sealed class ResultPanelTextureTests
 {
-    [Theory]
-    [InlineData(173, 202, (int)ResultPanelCalibrationAction.MoveLeft)]
-    [InlineData(484, 202, (int)ResultPanelCalibrationAction.MoveRight)]
-    [InlineData(795, 202, (int)ResultPanelCalibrationAction.MoveUp)]
-    [InlineData(1106, 202, (int)ResultPanelCalibrationAction.MoveDown)]
-    [InlineData(173, 362, (int)ResultPanelCalibrationAction.MoveNear)]
-    [InlineData(484, 362, (int)ResultPanelCalibrationAction.MoveFar)]
-    [InlineData(795, 362, (int)ResultPanelCalibrationAction.MakeSmaller)]
-    [InlineData(1106, 362, (int)ResultPanelCalibrationAction.MakeLarger)]
-    [InlineData(188, 560, (int)ResultPanelCalibrationAction.Reset)]
-    [InlineData(510, 560, (int)ResultPanelCalibrationAction.Cancel)]
-    [InlineData(961, 560, (int)ResultPanelCalibrationAction.Save)]
-    public void CalibrationHitTest_RecognizesLargeButtons(
-        float x,
-        float y,
-        int expectedValue)
+    [Fact]
+    public void CalibrationHitTest_UsesEveryRenderedButtonRectangle()
     {
-        Assert.Equal(
-            (ResultPanelCalibrationAction)expectedValue,
-            ResultPanelTexture.HitTestCalibration(x, y));
+        foreach ((ResultPanelCalibrationAction action, System.Windows.Rect bounds, _) in
+            ResultPanelTexture.CalibrationControls)
+        {
+            Assert.Equal(
+                action,
+                ResultPanelTexture.HitTestCalibration(
+                    (float)(bounds.Left + bounds.Width / 2),
+                    (float)(bounds.Top + bounds.Height / 2)));
+        }
     }
 
     [Theory]
     [InlineData(10, 10)]
-    [InlineData(320, 200)]
+    [InlineData(420, 200)]
     [InlineData(640, 400)]
     [InlineData(1250, 700)]
     public void CalibrationHitTest_RejectsGapsAndOutside(float x, float y)

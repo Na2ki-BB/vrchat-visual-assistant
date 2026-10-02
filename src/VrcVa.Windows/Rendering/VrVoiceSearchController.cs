@@ -4,7 +4,7 @@ using VrcVa.Windows.Voice;
 
 namespace VrcVa.Windows.Rendering;
 
-internal enum VrVoiceSearchAction { None, DirectSearch, InterpretedSearch, Previous, Next, Back, Close, Rerecord, Cancel, Retry, Candidate1, Candidate2, Candidate3, Candidate4, Candidate5 }
+internal enum VrVoiceSearchAction { None, DirectSearch, InterpretedSearch, Previous, Next, Back, Close, Rerecord, Cancel, Retry, AdjustPlacement, Candidate1, Candidate2, Candidate3, Candidate4, Candidate5 }
 
 internal sealed record VrVideoCard(VideoCandidate Candidate, VideoThumbnailResult? Thumbnail);
 
@@ -12,7 +12,8 @@ internal sealed record VrVoiceSearchSnapshot(
     TextInputSession? Input, VideoSearchResult? Result, VideoSearchFlowState State,
     string Message, string Query, string Failure, int PageIndex, int PageCount,
     IReadOnlyList<VrVideoCard> Cards, bool CanSearch, bool CanSelect, bool CanPrevious,
-    bool CanNext, bool CanBack, bool CanRerecord, bool CanCancel, bool CanRetry)
+    bool CanNext, bool CanBack, bool CanRerecord, bool CanCancel, bool CanRetry,
+    bool CanAdjustPlacement = false)
 {
     public bool IsInput => Input is not null && Result is null && State is VideoSearchFlowState.Input or VideoSearchFlowState.Closed;
     public bool Allows(VrVoiceSearchAction action) => action switch
@@ -25,6 +26,7 @@ internal sealed record VrVoiceSearchSnapshot(
         VrVoiceSearchAction.Rerecord => CanRerecord,
         VrVoiceSearchAction.Cancel => CanCancel,
         VrVoiceSearchAction.Retry => CanRetry,
+        VrVoiceSearchAction.AdjustPlacement => CanAdjustPlacement,
         >= VrVoiceSearchAction.Candidate1 and <= VrVoiceSearchAction.Candidate5 =>
             CanSelect && (int)action - (int)VrVoiceSearchAction.Candidate1 < Cards.Count,
         _ => false,
@@ -43,6 +45,7 @@ internal interface IVrVoiceSearchView
     event EventHandler<VrVoiceSearchActionEventArgs>? VoiceSearchActionRequested;
     int MeasureTranscriptPages(string transcript);
     bool TryShowVoiceSearch(VrVoiceSearchSnapshot snapshot);
+    bool TryShowVoicePlacementCalibration(VrVoiceSearchSnapshot snapshot) => false;
     void DismissVoiceSearch(VrVoiceSearchSnapshot snapshot);
 }
 
@@ -119,7 +122,8 @@ internal sealed class VrVoiceSearchController : IDisposable
             isInput ? _textPage > 0 && !_execution.IsRunning : _search.CanPrevious,
             isInput ? _textPage + 1 < pageCount && !_execution.IsRunning : _search.CanNext,
             !isInput && _search.CanSearch, !_execution.IsRunning && !_voice.RequiresRestart && !_search.RequiresRestart,
-            _search.CanCancel, _search.CanRetry);
+            _search.CanCancel, _search.CanRetry,
+            CanAdjustPlacement: !_execution.IsRunning && !_search.RequiresRestart);
         if (_shown is { } previous && previous with { Cards = next.Cards } == next && previous.Cards.SequenceEqual(next.Cards)) { return; }
         _shown = next;
         try { _view.TryShowVoiceSearch(next); }
@@ -142,6 +146,9 @@ internal sealed class VrVoiceSearchController : IDisposable
             case VrVoiceSearchAction.Retry: _search.TrySearch(false, retry: true); break;
             case VrVoiceSearchAction.Rerecord: _voice.TryStart(); _search.Refresh(); break;
             case VrVoiceSearchAction.Close: _ = CloseAsync(); break;
+            case VrVoiceSearchAction.AdjustPlacement:
+                _view.TryShowVoicePlacementCalibration(_shown);
+                break;
             case >= VrVoiceSearchAction.Candidate1 and <= VrVoiceSearchAction.Candidate5:
                 _search.TryCopy(_shown.Cards[(int)args.Action - (int)VrVoiceSearchAction.Candidate1].Candidate.CreateSelectionAction());
                 break;

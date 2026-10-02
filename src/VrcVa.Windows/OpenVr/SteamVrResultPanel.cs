@@ -40,8 +40,16 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     private OperationProgressSnapshot? _queuedProgress;
     private VrVoiceSearchSnapshot? _queuedVoiceSearch;
     private ResultPanelPlacement _placement;
+    private ResultPanelPlacement _resultPlacement;
+    private ResultPanelPlacement _voicePlacement;
+    private bool _currentUsesVoicePlacement;
     private ResultPanelPlacement? _calibrationOriginalPlacement;
     private bool _calibrationActive;
+    private bool _voicePlacementCalibrationActive;
+    private Guid _voicePlacementCalibrationSessionId;
+    private OperationProgressSnapshot? _voiceCalibrationProgress;
+    private VrVoiceSearchSnapshot? _voiceCalibrationSearch;
+    private string _calibrationMessage = "レーザーで選択すると、この画面がその場で動きます";
     private PointerDiagnosticKey? _lastPointerDiagnostic;
     private TimeSpan _nextPointerDiagnosticAt;
     private int _pointerDiagnosticCount;
@@ -65,6 +73,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     public event EventHandler? DisplayFailed;
     public event EventHandler? PlacementFallback;
     public event EventHandler<ResultPanelPlacementCalibrationEventArgs>? PlacementCalibrationFinished;
+    public event EventHandler<VoicePanelPlacementSaveEventArgs>? VoicePlacementSaveRequested;
 
     public bool LastPlacementUsedFallback =>
         _interop?.LastPlacementUsedFallback == true;
@@ -76,11 +85,15 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         Dispatcher dispatcher,
         ResultPanelPlacement? placement = null,
         IPrivacySafeLogger? logger = null,
-        WristLauncherPlacement? launcherPlacement = null)
+        WristLauncherPlacement? launcherPlacement = null,
+        ResultPanelPlacement? voicePlacement = null)
     {
         _dispatcher = dispatcher;
-        _placement = placement ?? ResultPanelPlacement.HeadsetFallback;
-        _placement.Validate();
+        _resultPlacement = placement ?? ResultPanelPlacement.HeadsetFallback;
+        _resultPlacement.Validate();
+        _voicePlacement = voicePlacement ?? _resultPlacement;
+        _voicePlacement.Validate();
+        _placement = _resultPlacement;
         _launcherPlacement = launcherPlacement ?? WristLauncherPlacement.Default;
         _launcherPlacement.Validate();
         _logger = logger;
@@ -230,6 +243,8 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         _scanSessionActive = false;
         _resultDesired = false;
+        _launcherState.ReturnToChip();
+        _launcherHover = WristLauncherAction.None;
         if (_launcherInterop is null)
         {
             _ = TryRecoverWristLauncher();
@@ -240,8 +255,6 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             return;
         }
 
-        _launcherState.ReturnToChip();
-        _launcherHover = WristLauncherAction.None;
         ShowLauncherView();
         _eventTimer.Start();
     }
@@ -250,21 +263,15 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         placement.Validate();
-        _placement = placement;
-        if (_interop is null)
+        _resultPlacement = placement;
+        if (_currentUsesVoicePlacement)
         {
             return false;
         }
 
         try
         {
-            bool usedFallback = _interop.SetPlacement(placement);
-            if (usedFallback)
-            {
-                PlacementFallback?.Invoke(this, EventArgs.Empty);
-            }
-
-            return usedFallback;
+            return ApplyActivePlacement(placement, usesVoicePlacement: false);
         }
         catch
         {
@@ -277,6 +284,56 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         placement.Validate();
+        _resultPlacement = placement;
+        return TryShowPlacementCalibrationCore(
+            placement,
+            voiceSessionId: Guid.Empty,
+            progress: null,
+            voiceSearch: null);
+    }
+
+    public bool TryShowVoicePlacementCalibration(OperationProgressSnapshot snapshot)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!snapshot.CanAdjustPlacement
+            || !snapshot.UsesVoicePlacement
+            || snapshot.SessionId == Guid.Empty
+            || !ReferenceEquals(_texture.Progress, snapshot))
+        {
+            return false;
+        }
+
+        return TryShowPlacementCalibrationCore(
+            _voicePlacement,
+            snapshot.SessionId,
+            snapshot,
+            voiceSearch: null);
+    }
+
+    public bool TryShowVoicePlacementCalibration(VrVoiceSearchSnapshot snapshot)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Guid sessionId = snapshot.Input?.SessionId ?? Guid.Empty;
+        if (!snapshot.CanAdjustPlacement
+            || sessionId == Guid.Empty
+            || !ReferenceEquals(_texture.VoiceSearch, snapshot))
+        {
+            return false;
+        }
+
+        return TryShowPlacementCalibrationCore(
+            _voicePlacement,
+            sessionId,
+            progress: null,
+            snapshot);
+    }
+
+    private bool TryShowPlacementCalibrationCore(
+        ResultPanelPlacement placement,
+        Guid voiceSessionId,
+        OperationProgressSnapshot? progress,
+        VrVoiceSearchSnapshot? voiceSearch)
+    {
         _ = TryRecoverWristLauncher();
         if (_calibrationActive
             || _launcherCalibrationActive
@@ -287,15 +344,27 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             return false;
         }
 
+        ResultPanelPlacement previousPlacement = _placement;
+        bool previousUsesVoicePlacement = _currentUsesVoicePlacement;
+        bool wasVisible = _visible;
+        bool wasInteractive = _interactive;
         try
         {
             SetPointerEnabled(false);
             _interop!.Hide();
             _visible = false;
             _placement = placement;
+            _currentUsesVoicePlacement = voiceSessionId != Guid.Empty;
             if (_interop.SetPlacement(placement))
             {
                 PlacementFallback?.Invoke(this, EventArgs.Empty);
+                RestorePresentationAfterRejectedCalibration(
+                    previousPlacement,
+                    previousUsesVoicePlacement,
+                    wasVisible,
+                    wasInteractive,
+                    restoredPlacement => { _ = _interop.SetPlacement(restoredPlacement); },
+                    _interop.Show);
                 return false;
             }
 
@@ -304,6 +373,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             _cursorShown = false;
             _calibrationOriginalPlacement = placement;
             _calibrationActive = true;
+            _voicePlacementCalibrationActive = voiceSessionId != Guid.Empty;
+            _voicePlacementCalibrationSessionId = voiceSessionId;
+            _voiceCalibrationProgress = progress;
+            _voiceCalibrationSearch = voiceSearch;
+            _calibrationMessage = "位置・3軸角度・大きさを調整し、保存して戻ります";
             BeginCalibrationUpload();
             _showAfterImageLoad = true;
             _enableInteractionAfterImageLoad = true;
@@ -318,25 +392,66 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
     }
 
-    public bool TryShow(string title, string body) => TryShowContent(title, body, null);
+    internal void RestorePresentationAfterRejectedCalibration(
+        ResultPanelPlacement previousPlacement,
+        bool previousUsesVoicePlacement,
+        bool wasVisible,
+        bool wasInteractive,
+        Action<ResultPanelPlacement> restorePlacement,
+        Action show)
+    {
+        _placement = previousPlacement;
+        _currentUsesVoicePlacement = previousUsesVoicePlacement;
+        restorePlacement(previousPlacement);
+        _visible = wasVisible;
+        SetPointerEnabled(wasVisible && wasInteractive);
+        if (wasVisible)
+        {
+            show();
+        }
+    }
+
+    public bool TryShow(string title, string body) => TryShowContent(
+        title, body, null, null, _resultPlacement, usesVoicePlacement: false);
 
     public bool TryShowProgress(OperationProgressSnapshot snapshot)
     {
+        if (TryQueueVoiceCalibrationPresentation(snapshot, null)) { return true; }
         PrepareProgressPresentation();
-        return TryShowContent(snapshot.Title, snapshot.Message, snapshot);
+        ResultPanelPlacement placement = snapshot.UsesVoicePlacement
+            ? _voicePlacement : _resultPlacement;
+        return TryShowContent(
+            snapshot.Title,
+            snapshot.Message,
+            snapshot,
+            null,
+            placement,
+            snapshot.UsesVoicePlacement);
     }
 
     public int MeasureTranscriptPages(string transcript) => _texture.MeasureTranscriptPages(transcript);
 
     public bool TryShowVoiceSearch(VrVoiceSearchSnapshot snapshot)
     {
+        if (TryQueueVoiceCalibrationPresentation(null, snapshot)) { return true; }
         PrepareProgressPresentation();
-        return TryShowContent(string.Empty, string.Empty, null, snapshot);
+        return TryShowContent(
+            string.Empty,
+            string.Empty,
+            null,
+            snapshot,
+            _voicePlacement,
+            usesVoicePlacement: true);
     }
 
     public void DismissVoiceSearch(VrVoiceSearchSnapshot snapshot)
     {
-        if (!ReferenceEquals(_queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch, snapshot))
+        bool ownsVoiceCalibration = _voicePlacementCalibrationActive
+            && ReferenceEquals(_voiceCalibrationSearch, snapshot);
+        if (!ownsVoiceCalibration
+            && !ReferenceEquals(
+                _queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch,
+                snapshot))
         {
             // The native upload owns its RGBA buffer, not this stale model. Release
             // old text/images without hiding or discarding a newer queued owner.
@@ -364,13 +479,27 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         // Keep an in-flight calibration upload owned until ImageLoaded; the
         // normal queued full-texture path then replaces it without mixing views.
         if (_launcherCalibrationActive) { FinishWristLauncherCalibration(save: false, returnToLauncher: false); }
-        if (_calibrationActive) { FinishPlacementCalibration(save: false); }
+        if (_calibrationActive && !_voicePlacementCalibrationActive)
+        {
+            FinishPlacementCalibration(save: false);
+        }
     }
 
-    private bool TryShowContent(string title, string body, OperationProgressSnapshot? progress, VrVoiceSearchSnapshot? voiceSearch = null)
+    private bool TryShowContent(
+        string title,
+        string body,
+        OperationProgressSnapshot? progress,
+        VrVoiceSearchSnapshot? voiceSearch,
+        ResultPanelPlacement placement,
+        bool usesVoicePlacement)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _ = TryRecoverWristLauncher();
+        if (_interop is null)
+        {
+            _placement = placement;
+            _currentUsesVoicePlacement = usesVoicePlacement;
+        }
         if (!EnsureConnected())
         {
             return false;
@@ -404,6 +533,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
                 _interop!.Hide();
                 _visible = false;
             }
+            _ = ApplyActivePlacement(placement, usesVoicePlacement);
             if (_imageUpload.InFlight)
             {
                 QueuePresentation(title, body, progress, voiceSearch);
@@ -424,6 +554,60 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             Disconnect();
             throw;
         }
+    }
+
+    private bool ApplyActivePlacement(
+        ResultPanelPlacement placement,
+        bool usesVoicePlacement)
+    {
+        placement.Validate();
+        if (_placement == placement
+            && _currentUsesVoicePlacement == usesVoicePlacement)
+        {
+            return _interop?.LastPlacementUsedFallback == true;
+        }
+        _placement = placement;
+        _currentUsesVoicePlacement = usesVoicePlacement;
+        if (_interop is null)
+        {
+            return false;
+        }
+
+        bool usedFallback = _interop.SetPlacement(placement);
+        if (usedFallback)
+        {
+            PlacementFallback?.Invoke(this, EventArgs.Empty);
+        }
+        return usedFallback;
+    }
+
+    private bool TryQueueVoiceCalibrationPresentation(
+        OperationProgressSnapshot? progress,
+        VrVoiceSearchSnapshot? voiceSearch)
+    {
+        if (!_voicePlacementCalibrationActive)
+        {
+            return false;
+        }
+
+        Guid sessionId = progress?.SessionId
+            ?? voiceSearch?.Input?.SessionId
+            ?? Guid.Empty;
+        bool sameOwner = sessionId != Guid.Empty
+            && sessionId == _voicePlacementCalibrationSessionId
+            && (progress is null || progress.UsesVoicePlacement);
+        bool remainsEligible = progress?.CanAdjustPlacement
+            ?? voiceSearch?.CanAdjustPlacement
+            ?? false;
+        if (sameOwner && remainsEligible)
+        {
+            _voiceCalibrationProgress = progress;
+            _voiceCalibrationSearch = voiceSearch;
+            return true;
+        }
+
+        CancelVoicePlacementCalibration(resumePresentation: false);
+        return false;
     }
 
     internal static bool CanUpdateVisiblePresentation(
@@ -477,6 +661,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
     public bool PreloadStatusAtlas()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_interop is null)
+        {
+            _placement = _resultPlacement;
+            _currentUsesVoicePlacement = false;
+        }
         if (!EnsureConnected())
         {
             return false;
@@ -484,6 +673,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         try
         {
+            _ = ApplyActivePlacement(_resultPlacement, usesVoicePlacement: false);
             SetPointerEnabled(false);
             _interop!.Hide();
             _visible = false;
@@ -513,6 +703,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         try
         {
+            _ = ApplyActivePlacement(_resultPlacement, usesVoicePlacement: false);
             SetPointerEnabled(false);
             if (!_imageUpload.AtlasLoaded)
             {
@@ -580,7 +771,11 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             return;
         }
 
-        if (_calibrationActive)
+        if (_voicePlacementCalibrationActive)
+        {
+            CancelVoicePlacementCalibration(resumePresentation: false);
+        }
+        else if (_calibrationActive)
         {
             FinishPlacementCalibration(save: false);
             return;
@@ -1364,6 +1559,37 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
     private void HandleUserResultClose()
     {
+        if (_voicePlacementCalibrationActive)
+        {
+            OperationProgressSnapshot? pendingProgress = _voiceCalibrationProgress;
+            VrVoiceSearchSnapshot? pendingVoiceSearch = _voiceCalibrationSearch;
+            Hide();
+            _texture.SetContent(string.Empty, string.Empty);
+            ReturnToLauncher();
+            if (pendingVoiceSearch is not null)
+            {
+                VoiceSearchActionRequested?.Invoke(
+                    this,
+                    new(pendingVoiceSearch, VrVoiceSearchAction.Close));
+                return;
+            }
+            if (pendingProgress is not null)
+            {
+                OperationProgressAction action = pendingProgress.CanCancel
+                    ? OperationProgressAction.Cancel
+                    : OperationProgressAction.Close;
+                if (pendingProgress.Allows(action))
+                {
+                    ProgressActionRequested?.Invoke(this, new(pendingProgress, action));
+                    return;
+                }
+            }
+
+            Hide();
+            ReturnToLauncher();
+            return;
+        }
+
         VrVoiceSearchSnapshot? currentVoiceSearch = _queuedResultTitle is not null ? _queuedVoiceSearch : _texture.VoiceSearch;
         OperationProgressSnapshot? currentProgress = _queuedResultTitle is not null ? _queuedProgress : _texture.Progress;
         if (!_calibrationActive && !_launcherCalibrationActive && currentVoiceSearch is { } voiceSearch)
@@ -1607,7 +1833,10 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
 
         _imageUpload.Begin(ResultPanelImageUploadKind.Calibration);
-        byte[] pixels = _texture.RenderCalibrationRgba();
+        string title = _voicePlacementCalibrationActive
+            ? "録音・動画パネルの位置調整"
+            : "VR結果パネルの位置調整";
+        byte[] pixels = _texture.RenderCalibrationRgba(title, _calibrationMessage);
         interop.SetImage(
             pixels,
             ResultPanelTexture.PixelWidth,
@@ -1639,12 +1868,34 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
     private void HandlePlacementCalibrationClick(float x, float y)
     {
+        if (!_calibrationActive)
+        {
+            return;
+        }
+
         ResultPanelCalibrationAction action = ResultPanelTexture.HitTestCalibration(x, y);
         switch (action)
         {
             case ResultPanelCalibrationAction.None:
                 return;
             case ResultPanelCalibrationAction.Save:
+                if (_voicePlacementCalibrationActive)
+                {
+                    if (!TryAcceptVoicePlacementSave(
+                        _placement,
+                        out string failureMessage))
+                    {
+                        _calibrationMessage = failureMessage;
+                        SetPointerEnabled(false);
+                        _activationGate.Reset();
+                        BeginCalibrationUpload();
+                        _showAfterImageLoad = true;
+                        _enableInteractionAfterImageLoad = true;
+                        return;
+                    }
+
+                    _voicePlacement = _placement;
+                }
                 FinishPlacementCalibration(save: true);
                 return;
             case ResultPanelCalibrationAction.Cancel:
@@ -1652,6 +1903,7 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
                 return;
             default:
                 ResultPanelPlacement updated = action == ResultPanelCalibrationAction.Reset
+                    && !_voicePlacementCalibrationActive
                     && _placement.Anchor == ResultPanelAnchor.LeftHand
                         ? ResultPanelPlacement.CreateAlignedToWristLauncher(
                             _launcherPlacement,
@@ -1672,12 +1924,30 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
     }
 
+    internal bool TryAcceptVoicePlacementSave(
+        ResultPanelPlacement placement,
+        out string failureMessage)
+    {
+        VoicePanelPlacementSaveEventArgs saveRequest = new(placement);
+        VoicePlacementSaveRequested?.Invoke(this, saveRequest);
+        failureMessage = string.IsNullOrWhiteSpace(saveRequest.FailureMessage)
+            ? "保存できませんでした。もう一度保存するか、中止してください"
+            : saveRequest.FailureMessage;
+        return saveRequest.Accepted;
+    }
+
     private void FinishPlacementCalibration(bool save)
     {
+        bool voiceCalibration = _voicePlacementCalibrationActive;
         ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
         ResultPanelPlacement completed = save ? _placement : original;
         _calibrationActive = false;
         _calibrationOriginalPlacement = null;
+        _voicePlacementCalibrationActive = false;
+        if (!voiceCalibration)
+        {
+            _resultPlacement = completed;
+        }
         Exception? nativeFailure = null;
         if (!save)
         {
@@ -1694,9 +1964,12 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         try
         {
-            PlacementCalibrationFinished?.Invoke(
-                this,
-                new ResultPanelPlacementCalibrationEventArgs(completed, save));
+            if (!voiceCalibration)
+            {
+                PlacementCalibrationFinished?.Invoke(
+                    this,
+                    new ResultPanelPlacementCalibrationEventArgs(completed, save));
+            }
         }
         finally
         {
@@ -1712,6 +1985,13 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
 
         if (nativeFailure is not null)
         {
+            ClearVoicePlacementCalibrationReturn();
+            return;
+        }
+
+        if (voiceCalibration)
+        {
+            ResumeVoicePlacementPresentation();
             return;
         }
 
@@ -1722,6 +2002,71 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
         }
     }
 
+    private void CancelVoicePlacementCalibration(bool resumePresentation)
+    {
+        if (!_voicePlacementCalibrationActive)
+        {
+            return;
+        }
+
+        ResultPanelPlacement original = _calibrationOriginalPlacement ?? _voicePlacement;
+        _placement = original;
+        _currentUsesVoicePlacement = true;
+        _calibrationActive = false;
+        _voicePlacementCalibrationActive = false;
+        _calibrationOriginalPlacement = null;
+        try
+        {
+            _ = _interop?.SetPlacement(original);
+        }
+        catch (Exception exception)
+        {
+            TryLogLauncherError(
+                "openvr.voice_panel.calibration_cancel_failed",
+                exception);
+            ClearVoicePlacementCalibrationReturn();
+            Disconnect();
+            return;
+        }
+
+        if (resumePresentation)
+        {
+            ResumeVoicePlacementPresentation();
+        }
+        else
+        {
+            ClearVoicePlacementCalibrationReturn();
+        }
+    }
+
+    private void ResumeVoicePlacementPresentation()
+    {
+        OperationProgressSnapshot? progress = _voiceCalibrationProgress;
+        VrVoiceSearchSnapshot? voiceSearch = _voiceCalibrationSearch;
+        ClearVoicePlacementCalibrationReturn();
+        if (voiceSearch is not null)
+        {
+            _ = TryShowVoiceSearch(voiceSearch);
+            return;
+        }
+        if (progress is not null)
+        {
+            _ = TryShowProgress(progress);
+            return;
+        }
+
+        Hide();
+        ReturnToLauncher();
+    }
+
+    private void ClearVoicePlacementCalibrationReturn()
+    {
+        _voicePlacementCalibrationSessionId = Guid.Empty;
+        _voiceCalibrationProgress = null;
+        _voiceCalibrationSearch = null;
+        _calibrationMessage = "レーザーで選択すると、この画面がその場で動きます";
+    }
+
     private void AbandonPlacementCalibration()
     {
         if (!_calibrationActive)
@@ -1729,13 +2074,22 @@ internal sealed partial class SteamVrResultPanel : IOpenVrOverlayCaptureGate, IO
             return;
         }
 
+        bool voiceCalibration = _voicePlacementCalibrationActive;
         ResultPanelPlacement original = _calibrationOriginalPlacement ?? _placement;
         _placement = original;
         _calibrationActive = false;
         _calibrationOriginalPlacement = null;
-        PlacementCalibrationFinished?.Invoke(
-            this,
-            new ResultPanelPlacementCalibrationEventArgs(original, SaveRequested: false));
+        _voicePlacementCalibrationActive = false;
+        if (voiceCalibration)
+        {
+            ClearVoicePlacementCalibrationReturn();
+        }
+        else
+        {
+            PlacementCalibrationFinished?.Invoke(
+                this,
+                new ResultPanelPlacementCalibrationEventArgs(original, SaveRequested: false));
+        }
     }
 
     private void Disconnect()
@@ -1827,6 +2181,16 @@ internal readonly record struct PointerDiagnosticKey(
 internal sealed record ResultPanelPlacementCalibrationEventArgs(
     ResultPanelPlacement Placement,
     bool SaveRequested);
+
+internal sealed class VoicePanelPlacementSaveEventArgs(
+    ResultPanelPlacement placement) : EventArgs
+{
+    public ResultPanelPlacement Placement { get; } = placement;
+
+    public bool Accepted { get; set; }
+
+    public string? FailureMessage { get; set; }
+}
 
 internal enum ResultPanelImageUploadKind
 {

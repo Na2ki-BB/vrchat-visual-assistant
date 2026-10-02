@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private readonly OscTriggerOptions? _oscTriggerOptions;
     private VrcVaSettings _settings = VrcVaSettings.Default;
     private ResultPanelPlacement _resultPanelPlacement = ResultPanelPlacement.Default;
+    private ResultPanelPlacement _voicePanelPlacement = ResultPanelPlacement.Default;
     private string _translationStatus;
     private string _oscStatus = "OSCトリガー: 無効";
     private string _steamVrAutoLaunchStatus = "SteamVR自動起動: 初期設定待ち";
@@ -91,6 +92,7 @@ public partial class MainWindow : Window
         {
             _settings = _usageSettings.Reload(_settingsStore);
             _resultPanelPlacement = _settings.ResultPanel;
+            _voicePanelPlacement = _settings.VoicePanel;
             _steamVrAutoLaunchStatus = _settings.Onboarding.IsCompleted
                 ? "SteamVR自動起動: 確認待ち"
                 : "SteamVR自動起動: 初期設定待ち";
@@ -147,13 +149,16 @@ public partial class MainWindow : Window
             Dispatcher,
             _resultPanelPlacement,
             _logger,
-            _settings.WristLauncher);
+            _settings.WristLauncher,
+            _voicePanelPlacement);
         _steamVrResultPanel.PlacementFallback += SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.ScanRequested += SteamVrResultPanel_ScanRequested;
         _steamVrResultPanel.ConnectionLost += SteamVrResultPanel_ConnectionLost;
         _steamVrResultPanel.UserResultClosed += SteamVrResultPanel_UserResultClosed;
         _steamVrResultPanel.PlacementCalibrationFinished +=
             SteamVrResultPanel_PlacementCalibrationFinished;
+        _steamVrResultPanel.VoicePlacementSaveRequested +=
+            SteamVrResultPanel_VoicePlacementSaveRequested;
         _steamVrResultPanel.WristLauncherPlacementCalibrationStarted +=
             SteamVrResultPanel_WristLauncherPlacementCalibrationStarted;
         _steamVrResultPanel.WristLauncherPlacementCalibrationFinished +=
@@ -960,6 +965,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SteamVrResultPanel_VoicePlacementSaveRequested(
+        object? sender,
+        VoicePanelPlacementSaveEventArgs eventArgs)
+    {
+        try
+        {
+            VrcVaSettings updatedSettings = _settings with
+            {
+                VoicePanel = eventArgs.Placement,
+            };
+            _settingsStore.Save(updatedSettings);
+            _settings = updatedSettings;
+            _voicePanelPlacement = eventArgs.Placement;
+            eventArgs.Accepted = true;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or InvalidDataException)
+        {
+            eventArgs.FailureMessage =
+                "保存できませんでした。もう一度保存するか、中止してください";
+            LogResultPanelPlacementFailure(
+                "ui.voice_panel_placement_save_failed",
+                exception);
+        }
+    }
+
     private void SteamVrResultPanel_WristLauncherPlacementCalibrationFinished(
         object? sender,
         WristLauncherPlacementCalibrationEventArgs eventArgs)
@@ -1324,6 +1358,8 @@ public partial class MainWindow : Window
         _steamVrResultPanel.PlacementFallback -= SteamVrResultPanel_PlacementFallback;
         _steamVrResultPanel.PlacementCalibrationFinished -=
             SteamVrResultPanel_PlacementCalibrationFinished;
+        _steamVrResultPanel.VoicePlacementSaveRequested -=
+            SteamVrResultPanel_VoicePlacementSaveRequested;
         _steamVrResultPanel.WristLauncherPlacementCalibrationStarted -=
             SteamVrResultPanel_WristLauncherPlacementCalibrationStarted;
         _steamVrResultPanel.WristLauncherPlacementCalibrationFinished -=

@@ -240,12 +240,14 @@ internal sealed partial class ResultPanelTexture
         return RenderVisualRgba(visual, PixelWidth, PixelHeight);
     }
 
-    public byte[] RenderCalibrationRgba()
+    public byte[] RenderCalibrationRgba(
+        string title = "VR結果パネルの位置調整",
+        string message = "レーザーで選択すると、この画面がその場で動きます")
     {
         DrawingVisual visual = new();
         using (DrawingContext drawing = visual.RenderOpen())
         {
-            DrawCalibrationSurface(drawing);
+            DrawCalibrationSurface(drawing, title, message);
         }
 
         return RenderVisualRgba(visual, PixelWidth, PixelHeight);
@@ -361,23 +363,31 @@ internal sealed partial class ResultPanelTexture
         DrawResultControls(drawing, page);
     }
 
-    private void DrawCalibrationSurface(DrawingContext drawing)
+    private void DrawCalibrationSurface(DrawingContext drawing, string titleText, string message)
     {
         DrawBackground(drawing);
         FormattedText title = CreateText(
-            "VR結果パネルの位置調整",
+            titleText,
             34,
             FontWeights.SemiBold,
             Brushes.White,
             1180);
         drawing.DrawText(title, new Point(48, 25));
         FormattedText hint = CreateText(
-            "レーザーで選択すると、この画面がその場で動きます",
-            22,
+            message,
+            20,
             FontWeights.Normal,
             new SolidColorBrush(Color.FromRgb(190, 205, 225)),
             1180);
         drawing.DrawText(hint, new Point(48, 68));
+
+        DrawCalibrationGroupHeading(drawing, "左右", 44, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "上下", 437, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "前後", 830, 109, 362);
+        DrawCalibrationGroupHeading(drawing, "縦の向き", 44, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "横の向き", 437, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "傾き", 830, 262, 362);
+        DrawCalibrationGroupHeading(drawing, "大きさ", 437, 416, 362);
 
         foreach ((ResultPanelCalibrationAction action, Rect bounds, string label) in CalibrationButtons)
         {
@@ -402,7 +412,7 @@ internal sealed partial class ResultPanelTexture
                     or ResultPanelCalibrationAction.Cancel
                     or ResultPanelCalibrationAction.Reset
                     ? 27
-                    : 31,
+                    : 25,
                 FontWeights.SemiBold,
                 Brushes.White,
                 bounds.Width - 20);
@@ -492,19 +502,28 @@ internal sealed partial class ResultPanelTexture
         drawing.DrawText(text, new Point(left, top));
     }
 
+    internal static IReadOnlyList<(ResultPanelCalibrationAction Action, Rect Bounds, string Label)>
+        CalibrationControls => CalibrationButtons;
+
     private static readonly (ResultPanelCalibrationAction Action, Rect Bounds, string Label)[] CalibrationButtons =
     [
-        (ResultPanelCalibrationAction.MoveLeft, new Rect(48, 140, 250, 125), "←  左へ"),
-        (ResultPanelCalibrationAction.MoveRight, new Rect(359, 140, 250, 125), "右へ  →"),
-        (ResultPanelCalibrationAction.MoveUp, new Rect(670, 140, 250, 125), "↑  上へ"),
-        (ResultPanelCalibrationAction.MoveDown, new Rect(981, 140, 250, 125), "↓  下へ"),
-        (ResultPanelCalibrationAction.MoveNear, new Rect(48, 300, 250, 125), "近く"),
-        (ResultPanelCalibrationAction.MoveFar, new Rect(359, 300, 250, 125), "遠く"),
-        (ResultPanelCalibrationAction.MakeSmaller, new Rect(670, 300, 250, 125), "小さく"),
-        (ResultPanelCalibrationAction.MakeLarger, new Rect(981, 300, 250, 125), "大きく"),
-        (ResultPanelCalibrationAction.Reset, new Rect(48, 500, 280, 120), "初期値"),
-        (ResultPanelCalibrationAction.Cancel, new Rect(370, 500, 280, 120), "中止"),
-        (ResultPanelCalibrationAction.Save, new Rect(692, 500, 539, 120), "保存して閉じる"),
+        (ResultPanelCalibrationAction.MoveLeft, new Rect(44, 145, 174, 99), "左へ  −X"),
+        (ResultPanelCalibrationAction.MoveRight, new Rect(232, 145, 174, 99), "右へ  ＋X"),
+        (ResultPanelCalibrationAction.MoveDown, new Rect(437, 145, 174, 99), "下へ  −Y"),
+        (ResultPanelCalibrationAction.MoveUp, new Rect(625, 145, 174, 99), "上へ  ＋Y"),
+        (ResultPanelCalibrationAction.MoveFar, new Rect(830, 145, 174, 99), "遠く  −Z"),
+        (ResultPanelCalibrationAction.MoveNear, new Rect(1018, 145, 174, 99), "近く  ＋Z"),
+        (ResultPanelCalibrationAction.DecreasePitch, new Rect(44, 298, 174, 99), "縦  −5°"),
+        (ResultPanelCalibrationAction.IncreasePitch, new Rect(232, 298, 174, 99), "縦  ＋5°"),
+        (ResultPanelCalibrationAction.DecreaseYaw, new Rect(437, 298, 174, 99), "横  −5°"),
+        (ResultPanelCalibrationAction.IncreaseYaw, new Rect(625, 298, 174, 99), "横  ＋5°"),
+        (ResultPanelCalibrationAction.DecreaseRoll, new Rect(830, 298, 174, 99), "傾き  −5°"),
+        (ResultPanelCalibrationAction.IncreaseRoll, new Rect(1018, 298, 174, 99), "傾き  ＋5°"),
+        (ResultPanelCalibrationAction.MakeSmaller, new Rect(437, 453, 174, 83), "小さく  −6cm"),
+        (ResultPanelCalibrationAction.MakeLarger, new Rect(625, 453, 174, 83), "大きく  ＋6cm"),
+        (ResultPanelCalibrationAction.Reset, new Rect(44, 575, 270, 105), "初期値"),
+        (ResultPanelCalibrationAction.Cancel, new Rect(348, 575, 270, 105), "中止"),
+        (ResultPanelCalibrationAction.Save, new Rect(652, 575, 540, 105), "保存して戻る"),
     ];
 
     internal static IReadOnlyList<WristLauncherCalibrationButton>

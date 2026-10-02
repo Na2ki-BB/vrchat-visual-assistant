@@ -301,7 +301,7 @@ public sealed class VrVoiceSearchGeometryTests
                 Assert.Equal(5, view.Current.Cards.Count);
                 texture.SetVoiceSearch(view.Current!);
                 Assert.Equal(1280 * 720 * 4, texture.RenderCurrentResultRgba().Length);
-                Assert.Equal(12, ResultPanelTexture.VoiceSearchControls(view.Current!).Count);
+                Assert.Equal(13, ResultPanelTexture.VoiceSearchControls(view.Current!).Count);
                 if (page == 0) { view.Activate(VrVoiceSearchAction.Next); }
             }
             texture.SetContent("translation", "body");

@@ -256,6 +256,12 @@ internal enum ResultPanelCalibrationAction
     MoveDown,
     MoveNear,
     MoveFar,
+    DecreasePitch,
+    IncreasePitch,
+    DecreaseYaw,
+    IncreaseYaw,
+    DecreaseRoll,
+    IncreaseRoll,
     MakeSmaller,
     MakeLarger,
     Reset,
@@ -266,6 +272,7 @@ internal enum ResultPanelCalibrationAction
 internal static class ResultPanelCalibration
 {
     private const double PositionStepMeters = 0.03;
+    private const double RotationStepDegrees = 5;
     private const double WidthStepMeters = 0.06;
 
     public static ResultPanelPlacement Apply(
@@ -299,6 +306,30 @@ internal static class ResultPanelCalibration
             {
                 Z = ClampPosition(placement.Z - PositionStepMeters),
             },
+            ResultPanelCalibrationAction.DecreasePitch => placement with
+            {
+                PitchDegrees = ClampRotation(placement.PitchDegrees - RotationStepDegrees),
+            },
+            ResultPanelCalibrationAction.IncreasePitch => placement with
+            {
+                PitchDegrees = ClampRotation(placement.PitchDegrees + RotationStepDegrees),
+            },
+            ResultPanelCalibrationAction.DecreaseYaw => placement with
+            {
+                YawDegrees = ClampRotation(placement.YawDegrees - RotationStepDegrees),
+            },
+            ResultPanelCalibrationAction.IncreaseYaw => placement with
+            {
+                YawDegrees = ClampRotation(placement.YawDegrees + RotationStepDegrees),
+            },
+            ResultPanelCalibrationAction.DecreaseRoll => placement with
+            {
+                RollDegrees = ClampRotation(placement.RollDegrees - RotationStepDegrees),
+            },
+            ResultPanelCalibrationAction.IncreaseRoll => placement with
+            {
+                RollDegrees = ClampRotation(placement.RollDegrees + RotationStepDegrees),
+            },
             ResultPanelCalibrationAction.MakeSmaller => placement with
             {
                 WidthMeters = Math.Max(
@@ -323,4 +354,9 @@ internal static class ResultPanelCalibration
         value,
         ResultPanelPlacement.MinimumPosition,
         ResultPanelPlacement.MaximumPosition);
+
+    private static double ClampRotation(double value) => Math.Clamp(
+        value,
+        ResultPanelPlacement.MinimumRotationDegrees,
+        ResultPanelPlacement.MaximumRotationDegrees);
 }

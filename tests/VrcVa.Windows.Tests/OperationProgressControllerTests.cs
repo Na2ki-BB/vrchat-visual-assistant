@@ -69,6 +69,27 @@ public sealed class OperationProgressControllerTests
     }
 
     [Fact]
+    public async Task Recording_DisablesPlacementAdjustmentWithoutStoppingOrSending()
+    {
+        await using VoiceFlowFixture fixture = new();
+        ProgressView view = new();
+        using OperationProgressController controller = new(fixture.Execution, view);
+        controller.AttachVoice(fixture.Flow);
+        Assert.True(fixture.Flow.TryStart());
+        await fixture.Microphone.Started.Task;
+
+        Assert.Equal(OperationProgressState.Recording, view.Current!.State);
+        Assert.False(view.Current.CanAdjustPlacement);
+        view.Activate(OperationProgressAction.AdjustPlacement);
+
+        Assert.Equal(0, view.CalibrationRequests);
+        Assert.Equal(0, fixture.Requests);
+        Assert.Equal(VoiceFlowState.Recording, fixture.Flow.State);
+        view.Activate(OperationProgressAction.Cancel);
+        await fixture.Flow.WhenIdle;
+    }
+
+    [Fact]
     public async Task CancelTranscription_DrainsLateHttpWithoutTextOrDoubleRetry()
     {
         await using VoiceFlowFixture fixture = new();
@@ -386,7 +407,13 @@ public sealed class OperationProgressControllerTests
         public List<OperationProgressSnapshot> History { get; } = [];
         public int Returns { get; private set; }
         public bool Available { get; set; } = true;
+        public int CalibrationRequests { get; private set; }
         public bool TryShowProgress(OperationProgressSnapshot snapshot) { Current = snapshot; History.Add(snapshot); return Available; }
+        public bool TryShowVoicePlacementCalibration(OperationProgressSnapshot snapshot)
+        {
+            CalibrationRequests++;
+            return true;
+        }
         public void Hide() => Current = null;
         public void ReturnToLauncher() => Returns++;
         public void Activate(OperationProgressAction action, OperationProgressSnapshot? snapshot = null) =>

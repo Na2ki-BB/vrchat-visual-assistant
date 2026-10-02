@@ -305,6 +305,32 @@ public sealed class VrVoiceSearchControllerTests
 
         });
     }
+
+    [Fact]
+    public async Task PlacementAdjustmentFromTranscript_IsLocalAndStartsNoSearchOrCopy()
+    {
+        await VrFlowTestThread.RunAsync(async () =>
+        {
+            await using SearchFlowFixture fixture = new();
+            VrSearchView view = new();
+            using VrVoiceSearchController controller = new(
+                fixture.Voice.Execution,
+                fixture.Voice.Flow,
+                fixture.Flow,
+                view);
+            await fixture.Voice.RecordAsync();
+            int searches = fixture.Searches;
+            int opens = fixture.Voice.Opens;
+
+            Assert.True(view.Current!.CanAdjustPlacement);
+            view.Activate(VrVoiceSearchAction.AdjustPlacement);
+
+            Assert.Equal(1, view.CalibrationRequests);
+            Assert.Equal(searches, fixture.Searches);
+            Assert.Equal(opens, fixture.Voice.Opens);
+            Assert.Empty(fixture.Writes);
+        });
+    }
 }
 
 internal sealed class VrSearchView : IVrVoiceSearchView, IOperationProgressView
@@ -315,8 +341,14 @@ internal sealed class VrSearchView : IVrVoiceSearchView, IOperationProgressView
     public VrVoiceSearchSnapshot? Current { get; private set; }
     public OperationProgressSnapshot? Progress { get; private set; }
     public int TranscriptPages { get; init; } = 1;
+    public int CalibrationRequests { get; private set; }
     public int MeasureTranscriptPages(string transcript) => TranscriptPages;
     public bool TryShowVoiceSearch(VrVoiceSearchSnapshot snapshot) { Current = snapshot; Progress = null; return true; }
+    public bool TryShowVoicePlacementCalibration(VrVoiceSearchSnapshot snapshot)
+    {
+        CalibrationRequests++;
+        return true;
+    }
     public void DismissVoiceSearch(VrVoiceSearchSnapshot snapshot) { if (ReferenceEquals(Current, snapshot)) { Current = null; } }
     public void DismissProgress() { if (Current is null) { Hide(); } }
     public bool TryShowProgress(OperationProgressSnapshot snapshot) { Progress = snapshot; Current = null; return true; }
