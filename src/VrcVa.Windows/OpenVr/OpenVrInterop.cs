@@ -19,6 +19,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private const string DefaultOverlayName = "VRChat Visual Assistant Result";
 
     private readonly OpenVrRuntime _runtime;
+    private readonly GetOutputDeviceDelegate _getOutputDevice;
     private readonly GetTrackedDeviceIndexForControllerRoleDelegate _getTrackedDeviceIndexForControllerRole;
     private readonly IsTrackedDeviceConnectedDelegate _isTrackedDeviceConnected;
     private readonly CreateOverlayDelegate _createOverlay;
@@ -36,7 +37,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private readonly SetOverlayIntersectionMaskDelegate _setOverlayIntersectionMask;
     private readonly SetOverlayFlagDelegate _setOverlayFlag;
     private readonly SetOverlaySortOrderDelegate _setOverlaySortOrder;
-    private readonly SetOverlayRawDelegate _setOverlayRaw;
+    private readonly SetOverlayTextureDelegate _setOverlayTexture;
     private readonly ShowOverlayDelegate _showOverlay;
     private readonly PollNextOverlayEventDelegate _pollNextOverlayEvent;
     private readonly string _overlayKey;
@@ -44,7 +45,11 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     private ResultPanelPlacement _placement;
     private ResultPanelTransform _placementTransform;
     private OverlayTextureView _textureView;
+    private readonly Dictionary<(uint Width, uint Height), OpenVrD3D11Device.OpenVrD3D11Texture> _textures = [];
+    private OpenVrD3D11Device? _d3dDevice;
+    private OpenVrTexture _submittedTexture;
     private ulong _overlayHandle;
+    private bool _textureUpdateCompleted;
     private bool _disposed;
 
     private OpenVrInterop(
@@ -68,6 +73,9 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         _getTrackedDeviceIndexForControllerRole = OpenVrRuntime.GetFunction<GetTrackedDeviceIndexForControllerRoleDelegate>(
             systemFunctionTable,
             SystemSlot.GetTrackedDeviceIndexForControllerRole);
+        _getOutputDevice = OpenVrRuntime.GetFunction<GetOutputDeviceDelegate>(
+            systemFunctionTable,
+            SystemSlot.GetOutputDevice);
         _isTrackedDeviceConnected = OpenVrRuntime.GetFunction<IsTrackedDeviceConnectedDelegate>(
             systemFunctionTable,
             SystemSlot.IsTrackedDeviceConnected);
@@ -112,9 +120,9 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         _setOverlayIntersectionMask = OpenVrRuntime.GetFunction<SetOverlayIntersectionMaskDelegate>(
             overlayFunctionTable,
             OverlaySlot.SetOverlayIntersectionMask);
-        _setOverlayRaw = OpenVrRuntime.GetFunction<SetOverlayRawDelegate>(
+        _setOverlayTexture = OpenVrRuntime.GetFunction<SetOverlayTextureDelegate>(
             overlayFunctionTable,
-            OverlaySlot.SetOverlayRaw);
+            OverlaySlot.SetOverlayTexture);
     }
 
     public bool LastPlacementUsedFallback { get; private set; }
@@ -263,18 +271,28 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
             throw new ArgumentException("The RGBA buffer size does not match its dimensions.", nameof(rgbaPixels));
         }
 
-        unsafe
+        OpenVrD3D11Device device = _d3dDevice
+            ?? throw new InvalidOperationException("The OpenVR D3D11 texture device is unavailable.");
+        (uint Width, uint Height) size = (width, height);
+        if (!_textures.TryGetValue(size, out OpenVrD3D11Device.OpenVrD3D11Texture? texture))
         {
-            fixed (byte* buffer = rgbaPixels)
-            {
-                EnsureSuccess(_setOverlayRaw(
-                    _overlayHandle,
-                    (IntPtr)buffer,
-                    width,
-                    height,
-                    4));
-            }
+            texture = device.CreateOverlayTexture(width, height);
+            _textures.Add(size, texture);
         }
+
+        texture.Update(rgbaPixels);
+        if (_submittedTexture.Handle != texture.SharedHandle)
+        {
+            _submittedTexture = new OpenVrTexture(
+                texture.SharedHandle,
+                OpenVrTextureType.DxgiSharedHandle,
+                OpenVrColorSpace.Auto);
+            EnsureSuccess(_setOverlayTexture(_overlayHandle, ref _submittedTexture));
+        }
+        // The shared texture remains bound and receives each replacement through an
+        // atomic GPU CopyResource. SetOverlayTexture does not emit ImageLoaded, so keep
+        // the panel's guarded completion state machine with one local completion event.
+        _textureUpdateCompleted = true;
     }
 
     public void SelectAtlasCell(int cell, int columns, int rows)
@@ -458,6 +476,13 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     public bool TryPollEvent(out OpenVrEvent overlayEvent)
     {
         ThrowIfDisposed();
+        if (_textureUpdateCompleted)
+        {
+            _textureUpdateCompleted = false;
+            overlayEvent = new OpenVrEvent(OpenVrEvent.ImageLoaded, 0, 0, 0, 0);
+            return true;
+        }
+
         VrEvent nativeEvent = default;
         if (!_pollNextOverlayEvent(
                 _overlayHandle,
@@ -492,11 +517,29 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
             _overlayHandle = InvalidOverlayHandle;
         }
 
+        foreach (OpenVrD3D11Device.OpenVrD3D11Texture texture in _textures.Values)
+        {
+            texture.Dispose();
+        }
+        _textures.Clear();
+        _submittedTexture = default;
+        _d3dDevice?.Dispose();
+        _d3dDevice = null;
+
         _runtime.Dispose();
     }
 
     private void CreateAndConfigureOverlay()
     {
+        ulong adapterLuid = 0;
+        _getOutputDevice(ref adapterLuid, OpenVrTextureType.DirectX, IntPtr.Zero);
+        if (adapterLuid == 0)
+        {
+            throw new InvalidOperationException(
+                "IVRSystem.GetOutputDevice returned an empty DirectX adapter LUID.");
+        }
+        _d3dDevice = OpenVrD3D11Device.Create(adapterLuid);
+
         IntPtr key = Marshal.StringToCoTaskMemUTF8(_overlayKey);
         IntPtr name = Marshal.StringToCoTaskMemUTF8(_overlayName);
         try
@@ -629,9 +672,11 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         AssertSize<VrOverlayIntersectionMaskPrimitiveData>(16);
         AssertSize<VrOverlayIntersectionMaskPrimitive>(
             checked((int)OverlayIntersectionMaskPrimitiveSize));
+        AssertSize<OpenVrTexture>(IntPtr.Size == 8 ? 16 : 12);
     }
 
     internal const int SetOverlayMouseScaleFunctionSlot = OverlaySlot.SetOverlayMouseScale;
+    internal const int SetOverlayTextureFunctionSlot = OverlaySlot.SetOverlayTexture;
 
     internal const int SetOverlayIntersectionMaskFunctionSlot = OverlaySlot.SetOverlayIntersectionMask;
 
@@ -731,6 +776,7 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
     // Slots are from Valve's generated IVRSystem_026 function table.
     private static class SystemSlot
     {
+        public const int GetOutputDevice = 9;
         public const int GetTrackedDeviceIndexForControllerRole = 18;
         public const int IsTrackedDeviceConnected = 21;
     }
@@ -756,8 +802,14 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         public const int SetOverlayMouseScale = 50;
         public const int ComputeOverlayIntersection = 51;
         public const int SetOverlayIntersectionMask = 53;
-        public const int SetOverlayRaw = 60;
+        public const int SetOverlayTexture = 58;
     }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void GetOutputDeviceDelegate(
+        ref ulong device,
+        OpenVrTextureType textureType,
+        IntPtr instance);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetTrackedDeviceIndexForControllerRoleDelegate(
@@ -854,12 +906,9 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         uint primitiveSize);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate EvrOverlayError SetOverlayRawDelegate(
+    private delegate EvrOverlayError SetOverlayTextureDelegate(
         ulong overlayHandle,
-        IntPtr buffer,
-        uint width,
-        uint height,
-        uint bytesPerPixel);
+        ref OpenVrTexture texture);
 
     private enum EvrOverlayError
     {
@@ -883,6 +932,17 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         Standing = 1,
     }
 
+    private enum OpenVrTextureType
+    {
+        DirectX = 0,
+        DxgiSharedHandle = 5,
+    }
+
+    private enum OpenVrColorSpace
+    {
+        Auto = 0,
+    }
+
     internal enum VrOverlayIntersectionMaskPrimitiveType
     {
         Rectangle = 0,
@@ -898,6 +958,17 @@ internal sealed class OpenVrInterop : IOpenVrOverlayCaptureGate, IDisposable
         EnableControlBar = 8388608,
         EnableControlBarClose = 33554432,
         EnableClickStabilization = 134217728,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct OpenVrTexture(
+        IntPtr handle,
+        OpenVrTextureType textureType,
+        OpenVrColorSpace colorSpace)
+    {
+        public readonly IntPtr Handle = handle;
+        public readonly OpenVrTextureType TextureType = textureType;
+        public readonly OpenVrColorSpace ColorSpace = colorSpace;
     }
 
     [StructLayout(LayoutKind.Sequential)]
