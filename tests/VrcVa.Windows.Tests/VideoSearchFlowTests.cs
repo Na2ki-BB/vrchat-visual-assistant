@@ -13,7 +13,11 @@ public sealed class VideoSearchFlowTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task VoiceToSearchToClipboard_UsesCatalogAndKeepsOriginalAndCandidates(bool interpreted)
+    public Task VoiceToSearchToClipboard_UsesCatalogAndKeepsOriginalAndCandidates(bool interpreted) =>
+        VrFlowTestThread.RunAsync(() =>
+            VoiceToSearchToClipboard_UsesCatalogAndKeepsOriginalAndCandidatesCore(interpreted));
+
+    private static async Task VoiceToSearchToClipboard_UsesCatalogAndKeepsOriginalAndCandidatesCore(bool interpreted)
     {
         await using SearchFlowFixture fixture = new();
         await fixture.Voice.RecordAsync();
@@ -59,7 +63,11 @@ public sealed class VideoSearchFlowTests
     [InlineData(5, false, 1)]
     [InlineData(6, true, 2)]
     [InlineData(10, false, 2)]
-    public async Task BatchSizesAndPartialMetadataArePreserved(int count, bool partial, int pages)
+    public Task BatchSizesAndPartialMetadataArePreserved(int count, bool partial, int pages) =>
+        VrFlowTestThread.RunAsync(() =>
+            BatchSizesAndPartialMetadataArePreservedCore(count, partial, pages));
+
+    private static async Task BatchSizesAndPartialMetadataArePreservedCore(int count, bool partial, int pages)
     {
         await using SearchFlowFixture fixture = new();
         fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(count, partial));
@@ -76,7 +84,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task FailedSearchRetry_ReusesPaidInterpretationAndTranscript()
+    public Task FailedSearchRetry_ReusesPaidInterpretationAndTranscript() =>
+        VrFlowTestThread.RunAsync(FailedSearchRetry_ReusesPaidInterpretationAndTranscriptCore);
+
+    private static async Task FailedSearchRetry_ReusesPaidInterpretationAndTranscriptCore()
     {
         await using SearchFlowFixture fixture = new();
         fixture.SearchResponse = (_, _) => throw new ScanException(ScanFailureCode.VideoSearchTimedOut, ScanStage.TextHandling, "private provider data");
@@ -106,7 +117,11 @@ public sealed class VideoSearchFlowTests
     [InlineData(ScanFailureCode.SearchInterpretationRateLimited)]
     [InlineData(ScanFailureCode.SearchInterpretationTimedOut)]
     [InlineData(ScanFailureCode.SearchInterpretationInvalidResponse)]
-    public async Task InterpretationFailuresHaveNoImplicitFallbackOrAutomaticRetry(ScanFailureCode code)
+    public Task InterpretationFailuresHaveNoImplicitFallbackOrAutomaticRetry(ScanFailureCode code) =>
+        VrFlowTestThread.RunAsync(() =>
+            InterpretationFailuresHaveNoImplicitFallbackOrAutomaticRetryCore(code));
+
+    private static async Task InterpretationFailuresHaveNoImplicitFallbackOrAutomaticRetryCore(ScanFailureCode code)
     {
         await using SearchFlowFixture fixture = new();
         fixture.InterpretResponse = (_, _) => throw new ScanException(code, ScanStage.SearchInterpretation, "private response");
@@ -127,7 +142,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task CancelKeepsGateUntilCleanup_ThenAllowsRawTranscriptRecovery()
+    public Task CancelKeepsGateUntilCleanup_ThenAllowsRawTranscriptRecovery() =>
+        VrFlowTestThread.RunAsync(CancelKeepsGateUntilCleanup_ThenAllowsRawTranscriptRecoveryCore);
+
+    private static async Task CancelKeepsGateUntilCleanup_ThenAllowsRawTranscriptRecoveryCore()
     {
         await using SearchFlowFixture fixture = new();
         TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -158,7 +176,11 @@ public sealed class VideoSearchFlowTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task CloseOrRerecordRejectsLateImagesAndOldSelections(bool close)
+    public Task CloseOrRerecordRejectsLateImagesAndOldSelections(bool close) =>
+        VrFlowTestThread.RunAsync(() =>
+            CloseOrRerecordRejectsLateImagesAndOldSelectionsCore(close));
+
+    private static async Task CloseOrRerecordRejectsLateImagesAndOldSelectionsCore(bool close)
     {
         await using SearchFlowFixture fixture = new();
         TaskCompletionSource<VideoThumbnailResult> images = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -186,7 +208,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task CloseDuringSearchDrainsOwnerAndNeverReopensCandidateView()
+    public Task CloseDuringSearchDrainsOwnerAndNeverReopensCandidateView() =>
+        VrFlowTestThread.RunAsync(CloseDuringSearchDrainsOwnerAndNeverReopensCandidateViewCore);
+
+    private static async Task CloseDuringSearchDrainsOwnerAndNeverReopensCandidateViewCore()
     {
         await using SearchFlowFixture fixture = new();
         TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -206,7 +231,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task CopyFailureIsExplicitlyRetryableAndKeepsCandidates_NoDuplicateWrites()
+    public Task CopyFailureIsExplicitlyRetryableAndKeepsCandidates_NoDuplicateWrites() =>
+        VrFlowTestThread.RunAsync(CopyFailureIsExplicitlyRetryableAndKeepsCandidates_NoDuplicateWritesCore);
+
+    private static async Task CopyFailureIsExplicitlyRetryableAndKeepsCandidates_NoDuplicateWritesCore()
     {
         await using SearchFlowFixture fixture = new();
         await fixture.Voice.RecordAsync();
@@ -229,7 +257,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task CloseBeforeQueuedClipboardCallbackPreventsWriteAndDrainsCopy()
+    public Task CloseBeforeQueuedClipboardCallbackPreventsWriteAndDrainsCopy() =>
+        VrFlowTestThread.RunAsync(CloseBeforeQueuedClipboardCallbackPreventsWriteAndDrainsCopyCore);
+
+    private static async Task CloseBeforeQueuedClipboardCallbackPreventsWriteAndDrainsCopyCore()
     {
         await using SearchFlowFixture fixture = new();
         TaskCompletionSource dispatch = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -255,7 +286,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task TerminalCleanupFailureSurvivesSessionInvalidationAndDisablesAllWork()
+    public Task TerminalCleanupFailureSurvivesSessionInvalidationAndDisablesAllWork() =>
+        VrFlowTestThread.RunAsync(TerminalCleanupFailureSurvivesSessionInvalidationAndDisablesAllWorkCore);
+
+    private static async Task TerminalCleanupFailureSurvivesSessionInvalidationAndDisablesAllWorkCore()
     {
         await using SearchFlowFixture fixture = new();
         fixture.SearchResponse = (_, _) =>
@@ -276,7 +310,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task TerminalCleanupFailureAfterUserCloseStillRequiresAppRestart()
+    public Task TerminalCleanupFailureAfterUserCloseStillRequiresAppRestart() =>
+        VrFlowTestThread.RunAsync(TerminalCleanupFailureAfterUserCloseStillRequiresAppRestartCore);
+
+    private static async Task TerminalCleanupFailureAfterUserCloseStillRequiresAppRestartCore()
     {
         await using SearchFlowFixture fixture = new();
         TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -295,7 +332,10 @@ public sealed class VideoSearchFlowTests
     }
 
     [Fact]
-    public async Task InvalidSettingsPreventsSearchAndPaidInterpretation()
+    public Task InvalidSettingsPreventsSearchAndPaidInterpretation() =>
+        VrFlowTestThread.RunAsync(InvalidSettingsPreventsSearchAndPaidInterpretationCore);
+
+    private static async Task InvalidSettingsPreventsSearchAndPaidInterpretationCore()
     {
         await using SearchFlowFixture fixture = new();
         await fixture.Voice.RecordAsync();
