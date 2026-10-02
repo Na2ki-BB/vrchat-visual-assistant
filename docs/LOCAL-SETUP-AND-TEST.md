@@ -34,6 +34,17 @@ VRで左手首の **VRCVA** → **マイク** を右手の照準点とトリガ�
 
 本人がワールドの動画プレイヤーのURL欄へ貼り付け、再生します。動画が流れれば一通り完了です。
 
+## APIキーをまだ持っていない場合
+
+モデルを別途ダウンロード・購入する必要はありません。音声認識は `gpt-transcribe`、検索語の解釈は `gpt-6-luna` をアプリが指定します。
+
+1. [OpenAIのAPIキー管理画面](https://platform.openai.com/api-keys) に本人がログインし、**Create new secret key** を開きます
+2. キーを1本作ります。[Restrictedを使う場合](https://help.openai.com/en/articles/8867743-assign-api-key-permissions) は、音声文字起こし（`/v1/audio/transcriptions`）の送信を許可します。同じキーで検索語の解釈も使う場合はResponses（`/v1/responses`）の送信も許可します
+3. 作成時に表示されるキーを本人がコピーし、安全な場所へ保管します。チャットやGitHubへ貼りません。[キーの公式説明](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key) も確認してください
+4. VRCVAの **音声入力** タブに本人がキーを貼り付け、**専用キーを保存** を押します。説明を確認して、音声外部送信チェックを入れます
+
+API利用料は [ChatGPTのPro等の契約とは別会計](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform) です。API側の支払い設定・残高と利用権限を確認してください。キーを保存しただけでは、実際にAPIが使えるかの確認は済んでいません。
+
 ## 任意: 検索語を整えて探す
 
 この方式にはテキスト用のAPIキーも必要です。既に保存済みならそのまま使えます。未登録ならPCの **画面の翻訳** タブの **OpenAI APIキー** に本人が手持ちのキーを入力し、**暗号化して保存** を押します。音声用の保存欄とは別です。
