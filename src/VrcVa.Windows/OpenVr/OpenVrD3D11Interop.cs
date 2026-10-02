@@ -7,6 +7,8 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
 {
     private static readonly Guid DxgiFactory1Id =
         new("770AAE78-F26F-4DBA-A829-253C83D1B387");
+    private static readonly Guid DxgiResourceId =
+        new("035F3AB4-482E-4E50-B41F-8A7F8BD8960B");
 
     private const int DxgiErrorNotFound = unchecked((int)0x887A0002);
     private const int DxgiFactoryEnumAdapters1Slot = 12;
@@ -15,6 +17,8 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
     private const int D3d11ContextMapSlot = 14;
     private const int D3d11ContextUnmapSlot = 15;
     private const int D3d11ContextCopyResourceSlot = 47;
+    private const int D3d11ContextFlushSlot = 111;
+    private const int DxgiResourceGetSharedHandleSlot = 8;
     private const int D3d11ViewGetResourceSlot = 7;
     private const int D3d11ShaderResourceViewGetDescSlot = 8;
     private const int D3d11Texture2DGetDescSlot = 10;
@@ -22,6 +26,9 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
     private const uint D3d11CreateDeviceBgraSupport = 0x20;
     private const uint D3d11SdkVersion = 7;
     private const uint D3d11CpuAccessRead = 0x20000;
+    private const uint D3d11CpuAccessWrite = 0x10000;
+    private const uint D3d11BindShaderResource = 0x8;
+    private const uint D3d11ResourceMiscShared = 0x2;
 
     private IntPtr _device;
     private IntPtr _context;
@@ -113,6 +120,87 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
             ReleaseIfPresent(adapter);
             ReleaseIfPresent(factory);
         }
+    }
+
+    public OpenVrD3D11Texture CreateOverlayTexture(uint width, uint height)
+    {
+        ObjectDisposedException.ThrowIf(_device == IntPtr.Zero, this);
+        if (width == 0) { throw new ArgumentOutOfRangeException(nameof(width)); }
+        if (height == 0) { throw new ArgumentOutOfRangeException(nameof(height)); }
+
+        D3d11Texture2DDesc sharedDescription = CreateSharedTextureDescription(width, height);
+        D3d11Texture2DDesc uploadDescription = CreateUploadTextureDescription(width, height);
+        CreateTexture2DDelegate createTexture = GetComFunction<CreateTexture2DDelegate>(
+            _device,
+            D3d11DeviceCreateTexture2DSlot);
+        IntPtr sharedTexture = IntPtr.Zero;
+        IntPtr uploadTexture = IntPtr.Zero;
+        IntPtr dxgiResource = IntPtr.Zero;
+        try
+        {
+            Marshal.ThrowExceptionForHR(createTexture(
+                _device,
+                ref sharedDescription,
+                IntPtr.Zero,
+                out sharedTexture));
+            Marshal.ThrowExceptionForHR(createTexture(
+                _device,
+                ref uploadDescription,
+                IntPtr.Zero,
+                out uploadTexture));
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(
+                sharedTexture,
+                in DxgiResourceId,
+                out dxgiResource));
+            GetSharedHandleDelegate getSharedHandle = GetComFunction<GetSharedHandleDelegate>(
+                dxgiResource,
+                DxgiResourceGetSharedHandleSlot);
+            Marshal.ThrowExceptionForHR(getSharedHandle(dxgiResource, out IntPtr sharedHandle));
+            if (sharedHandle == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("D3D11 returned an empty shared texture handle.");
+            }
+
+            OpenVrD3D11Texture created = new(
+                _context,
+                uploadTexture,
+                sharedTexture,
+                sharedHandle,
+                width,
+                height);
+            uploadTexture = IntPtr.Zero;
+            sharedTexture = IntPtr.Zero;
+            return created;
+        }
+        finally
+        {
+            ReleaseIfPresent(dxgiResource);
+            ReleaseIfPresent(uploadTexture);
+            ReleaseIfPresent(sharedTexture);
+        }
+    }
+
+    internal static D3d11Texture2DDesc CreateSharedTextureDescription(uint width, uint height) =>
+        new()
+        {
+            Width = width,
+            Height = height,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = DxgiFormat.R8G8B8A8Unorm,
+            SampleDescription = new DxgiSampleDescription { Count = 1 },
+            Usage = D3d11Usage.Default,
+            BindFlags = D3d11BindShaderResource,
+            MiscFlags = D3d11ResourceMiscShared,
+        };
+
+    internal static D3d11Texture2DDesc CreateUploadTextureDescription(uint width, uint height)
+    {
+        D3d11Texture2DDesc description = CreateSharedTextureDescription(width, height);
+        description.Usage = D3d11Usage.Dynamic;
+        description.CpuAccessFlags = D3d11CpuAccessWrite;
+        description.MiscFlags = 0;
+        return description;
     }
 
     public OpenVrEyeMirrorFrame ReadMirrorView(
@@ -435,6 +523,12 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
         IntPtr source);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void FlushDelegate(IntPtr context);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetSharedHandleDelegate(IntPtr resource, out IntPtr sharedHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int MapDelegate(
         IntPtr context,
         IntPtr resource,
@@ -475,7 +569,7 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct D3d11Texture2DDesc
+    internal struct D3d11Texture2DDesc
     {
         public uint Width;
         public uint Height;
@@ -490,7 +584,7 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DxgiSampleDescription
+    internal struct DxgiSampleDescription
     {
         public uint Count;
         public uint Quality;
@@ -515,14 +609,134 @@ internal sealed partial class OpenVrD3D11Device : IDisposable
         public uint ArraySize;
     }
 
-    private enum D3d11Usage
+    internal enum D3d11Usage
     {
+        Default = 0,
+        Dynamic = 2,
         Staging = 3,
     }
 
     private enum D3d11Map
     {
         Read = 1,
+        WriteDiscard = 4,
+    }
+
+    internal sealed class OpenVrD3D11Texture : IDisposable
+    {
+        private readonly IntPtr _context;
+        private IntPtr _uploadTexture;
+        private IntPtr _sharedTexture;
+
+        internal OpenVrD3D11Texture(
+            IntPtr context,
+            IntPtr uploadTexture,
+            IntPtr sharedTexture,
+            IntPtr sharedHandle,
+            uint width,
+            uint height)
+        {
+            _context = context;
+            _uploadTexture = uploadTexture;
+            _sharedTexture = sharedTexture;
+            SharedHandle = sharedHandle;
+            Width = width;
+            Height = height;
+        }
+
+        public uint Width { get; }
+
+        public uint Height { get; }
+
+        public IntPtr SharedHandle { get; }
+
+        private IntPtr UploadTexture => _uploadTexture != IntPtr.Zero
+            ? _uploadTexture
+            : throw new ObjectDisposedException(nameof(OpenVrD3D11Texture));
+
+        public void Update(ReadOnlySpan<byte> rgbaPixels)
+        {
+            IntPtr uploadTexture = UploadTexture;
+            MapDelegate map = GetComFunction<MapDelegate>(_context, D3d11ContextMapSlot);
+            Marshal.ThrowExceptionForHR(map(
+                _context,
+                uploadTexture,
+                0,
+                D3d11Map.WriteDiscard,
+                0,
+                out D3d11MappedSubresource mapped));
+            try
+            {
+                CopyRgbaToMappedTexture(rgbaPixels, Width, Height, mapped.Data, mapped.RowPitch);
+            }
+            finally
+            {
+                UnmapDelegate unmap = GetComFunction<UnmapDelegate>(
+                    _context,
+                    D3d11ContextUnmapSlot);
+                unmap(_context, uploadTexture, 0);
+            }
+
+            IntPtr sharedTexture = _sharedTexture != IntPtr.Zero
+                ? _sharedTexture
+                : throw new ObjectDisposedException(nameof(OpenVrD3D11Texture));
+            // OpenVR samples DXGI shared-handle textures directly. Its public ABI
+            // requires writers to replace their contents with an atomic GPU copy.
+            CopyResourceDelegate copyResource = GetComFunction<CopyResourceDelegate>(
+                _context,
+                D3d11ContextCopyResourceSlot);
+            copyResource(_context, sharedTexture, uploadTexture);
+            FlushDelegate flush = GetComFunction<FlushDelegate>(_context, D3d11ContextFlushSlot);
+            flush(_context);
+        }
+
+        public void Dispose()
+        {
+            IntPtr uploadTexture = Interlocked.Exchange(ref _uploadTexture, IntPtr.Zero);
+            IntPtr sharedTexture = Interlocked.Exchange(ref _sharedTexture, IntPtr.Zero);
+            ReleaseIfPresent(uploadTexture);
+            ReleaseIfPresent(sharedTexture);
+        }
+    }
+
+    internal static unsafe void CopyRgbaToMappedTexture(
+        ReadOnlySpan<byte> rgbaPixels,
+        uint width,
+        uint height,
+        IntPtr destination,
+        uint destinationRowPitch)
+    {
+        int rowBytes = checked((int)(width * 4));
+        int expectedBytes = checked(rowBytes * (int)height);
+        if (rgbaPixels.Length != expectedBytes)
+        {
+            throw new ArgumentException(
+                "The RGBA buffer size does not match its dimensions.",
+                nameof(rgbaPixels));
+        }
+        if (destination == IntPtr.Zero)
+        {
+            throw new ArgumentException("The mapped D3D11 destination is null.", nameof(destination));
+        }
+        if (destinationRowPitch < rowBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(destinationRowPitch),
+                "The mapped D3D11 row pitch is smaller than one RGBA row.");
+        }
+
+        fixed (byte* sourceStart = rgbaPixels)
+        {
+            byte* destinationStart = (byte*)destination;
+            for (uint row = 0; row < height; row++)
+            {
+                Buffer.MemoryCopy(
+                    sourceStart + checked((int)(row * (uint)rowBytes)),
+                    destinationStart + checked((int)(row * destinationRowPitch)),
+                    destinationRowPitch,
+                    rowBytes);
+            }
+        }
     }
 }
 
