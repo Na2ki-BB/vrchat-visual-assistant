@@ -89,7 +89,8 @@ internal sealed class YtDlpProcessRunner(
                 throw YtDlpVideoSearchProvider.Failure(ScanFailureCode.VideoSearchFailed,
                     "yt-dlpによる動画検索に失敗しました。やり直してください。");
             }
-            return new YtDlpProcessOutput(await stdout.ConfigureAwait(false), (await stderr.ConfigureAwait(false)).Length != 0);
+            byte[] standardError = await stderr.ConfigureAwait(false);
+            return new YtDlpProcessOutput(await stdout.ConfigureAwait(false), HasMeaningfulStandardError(standardError));
         }
         catch (Exception exception) when (exception is not ScanException || !cleanupConfirmed)
         {
@@ -160,6 +161,19 @@ internal sealed class YtDlpProcessRunner(
     {
         try { await task.ConfigureAwait(false); }
         catch (Exception) { }
+    }
+
+    private static bool HasMeaningfulStandardError(ReadOnlySpan<byte> standardError)
+    {
+        if (standardError.IsEmpty) { return false; }
+        while (!standardError.IsEmpty && standardError[^1] is (byte)'\r' or (byte)'\n')
+        {
+            standardError = standardError[..^1];
+        }
+        // The fixed standalone build emits this runtime lifecycle notice on every successful search.
+        // Suppress only the exact notice; any additional or changed stderr still marks the result partial.
+        return !standardError.SequenceEqual(
+            "Deprecated Feature: Support for Python version 3.10 has been deprecated. Please update to Python 3.11 or above"u8);
     }
 
     private static ScanException CleanupFailure() => YtDlpVideoSearchProvider.Failure(

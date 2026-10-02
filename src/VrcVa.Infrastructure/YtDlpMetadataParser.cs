@@ -107,7 +107,11 @@ internal static class YtDlpMetadataParser
         {
             if (value.ValueKind != JsonValueKind.String
                 || !Uri.TryCreate(value.GetString(), UriKind.Absolute, out Uri? uri)) { return null; }
-            return new VideoMetadata(id, title, thumbnailUrl: uri).ThumbnailUrl;
+            _ = new VideoMetadata(id, title, thumbnailUrl: uri);
+            // Signed search-result URLs currently negotiate WebP even with a .jpg path, while the
+            // bounded Windows decoder intentionally supports JPEG/PNG only. Use YouTube's stable,
+            // small JPEG URL derived solely from the already validated video ID.
+            return new Uri("https://i.ytimg.com/vi/" + id + "/hqdefault.jpg", UriKind.Absolute);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { return null; }
     }

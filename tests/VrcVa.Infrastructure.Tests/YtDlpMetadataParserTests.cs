@@ -45,6 +45,25 @@ public sealed class YtDlpMetadataParserTests
     }
 
     [Fact]
+    public void Parse_SignedThumbnailIsValidatedThenCanonicalizedToBoundedJpegUrl()
+    {
+        VideoSearchBatch batch = Parse(new
+        {
+            entries = new[] { new {
+                id = "sample00000", title = "Synthetic title",
+                thumbnails = new[] { new {
+                    url = "https://i.ytimg.com/vi/sample00000/hq720.jpg?sqp=provider-token&rs=provider-signature",
+                    width = 360, height = 202,
+                } },
+            } }
+        });
+
+        Assert.False(batch.IsPartial);
+        Assert.Equal("https://i.ytimg.com/vi/sample00000/hqdefault.jpg",
+            Assert.Single(batch.Videos).ThumbnailUrl!.AbsoluteUri);
+    }
+
+    [Fact]
     public void Parse_FiltersInvalidAndDuplicateEntriesButKeepsFirstValidSnapshot()
     {
         VideoSearchBatch batch = Parse(new
