@@ -24,7 +24,7 @@ VRで左手首の **VRCVA** → **マイク** を右手の照準点とトリガ�
 
 ## 4. 検索する
 
-文章の下の **そのまま検索** を押します。動画の候補が出ればOKです。[検索語を整えて探す場合はこちら](#任意-検索語を整えて探す)。
+文章の下の **そのまま検索** を押します。末尾の句点「。」1文字だけを検索語から除き、元の認識文は残します。候補画面の **検索語** は実際に検索へ渡した語です。動画の候補が出ればOKです。[検索語を整えて探す場合はこちら](#任意-検索語を整えて探す)。
 
 ## 5. 動画URLをコピーする
 
@@ -96,19 +96,19 @@ XSOverlayはエラー通知の補助として任意です。WPF窓をXSOverlay�
    }
    ```
 
-3. 作業用フォルダーをPowerShellで開き、次を実行します。`vrchat-visual-assistant-local` が既にあるなら別名にします。本書ではCIで確認した実装commitを固定し、途中で別の版へ変えません
+3. 作業用フォルダーをPowerShellで開き、次を実行します。`vrchat-visual-assistant-local` が既にあるなら別名にします。本書では[主要経路を本人実機確認した実装commit](../TASKS.md#voice-search-acceptance--2026-10-02)を固定し、途中で別の版へ変えません
 
    ```powershell
    git clone https://github.com/Na2ki-BB/vrchat-visual-assistant.git vrchat-visual-assistant-local
    if ($LASTEXITCODE -ne 0) { throw "ソース取得に失敗しました" }
    Set-Location .\vrchat-visual-assistant-local
-   git checkout --detach f8c5da1babcef2b547dd778ab807d31d72147f23
+   git checkout --detach 5469b555a347ebb004edc16b8beba5ba15558a86
    if ($LASTEXITCODE -ne 0) { throw "確認対象のcommitを取得できませんでした" }
    git rev-parse HEAD
    git status --short
    ```
 
-   HEADが `f8c5da1babcef2b547dd778ab807d31d72147f23`、最後の表示が空であることを確認します。これは元のブランチを切り替えずに試すためのdetached HEADです。後で開発する場合は別ブランチを作ります
+   HEADが `5469b555a347ebb004edc16b8beba5ba15558a86`、最後の表示が空であることを確認します。これは元のブランチを切り替えずに試すためのdetached HEADです。後で開発する場合は別ブランチを作ります
 
 既存cloneを使う場合も、まず `git status --short --branch` を確認し、作業中なら新しいcloneを使います。`reset --hard`、`clean`、変更の破棄や、未確認のstashは使いません。クラウドの `bin/obj`、`.env`、キー、設定、ログをPCへ丸ごとコピーする必要はありません。
 
@@ -141,10 +141,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
 上のビルド成功後、同じWindows PCで実行します。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -Version local-f8c5da1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -Version local-5469b55
 ```
 
-`artifacts\beta\VRCVA-beta-local-f8c5da1-win-x64.zip` が作られます。中の `VRCVA` フォルダー全体を、旧版とは別の、後で動かさない場所へ展開して `VrcVa.exe` を起動します。.NET Runtime同梱のWindows x64版で、`OpenVr\Assets` も含むためexeだけを移しません。スクリプトはpublishと配置検査を行い、単体テストは行いません。同名の既存ZIPは日時付きで保存します。
+`artifacts\beta\VRCVA-beta-local-5469b55-win-x64.zip` が作られます。中の `VRCVA` フォルダー全体を、旧版とは別の、後で動かさない場所へ展開して `VrcVa.exe` を起動します。.NET Runtime同梱のWindows x64版で、`OpenVr\Assets` も含むためexeだけを移しません。スクリプトはpublishと配置検査を行い、単体テストは行いません。同名の既存ZIPは日時付きで保存します。
 
 インストーラー、署名、自動更新、yt-dlp同梱はありません。CIの成功runからアプリZIPをダウンロードする経路もありません。警告の発行元や取得元が不明なら、そのまま実行せず確認してください。起動先を替えたら、その版の `初期設定を開く` からSteamVR連動を再設定します。
 
@@ -171,7 +171,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -
 - **録音中に送らず止めたい:** `マイク停止 → 認識` ではなく `中止` を押します。送信開始後の中止はサービス側の処理・課金を取り消せません
 - **内容を消して終える:** `閉じる・内容を破棄` またはアプリ終了を使います。成功音声は破棄され、失敗音声は初期120秒だけメモリ保持します。中止・閉じる・録り直し・終了で破棄します。コピー済みURLはOS側に残るので、不要なら本人がclipboardと必要な履歴を消します
 - **次回の自動起動を止める:** SteamVRが起動中の状態で `初期設定を開く` からSteamVR連動を無効にし、`無効` の表示を確認して終了します。SteamVR停止中は変更が保留になるため、起動してから確認します
-- **前の版へ戻す:** 新版を終了し、更新前に残した実行フォルダーから起動します。設定versionは新版で保存時に6になるため、旧版が読めなければ両方を終了し、[付録Aのソース取得手順](#既存環境を残してソースを取得)で退避した更新前の `settings.json` を元へ戻します。新版の設定も別名で退避し、上書き前に確認します。旧版の起動先からSteamVR連動を再設定します。資格情報マネージャーのキーは削除・再入力せず維持します
+- **前の版へ戻す:** 新版を終了し、更新前に残した実行フォルダーから起動します。設定versionは新版で保存時に7になるため、旧版が読めなければ両方を終了し、[付録Aのソース取得手順](#既存環境を残してソースを取得)で退避した更新前の `settings.json` を元へ戻します。新版の設定も別名で退避し、上書き前に確認します。旧版の起動先からSteamVR連動を再設定します。資格情報マネージャーのキーは削除・再入力せず維持します
 
 不要になった新版フォルダーを片付ける場合も、元のソース・旧版・設定backupを巻き込みません。停止だけのためにキー、`%LOCALAPPDATA%\VrcVa` 全体、VRChatやSteamVRの設定を削除する必要はありません。
 
@@ -193,33 +193,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-beta.ps1 -
 1. 普段のQuest PC接続 → SteamVR → Windows版VRChatの順で起動します。VRCVAのSteamVR連動が有効なら自動起動を確認し、未設定なら `run.ps1` または配置先の `VrcVa.exe` を開きます
 2. 左手首の小さい `VRCVA` ランチャーを、右手の水色の照準点とトリガーで開き、`マイク` を選びます。例として「落ち着いたピアノの作業用BGMを探して」のような自分の短い一文を話します
 3. `マイク停止 → 認識` を押し、実OpenAI音声API（`gpt-transcribe`）の認識文を確認します。PCなら `録音開始 / 録り直し` → `停止して文字起こし` です。認識文は編集されず、VRとPCで同じ入力を扱います
-4. `そのまま検索` を押します。認識文をそのままYouTubeへ送り、最大10件を5件ずつ表示します。タイトル・サムネイルを見て、2ページ目がある場合は `次へ` / `前へ` も使います。サムネイル取得先は `i.ytimg.com` / `img.youtube.com` です
+4. `そのまま検索` を押します。認識文の最後の非空白文字が句点「。」なら、その1文字だけを除いてYouTubeへ送ります。末尾空白と原文は保持します。実際の検索語と、最大10件を5件ずつ表示します。タイトル・サムネイルを見て、2ページ目がある場合は `次へ` / `前へ` も使います。サムネイル取得先は `i.ytimg.com` / `img.youtube.com` です
 5. 候補カードを選び、URLコピーの完了表示を確認します。Windows共有clipboardを上書きします。**本人が**ワールドの動画プレイヤーへ貼り付け、再生を操作します。VRCVAによる自動貼り付け・再生はありません。ワールド側のURL許可や操作権限で再生できない場合は、検索・コピーの成否と分けて記録します
 6. VRCVAで `入力へ`（PCは `入力へ戻る`）を押し、同じ認識文から `解釈して検索` を選びます。録り直さず、実OpenAI（`gpt-6-luna` / `reasoning.effort=none`）へ認識文を送り、確定した `検索語` と候補を確認します。候補を選んでコピーし、必要なら本人が同じプレイヤーへ貼り付けます
-7. パネルを出したままVRChat内で歩けるか、照準点・ボタン・候補が読めるかも、この操作中に確認します。右トリガーはVRChat側にも届くため、ワールド側の操作が同時に起きる可能性があります。読みにくければ `VRで位置調整` を使います
+7. パネルを出したままVRChat内で歩けるか、照準点・ボタン・候補が読めるかも、この操作中に確認します。右トリガーはVRChat側にも届くため、ワールド側の操作が同時に起きる可能性があります。読みにくければ録音・認識文・候補パネル内の `位置調整` を使い、位置と大きさを合わせて保存します。翻訳結果の配置とは別に保存されます
 8. `閉じる`（PCは `閉じる・内容を破棄`）で内容を消し、VRCVAを終了します。終わったら下の「確認済みと未確認」へ実施commit、各段階の成否と遅延、送信回数/秒数、歩行・表示・手動再生の結果を記録します。キー、音声、認識文、検索語、URL、スクリーンショットを公開記録へ残す必要はありません
 
 解釈が失敗しても直接検索や別モデルへ自動で切り替わりません。検索だけの失敗後に `やり直す`（PCは `確定済みの検索語でやり直す`）を選ぶと、成功済みの文字起こし・AI解釈は再送せず、同じ検索語を使います。無限再試行や上限を戻すための再起動は行いません。
 
 ## 付録D: 確認済みと未確認
 
-**2026-10-01時点の実装基準:** [`f8c5da1babcef2b547dd778ab807d31d72147f23`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/f8c5da1babcef2b547dd778ab807d31d72147f23)。[mainのWindows CI104](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/36908642593) でRelease buildはwarnings/errors 0、単体テスト1,445件と独立cold shutdownチェック3件が成功しました。これはクラウドでのソース準備・自動検証の範囲です。詳しい証拠と過去の実機履歴は [TASKSの検証記録](../TASKS.md#l3-verification-evidence--2026-10-01) を残しています。
+**現在の実装基準:** [`5469b555a347ebb004edc16b8beba5ba15558a86`](https://github.com/Na2ki-BB/vrchat-visual-assistant/commit/5469b555a347ebb004edc16b8beba5ba15558a86)。[mainのWindows CI](https://github.com/Na2ki-BB/vrchat-visual-assistant/actions/runs/37014966469) でRelease buildはwarnings/errors 0、単体テスト1,508件（failed/skipped 0）と別実行のWPF終了チェック3件が成功しました。
 
-**ローカルPCで確認済み（2026-10-02 JST / 2026-10-01 UTC）:** 同commitで次を確認しました。
+**本人実機確認済み（2026-10-02 JST）:** Windows + SteamVR + Quest 3SのPCVRで、音声文字起こし、直接/解釈検索、10候補と画像表示、URLコピー、VR内の主要操作が成功しました。追加修正のVR内位置調整、ちらつき解消、直接検索の末尾句点除去、実送信検索語の表示も合格しています。最終確認は同日22:58 JSTです。[確認範囲・修正PR・残る項目の正本](../TASKS.md#voice-search-acceptance--2026-10-02)を参照してください。
 
-- ソース取得、Windows Release build（warnings/errors 0）、単体テスト1,445件の全成功
-- `scripts\publish-beta.ps1` による自己完結ZIPの作成、自己完結版exeの最小化起動と準備完了
-- SteamVRへの接続とパネル初期化、`en-US` OCR認識器が利用可能であること。ヘッドセット内の可読性・クリックや実看板のOCR精度は別確認
-- 固定yt-dlp **2026.08.19** の配置、公式asset digest・公式SHA一覧・実ファイルSHA256の一致、実行ファイルのversion一致。検索はまだ行っていない
-- 旧ソースを残し、既存設定のhashを維持したまま復元用backupを作成
+これは本人の1環境での確認です。全control・全候補の網羅操作、切断/再接続、clipboard占有回復、長時間運転、API精度・遅延・費用の定量評価、全ワールドでの再生や他のPC/接続方式の互換性を保証しません。古い自動検証・準備の記録は[TASKSの履歴](../TASKS.md#l3-verification-evidence--2026-10-01)に残します。
 
-準備中に実録音・実API送信は行っていません。起動・初期化の成功を実サービスやヘッドセット内操作の受入成功へ広げません。
-
-**現行版で未確認:** 実マイク・実OpenAI API、固定yt-dlpでの実YouTube検索・サムネイル・実clipboard、Quest 3Sの新しい音声/候補パネルの可読性・操作・歩行維持、ワールドでの手動貼り付け・再生。過去の翻訳用ビルドの実機成功を、これらの成功として流用しません。
-
-実機確認後は、内容を保存せず次だけ追記します。
-
-- 実施日・実施commit・実行先（開発版または自己完結版）
-- ローカルビルド/起動、音声認識、直接検索、解釈検索、サムネイル、コピー、手動貼り付け/再生それぞれの成否
-- 段階別遅延、実送信回数/音声秒数と確認できた費用、歩行維持・可読性・中止/終了の結果
-- 未確認または失敗した項目と、次に必要な対応
+追加確認を記録する場合も、実施日・commit・環境・各段階の成否と未確認項目だけを残します。キー、音声、認識文、検索語、URL、個人のPCパスを公開記録に含めません。
