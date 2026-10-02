@@ -25,7 +25,6 @@ public sealed class WinMmInteropTests
         Assert.Equal(16, format.BitsPerSample);
         Assert.Equal(0, format.ExtraSize);
         Assert.Equal(0x00050000u, WinMmInterop.CallbackEvent);
-        Assert.Equal(0x0010u, WinMmInterop.DefaultCommunicationDevice);
         Assert.Equal(0x0811u, WinMmInterop.QueryFunctionInstanceId);
         Assert.Equal(0x0812u, WinMmInterop.QueryFunctionInstanceIdSize);
     }
@@ -140,7 +139,7 @@ public sealed class WinMmInteropTests
 #endif
 
     [Fact]
-    public async Task Open_QueriesCommunicationMapperAndSnapshotsActualEndpointWithoutRecording()
+    public async Task Open_ResolvesCommunicationEndpointToConcreteWinMmDeviceWithoutRecording()
     {
         var api = new FakeApi();
         var endpoint = new FakeEndpoint();
@@ -152,10 +151,10 @@ public sealed class WinMmInteropTests
         });
         IMicrophone microphone = await factory.OpenAsync(CancellationToken.None).WaitAsync(TestTimeout);
         Assert.Equal(FakeApi.EndpointId, selected);
-        Assert.Equal(["query", "open", "get-id", "id-size", "id"], api.Calls);
-        Assert.All(api.OpenDevices, device => Assert.Equal(uint.MaxValue, device));
-        Assert.Equal(0x11u, api.OpenFlags[0]);
-        Assert.Equal(0x50010u, api.OpenFlags[1]);
+        Assert.Equal(["default", "device-count", "id-size:0", "id:0", "id-size:1", "id:1", "query", "open"], api.Calls);
+        Assert.All(api.OpenDevices, device => Assert.Equal(1u, device));
+        Assert.Equal(WinMmInterop.WaveFormatQuery, api.OpenFlags[0]);
+        Assert.Equal(WinMmInterop.CallbackEvent, api.OpenFlags[1]);
         Assert.NotEqual((nuint)0, api.EventHandle);
         await microphone.DisposeAsync();
         await microphone.DisposeAsync();
@@ -164,6 +163,51 @@ public sealed class WinMmInteropTests
         Assert.True(endpoint.Disposed);
         Assert.Single(api.Threads.Distinct());
         Assert.All(endpoint.Threads, thread => Assert.Equal(api.Threads[0], thread));
+    }
+
+    [Fact]
+    public async Task Open_AmbiguousWinMmEndpointMappingFailsBeforeNativeOpen()
+    {
+        var api = new FakeApi { EndpointIds = [FakeApi.EndpointId, FakeApi.EndpointId] };
+        var factory = new WinMmMicrophoneFactory(api, _ => new FakeEndpoint());
+
+        VoiceInputException error = await Assert.ThrowsAsync<VoiceInputException>(
+            () => factory.OpenAsync(CancellationToken.None));
+
+        Assert.Equal(VoiceInputFailureCode.DeviceUnavailable, error.Code);
+        Assert.Empty(api.OpenDevices);
+    }
+
+    [Fact]
+    public async Task Open_MissingWinMmEndpointMappingFailsBeforeNativeOpen()
+    {
+        var api = new FakeApi { EndpointIds = ["first-other-endpoint", "second-other-endpoint"] };
+        var factory = new WinMmMicrophoneFactory(api, _ => new FakeEndpoint());
+
+        VoiceInputException error = await Assert.ThrowsAsync<VoiceInputException>(
+            () => factory.OpenAsync(CancellationToken.None));
+
+        Assert.Equal(VoiceInputFailureCode.DeviceUnavailable, error.Code);
+        Assert.Empty(api.OpenDevices);
+    }
+
+    [Fact]
+    public async Task Open_DefaultChangeAfterResolutionFailsBeforeNativeOpen()
+    {
+        var api = new FakeApi();
+        var endpoint = new FakeEndpoint();
+        var factory = new WinMmMicrophoneFactory(api, _ =>
+        {
+            endpoint.Lose();
+            return endpoint;
+        });
+
+        VoiceInputException error = await Assert.ThrowsAsync<VoiceInputException>(
+            () => factory.OpenAsync(CancellationToken.None));
+
+        Assert.Equal(VoiceInputFailureCode.DeviceUnavailable, error.Code);
+        Assert.Empty(api.OpenDevices);
+        Assert.True(endpoint.Disposed);
     }
 
     [Theory]
@@ -177,7 +221,7 @@ public sealed class WinMmInteropTests
         VoiceInputException error = await Assert.ThrowsAsync<VoiceInputException>(
             () => factory.OpenAsync(CancellationToken.None));
         Assert.Equal((VoiceInputFailureCode)expected, error.Code);
-        Assert.Equal(["query"], api.Calls);
+        Assert.Equal(["default", "device-count", "id-size:0", "id:0", "id-size:1", "id:1", "query"], api.Calls);
     }
 
     [Theory]
@@ -497,6 +541,7 @@ public sealed class WinMmInteropTests
     private sealed class FakeApi : IWinMmApi
     {
         internal const string EndpointId = "synthetic-communication-endpoint";
+        internal const string OtherEndpointId = "synthetic-other-endpoint";
         private readonly object _queueLock = new();
         private readonly Queue<nint> _queued = new();
         private int _adds;
@@ -510,6 +555,8 @@ public sealed class WinMmInteropTests
         internal TaskCompletionSource FirstRequeue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal uint QueryResult { get; init; }
         internal uint CloseResult { get; init; }
+        internal IReadOnlyList<string> EndpointIds { get; init; } = [OtherEndpointId, EndpointId];
+        internal string DefaultEndpointId { get; init; } = EndpointId;
         internal byte[] FinalSamples { get; init; } = [];
         internal Action? OnStop { get; init; }
         internal Action? OnOpen { get; init; }
@@ -518,6 +565,18 @@ public sealed class WinMmInteropTests
         internal nuint EventHandle { get; private set; }
         internal int MaximumQueued { get; private set; }
         internal bool AllBuffersWereZeroAtClose { get; private set; }
+
+        public uint GetDeviceCount()
+        {
+            Log("device-count");
+            return (uint)EndpointIds.Count;
+        }
+
+        public string GetDefaultCommunicationEndpointId()
+        {
+            Log("default");
+            return DefaultEndpointId;
+        }
 
         public uint Open(out nint handle, uint deviceId, ref WinMmInterop.WaveFormat format, nuint callback, uint flags)
         {
@@ -531,26 +590,21 @@ public sealed class WinMmInteropTests
             return query ? QueryResult : 0;
         }
 
-        public uint GetId(nint handle, out uint deviceId)
-        {
-            Log("get-id");
-            deviceId = 7;
-            return 0;
-        }
-
         public uint Message(nint handleOrId, uint message, nuint parameter1, nuint parameter2)
         {
-            Assert.Equal((nint)7, handleOrId);
+            int deviceId = checked((int)handleOrId);
+            Assert.InRange(deviceId, 0, EndpointIds.Count - 1);
+            string endpointId = EndpointIds[deviceId];
             if (message == WinMmInterop.QueryFunctionInstanceIdSize)
             {
-                Log("id-size");
-                Marshal.WriteIntPtr((nint)parameter1, (nint)((EndpointId.Length + 1) * sizeof(char)));
+                Log($"id-size:{deviceId}");
+                Marshal.WriteIntPtr((nint)parameter1, (nint)((endpointId.Length + 1) * sizeof(char)));
             }
             else
             {
                 Assert.Equal(WinMmInterop.QueryFunctionInstanceId, message);
-                Log("id");
-                char[] chars = (EndpointId + '\0').ToCharArray();
+                Log($"id:{deviceId}");
+                char[] chars = (endpointId + '\0').ToCharArray();
                 Marshal.Copy(chars, 0, (nint)parameter1, chars.Length);
             }
 

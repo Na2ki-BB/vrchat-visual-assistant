@@ -6,9 +6,7 @@ namespace VrcVa.Windows.Voice;
 // Source: Windows SDK mmeapi.h/mmddk.h and mmdeviceapi.h (Microsoft win32metadata).
 internal static class WinMmInterop
 {
-    internal const uint WaveMapper = uint.MaxValue;
     internal const uint WaveFormatQuery = 0x0001;
-    internal const uint DefaultCommunicationDevice = 0x0010;
     internal const uint CallbackEvent = 0x00050000;
     internal const uint HeaderDone = 0x0001;
     internal const uint HeaderPrepared = 0x0002;
@@ -80,9 +78,39 @@ internal static class WinMmInterop
         }
     }
 
-    internal static unsafe string GetEndpointId(IWinMmApi api, nint handle)
+    internal static WinMmRecordingDevice ResolveCommunicationDevice(IWinMmApi api)
     {
-        Check(api.GetId(handle, out uint deviceId));
+        string endpointId = api.GetDefaultCommunicationEndpointId();
+        if (string.IsNullOrWhiteSpace(endpointId))
+        {
+            throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
+        }
+
+        uint? match = null;
+        uint count = api.GetDeviceCount();
+        for (uint deviceId = 0; deviceId < count; deviceId++)
+        {
+            if (!string.Equals(GetEndpointId(api, deviceId), endpointId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (match.HasValue)
+            {
+                // Never guess when multiple WinMM inputs claim the same endpoint.
+                throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
+            }
+
+            match = deviceId;
+        }
+
+        return match.HasValue
+            ? new WinMmRecordingDevice(match.Value, endpointId)
+            : throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
+    }
+
+    internal static unsafe string GetEndpointId(IWinMmApi api, uint deviceId)
+    {
         nuint bytes = 0;
         Check(api.Message((nint)deviceId, QueryFunctionInstanceIdSize, (nuint)(&bytes), 0));
         // Endpoint IDs are opaque; only validate bounded UTF-16 storage, never parse them.
@@ -113,10 +141,13 @@ internal static class WinMmInterop
     }
 }
 
+internal readonly record struct WinMmRecordingDevice(uint DeviceId, string EndpointId);
+
 internal interface IWinMmApi
 {
+    uint GetDeviceCount();
+    string GetDefaultCommunicationEndpointId();
     uint Open(out nint handle, uint deviceId, ref WinMmInterop.WaveFormat format, nuint callback, uint flags);
-    uint GetId(nint handle, out uint deviceId);
     uint Message(nint handleOrId, uint message, nuint parameter1, nuint parameter2);
     uint Prepare(nint handle, nint header, uint headerBytes);
     uint AddBuffer(nint handle, nint header, uint headerBytes);
@@ -129,9 +160,10 @@ internal interface IWinMmApi
 
 internal sealed class WinMmApi : IWinMmApi
 {
+    public uint GetDeviceCount() => waveInGetNumDevs();
+    public string GetDefaultCommunicationEndpointId() => CoreAudioRecordingEndpoint.GetDefaultCommunicationEndpointId();
     public uint Open(out nint handle, uint deviceId, ref WinMmInterop.WaveFormat format, nuint callback, uint flags) =>
         waveInOpen(out handle, deviceId, ref format, callback, 0, flags);
-    public uint GetId(nint handle, out uint deviceId) => waveInGetID(handle, out deviceId);
     public uint Message(nint handleOrId, uint message, nuint parameter1, nuint parameter2) =>
         waveInMessage(handleOrId, message, parameter1, parameter2);
     public uint Prepare(nint handle, nint header, uint headerBytes) => waveInPrepareHeader(handle, header, headerBytes);
@@ -143,10 +175,10 @@ internal sealed class WinMmApi : IWinMmApi
     public uint Close(nint handle) => waveInClose(handle);
 
     [DllImport("winmm.dll", ExactSpelling = true)]
+    private static extern uint waveInGetNumDevs();
+    [DllImport("winmm.dll", ExactSpelling = true)]
     private static extern uint waveInOpen(out nint handle, uint deviceId, ref WinMmInterop.WaveFormat format,
         nuint callback, nuint instance, uint flags);
-    [DllImport("winmm.dll", ExactSpelling = true)]
-    private static extern uint waveInGetID(nint handle, out uint deviceId);
     [DllImport("winmm.dll", ExactSpelling = true)]
     private static extern uint waveInMessage(nint handle, uint message, nuint parameter1, nuint parameter2);
     [DllImport("winmm.dll", ExactSpelling = true)]
@@ -208,6 +240,50 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
         }
     }
 
+    internal static string GetDefaultCommunicationEndpointId()
+    {
+        IMMDeviceEnumerator? enumerator = null;
+        IMMDevice? device = null;
+        nint id = 0;
+        bool initialized = false;
+        try
+        {
+            Marshal.ThrowExceptionForHR(CoInitializeEx(0, 0));
+            initialized = true;
+            Guid classId = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
+            Guid interfaceId = typeof(IMMDeviceEnumerator).GUID;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out enumerator));
+            if (enumerator.GetDefaultAudioEndpoint(1, 2, out device) < 0
+                || device.GetState(out uint state) < 0
+                || state != WinMmInterop.DeviceStateActive
+                || device.GetId(out id) < 0)
+            {
+                throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
+            }
+
+            string? endpointId = Marshal.PtrToStringUni(id);
+            return !string.IsNullOrWhiteSpace(endpointId)
+                ? endpointId
+                : throw new VoiceInputException(VoiceInputFailureCode.DeviceUnavailable);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(id);
+            if (device is not null)
+            {
+                Marshal.ReleaseComObject(device);
+            }
+            if (enumerator is not null)
+            {
+                Marshal.ReleaseComObject(enumerator);
+            }
+            if (initialized)
+            {
+                CoUninitialize();
+            }
+        }
+    }
+
     public bool IsAvailable
     {
         get
@@ -222,8 +298,8 @@ internal sealed class CoreAudioRecordingEndpoint : IRecordingEndpoint
                 return false;
             }
 
-            // Wave APIs can transparently reroute a default-device stream. Fail
-            // rather than accept samples from a newly selected communication mic.
+            // The concrete WinMM device must remain the communications default.
+            // Fail rather than accept samples after the user selects another mic.
             int result = _enumerator.GetDefaultAudioEndpoint(1, 2, out IMMDevice current);
             if (result < 0)
             {
