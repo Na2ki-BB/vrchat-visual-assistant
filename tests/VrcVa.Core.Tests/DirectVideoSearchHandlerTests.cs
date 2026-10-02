@@ -72,7 +72,7 @@ public sealed class DirectVideoSearchHandlerTests
     [InlineData("猫。 \r\n", "猫 \r\n")]
     [InlineData("猫. \r\n", "猫. \r\n")]
     [InlineData("猫！", "猫！")]
-    public async Task DirectSearch_StripsOnlyTerminalJapaneseFullStopsFromProviderQuery(
+    public async Task DirectSearch_DisplaysProviderQueryAndPreservesOriginalTranscript(
         string transcript, string expectedProviderQuery)
     {
         Harness harness = new(1);
@@ -85,8 +85,9 @@ public sealed class DirectVideoSearchHandlerTests
         Assert.Equal(expectedProviderQuery, harness.Provider.Request!.Query);
         Assert.Equal(transcript, input.Transcript);
         Assert.Equal(transcript, outcome.Result!.SourceText);
-        Assert.Equal(transcript, outcome.Result.PrimarySection.Text);
-        Assert.Equal(transcript, outcome.Result.FeatureResult.VideoSearch!.Query);
+        Assert.Equal(expectedProviderQuery, outcome.Result.PrimarySection.Text);
+        Assert.Equal(expectedProviderQuery, outcome.Result.FeatureResult.VideoSearch!.Query);
+        Assert.Same(harness.Provider.Request, harness.Session.CurrentSearchRequest);
         Assert.Equal(0, harness.Ai.Calls);
     }
 
@@ -106,6 +107,7 @@ public sealed class DirectVideoSearchHandlerTests
         Assert.Equal(ScanFailureCode.Unexpected, outcome.Failure?.Code);
         Assert.Equal(0, harness.Provider.Calls);
         Assert.Null(harness.Session.CurrentResult);
+        Assert.Null(harness.Session.CurrentSearchRequest);
         Assert.Equal(transcript, input.Transcript);
     }
 
@@ -206,6 +208,7 @@ public sealed class DirectVideoSearchHandlerTests
             rerecord.Dispose();
         }
         Assert.Null(harness.Session.CurrentResult);
+        Assert.Null(harness.Session.CurrentSearchRequest);
         Assert.False(harness.Session.TryResolveSelection(result.Candidates[0].CreateSelectionAction(), out _));
         Assert.False(harness.Session.TryGetPage(result.SessionId, result.OperationId, 0, out _));
     }
@@ -334,6 +337,30 @@ public sealed class DirectVideoSearchHandlerTests
         Assert.Null(harness.Session.CurrentResult);
         Assert.Empty(harness.Renderer.Outcomes);
         Assert.False(harness.Execution.IsRunning);
+    }
+
+    [Fact]
+    public async Task SeparateHandlerCancellation_ClearsRequestBeforeProviderCleanup()
+    {
+        Harness harness = new(1);
+        TextInputSession input = TextInputSession.Create("検索語。");
+        ScanRequest request = ScanRequest.CreateText("test", FeatureIds.DirectVideoSearch, input);
+        Assert.True(harness.Execution.TryBeginSession(request.CorrelationId, out var operation, sessionId: input.SessionId));
+        using (operation)
+        using (CancellationTokenSource cancellation = new())
+        {
+            TaskCompletionSource<VideoSearchBatch> finish = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            harness.Provider.Operation = (_, _) => finish.Task;
+            Task<FeatureResult> pending = harness.Handler.HandleAsync(input, request, null, cancellation.Token);
+            Assert.Equal("検索語", harness.Session.CurrentSearchRequest!.Query);
+            cancellation.Cancel();
+            Assert.Null(harness.Session.CurrentSearchRequest);
+            Assert.Null(harness.Session.CurrentResult);
+            Assert.True(harness.Execution.IsRunning);
+            finish.SetResult(CreateBatch(1));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+            Assert.Equal("検索語。", input.Transcript);
+        }
     }
 
     [Fact]

@@ -9,13 +9,14 @@ public sealed class VideoSearchSessionLifetimeTests
     [InlineData(true)]
     public void ExplicitPurgeReleasesClosedOrReplacedContentWithoutWaitingForARead(bool replace)
     {
-        (VideoSearchSession session, WeakReference input, WeakReference query, WeakReference result) = ClosedSession(replace);
+        (VideoSearchSession session, WeakReference input, WeakReference query, WeakReference result, WeakReference request) = ClosedSession(replace);
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
         Assert.False(input.IsAlive);
         Assert.False(query.IsAlive);
         Assert.False(result.IsAlive);
+        Assert.False(request.IsAlive);
         GC.KeepAlive(session); // the app itself still owns this session
     }
 
@@ -40,7 +41,7 @@ public sealed class VideoSearchSessionLifetimeTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (VideoSearchSession, WeakReference, WeakReference, WeakReference) ClosedSession(bool replace)
+    private static (VideoSearchSession, WeakReference, WeakReference, WeakReference, WeakReference) ClosedSession(bool replace)
     {
         ExecutionCoordinator execution = new();
         VideoSearchSession session = new(execution);
@@ -56,6 +57,7 @@ public sealed class VideoSearchSessionLifetimeTests
         WeakReference retainedInput = new(input);
         WeakReference retainedQuery = new(session.CurrentInterpretedQuery!);
         WeakReference retainedResult = new(response.VideoSearch!);
+        WeakReference retainedRequest = new(session.CurrentSearchRequest!);
         if (replace)
         {
             Assert.True(execution.TryBeginSession(Guid.NewGuid(), out var newer));
@@ -63,7 +65,7 @@ public sealed class VideoSearchSessionLifetimeTests
         }
         else { execution.CloseSession(input.SessionId); }
         session.DiscardInvalidatedState();
-        return (session, retainedInput, retainedQuery, retainedResult);
+        return (session, retainedInput, retainedQuery, retainedResult, retainedRequest);
     }
 
     private sealed class Interpreter : ISearchQueryInterpreter

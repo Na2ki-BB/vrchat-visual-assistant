@@ -2,7 +2,7 @@
 
 Status: K1–K5 adapters / WPF flow and L2 VR flow implemented; automated verification and separate real-device/service acceptance tracked in TASKS
 
-Last updated: 2026-10-01 (Etc/UTC). Requirements and repository review, plus official provider documentation; no API or device validation.
+Last updated: 2026-10-02 (Etc/UTC). Requirements and repository review, plus official provider documentation; no API or device validation.
 
 [設計の入口](../DESIGN.md) · [共通AI基盤設計](DESIGN-PLATFORM.md) · [日本語翻訳機能設計](DESIGN-JAPANESE-TRANSLATION.md)
 
@@ -60,7 +60,7 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 1. 既存の左腕メニューのマイクアイコンを押して録音する。再押しで停止し、初期上限30秒でも同じ経路で自動停止する。残り秒数と中止を表示する
 2. 共通側でGPT Transcribeによる文字起こしを行い、認識文を表示する。文字起こし中も状態と中止を表示する
 3. **認識文の直下に最初から2ボタン**「そのまま検索」「解釈して検索」を表示する。先に検索を押して後から方法を選ぶ二段階にはしない
-4. 選択した方式で検索する。検索語は認識文と別に保持し、候補画面に検索語を表示する案とする。追加の確認画面は挟まない
+4. 選択した方式で検索する。検索語は認識文と別に保持し、PC/VRの候補画面には実際にproviderへ渡した検索語を表示する。追加の確認画面は挟まない
 5. yt-dlpで最大10件を取得し、1ページ5件、最大2ページの候補を表示する。「次の候補」「前の候補」で取得済みの候補を切り替える
 6. 本人がサムネイル/タイトルの候補カードを選ぶと、対応する正規のYouTube watch URLをWindowsクリップボードへコピーする。成功を表示して機能上の目的を達成する
 7. 本人がワールドの動画プレイヤーへ手動で貼り付ける。コピー後も候補は閉じる/入力を置き換えるまで残し、別候補を選べる
@@ -83,7 +83,7 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 
 ### 「そのまま検索」
 
-認識された文章は原文のまま保持・表示し、yt-dlpに渡す直接検索語だけから最後の非空白文字である日本語句点「。」を除く。句点より後ろの末尾空白は保持し、内部の「。」、英文ピリオド、その他の文字は変更しない。AIの解釈、言い換え、コマンド除去、別のモデル呼び出しは挟まない。除去後が空白のみになる入力や長さ上限超過などは既存の入力検証で送信を止める。CLI用の安全な引数化は内容の変更ではない。
+認識された文章は文字起こし画面で原文のまま保持・表示し、yt-dlpに渡す直接検索語だけから最後の非空白文字である日本語句点「。」を除く。句点より後ろの末尾空白は保持し、内部の「。」、英文ピリオド、その他の文字は変更しない。AIの解釈、言い換え、コマンド除去、別のモデル呼び出しは挟まない。除去後が空白のみになる入力や長さ上限超過などは既存の入力検証で送信を止める。候補画面の「検索語」には句点除去後に実際に渡した語を表示する。CLI用の安全な引数化は内容の変更ではない。
 
 ### 「解釈して検索」
 
@@ -96,7 +96,7 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 - 不正/空のAI出力は解釈失敗として表示する。直接検索への暗黙切替はせず、本人は認識文へ戻って「そのまま検索」を選べる
 - **解釈用モデルはGPT-6 Luna（`gpt-6-luna`）、`reasoning.effort=none` を採用**する。検索語の短い整形を低費用で行う初期選定であり、実際の固有名詞・補足指示への精度は未評価。モデル選択は設定とadapter境界で差替可能にし、無断fallbackや自動再試行はしない
 - `ITextModelClient` の認証・キャンセル・fake通信は再利用するが、**検索AI解釈のquotaは翻訳と別枠**にする。初期値は既存の数値を引き継いだ10回／起動とし、後から個別に変更可能にする。解釈の利用で翻訳の残回数を減らさず、その逆も同様とする。K3は検索専用のsingleton allowlistに `gpt-6-luna` を追加し、翻訳allowlistとは分離する。翻訳の既定モデルと切替は今回変更しない
-- 追加確認画面は不要。検索に実際に使った語を結果画面へ表示する案を維持し、具体レイアウトは候補カードと合わせて確かめる
+- 追加確認画面は不要。検索に実際に使った解釈済みの語をPC/VRの結果画面へ表示し、検索だけの再試行でも同じ語を表示する
 
 ## Search provider — yt-dlp
 
@@ -104,7 +104,9 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 
 ### K1 core contracts — implemented, no external search
 
-`DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。直接検索の `VideoSearchRequest.Query` は原文から最後の非空白文字である日本語句点「。」だけを除き、末尾空白を保持した値（空白・改行を含む4,000 UTF-8 byte以内）とする。`VideoSearchResult.Query` と共通認識文は原文を保つ。直接検索の試行開始時に旧結果・解釈・再試行identityを失効させ、句点除去後の空queryが検証で拒否されても旧候補selectionを再利用できない。AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
+`DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。直接検索の `VideoSearchRequest.Query` は原文から最後の非空白文字である日本語句点「。」だけを除き、末尾空白を保持した値（空白・改行を含む4,000 UTF-8 byte以内）とする。`VideoSearchResult.Query` と結果の「検索語」は `VideoSearchRequest.Query` と一致し、共通認識文と「認識文」sectionは原文を保つ。直接検索の試行開始時に旧結果・解釈・再試行identityを失効させ、句点除去後の空queryが検証で拒否されても旧候補selectionを再利用できない。AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
+
+`VideoSearchSession.CurrentSearchRequest` は現在の検索試行でproviderへ渡す検証済みrequestだけを保持し、検索中・失敗時の表示にも同じqueryを使う。新検索・空query拒否・中止・session失効で古いrequestを再表示せず、入力へ戻ると原文を表示する。
 
 `VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。K4のclipboard境界はこの正本をSTA書込み直前に再照合する。公開UIはK5/L2で接続済み。
 

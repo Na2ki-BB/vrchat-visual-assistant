@@ -104,12 +104,11 @@ public sealed class VideoSearchResult
     internal VideoSearchResult(
         VideoSearchRequest request,
         VideoSearchBatch batch,
-        TimeSpan searchDuration,
-        string? displayQuery = null)
+        TimeSpan searchDuration)
     {
         SessionId = request.SessionId;
         OperationId = request.OperationId;
-        Query = displayQuery ?? request.Query;
+        Query = request.Query;
         SearchDuration = searchDuration;
         IsPartial = batch.IsPartial;
         Candidates = Array.AsReadOnly(batch.Videos.Select(video =>

@@ -46,6 +46,7 @@ public sealed class InterpretedVideoSearchHandler : ITextFeatureHandler
         cancellation.Token.ThrowIfCancellationRequested();
         operation.ThrowIfNotCurrent();
         VideoSearchRequest search = new(input.SessionId, request.CorrelationId, query.Query);
+        _session.AcceptSearchRequest(operation, search, cancellation.Token);
         progress?.Report(new ScanProgress(request.CorrelationId, ScanStage.TextHandling, "動画を検索しています。", TimeSpan.Zero));
         Stopwatch timer = Stopwatch.StartNew();
         VideoSearchBatch batch;

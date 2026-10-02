@@ -69,7 +69,8 @@ internal sealed class VideoSearchFlow : IAsyncDisposable
         Guid? retryId = retry && feature == FeatureIds.InterpretedVideoSearch ? _retrySearchOperationId : null;
         if (!_execution.TryBeginOperation(input.SessionId, Guid.NewGuid(), out ExecutionOperation? operation)) { return false; }
         InvalidateView();
-        if (!retry) { _retrySearchOperationId = null; _query = interpreted ? string.Empty : input.Transcript; }
+        if (!retry) { _retrySearchOperationId = null; }
+        _query = string.Empty;
         _input = input;
         _operation = operation;
         _feature = feature;
@@ -104,7 +105,7 @@ internal sealed class VideoSearchFlow : IAsyncDisposable
             IProgress<ScanProgress> progress = new Progress<ScanProgress>(value =>
             {
                 if (view != _viewGeneration || !ReferenceEquals(_operation, operation) || !operation.IsCurrent) { return; }
-                _query = _session.CurrentInterpretedQuery?.Query ?? string.Empty;
+                _query = QueryFor(operation);
                 State = value.Stage == ScanStage.SearchInterpretation ? VideoSearchFlowState.Interpreting : VideoSearchFlowState.Searching;
                 Message = State == VideoSearchFlowState.Interpreting ? "OpenAIへ認識文を送り、検索語を解釈しています。" : "YouTubeから動画の候補情報を取得しています。";
                 Notify();
@@ -147,15 +148,16 @@ internal sealed class VideoSearchFlow : IAsyncDisposable
         else if (!IsInputCurrent()) { InvalidateView(); State = VideoSearchFlowState.Closed; }
         else if (cancelled)
         {
+            _query = string.Empty;
             State = VideoSearchFlowState.Input;
             Message = "中止と後処理が完了しました。認識文は保持しています。";
         }
         else if (failure is not null)
         {
+            _query = QueryFor(operation);
             if (_session.RetryableSearchOperationId == operation.OperationId)
             {
                 _retrySearchOperationId = operation.OperationId;
-                _query = _session.CurrentInterpretedQuery?.Query ?? string.Empty;
             }
             FailureCode = failure.FailureCode;
             FailureStage = failure.Stage;
@@ -306,6 +308,8 @@ internal sealed class VideoSearchFlow : IAsyncDisposable
 
     private bool IsInputCurrent() => _input is not null && ReferenceEquals(_currentInput(), _input)
         && _execution.IsSessionCurrent(_input.SessionId);
+    private string QueryFor(ExecutionOperation operation) => _session.CurrentSearchRequest is { } request
+        && request.OperationId == operation.OperationId ? request.Query : string.Empty;
     private bool IsResultCurrent() => _result is not null && IsInputCurrent() && ReferenceEquals(_session.CurrentResult, _result);
     private void CancelImages() { _imageCancellation?.Cancel(); }
     private void InvalidateView() { _viewGeneration++; CancelImages(); _images.Clear(); _result = null; PageIndex = 0; }

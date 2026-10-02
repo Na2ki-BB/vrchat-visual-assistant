@@ -12,6 +12,7 @@ public sealed class VideoSearchSession
     private readonly object _sync = new();
     private readonly ExecutionCoordinator _execution;
     private ExecutionOperation? _searchOperation;
+    private VideoSearchRequest? _searchRequest;
     private VideoSearchResult? _result;
     private SearchQueryInterpretation? _interpretedQuery;
     private TextInputSession? _interpretedInput;
@@ -60,6 +61,12 @@ public sealed class VideoSearchSession
         get { lock (_sync) { DiscardStaleSession(); return _retryableSearchOperationId; } }
     }
 
+    /// <summary>The validated request handed to the provider for the current search attempt.</summary>
+    public VideoSearchRequest? CurrentSearchRequest
+    {
+        get { lock (_sync) { DiscardStaleSession(); return _searchRequest; } }
+    }
+
     internal ExecutionOperation BeginInterpretedSearch(TextInputSession input, Guid operationId,
         Guid? retrySearchOperationId, out SearchQueryInterpretation? retainedQuery)
     {
@@ -77,6 +84,7 @@ public sealed class VideoSearchSession
             if (retrySearchOperationId is not null) { retainedQuery = _interpretedQuery; }
             else { ClearInterpretation(); }
             _searchOperation = operation;
+            _searchRequest = null;
             _result = null;
             _retryableSearchOperationId = null;
             return operation;
@@ -108,6 +116,7 @@ public sealed class VideoSearchSession
             // A late cancellation from an old handler cannot clear a newer search.
             if (!ReferenceEquals(_searchOperation, operation)) { return; }
             _result = null;
+            _searchRequest = null;
             ClearInterpretation();
         }
         if (!operation.CancellationToken.IsCancellationRequested)
@@ -153,8 +162,25 @@ public sealed class VideoSearchSession
             ExecutionOperation operation = FindNewOperation(sessionId, operationId);
             ClearInterpretation();
             _searchOperation = operation;
+            _searchRequest = null;
             _result = null;
             return operation;
+        }
+    }
+
+    internal void AcceptSearchRequest(ExecutionOperation operation, VideoSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.ThrowIfNotCurrent();
+            if (!ReferenceEquals(_searchOperation, operation) || !_execution.IsActive(operation)
+                || request.SessionId != operation.SessionId || request.OperationId != operation.OperationId)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+            _searchRequest = request;
         }
     }
 
@@ -162,8 +188,7 @@ public sealed class VideoSearchSession
         VideoSearchRequest request,
         VideoSearchBatch batch,
         TimeSpan searchDuration,
-        CancellationToken cancellationToken,
-        string? displayQuery = null)
+        CancellationToken cancellationToken)
     {
         lock (_sync)
         {
@@ -176,7 +201,7 @@ public sealed class VideoSearchSession
             }
 
             _retryableSearchOperationId = null;
-            _result = new VideoSearchResult(request, batch, searchDuration, displayQuery);
+            _result = new VideoSearchResult(request, batch, searchDuration);
             return _result;
         }
     }
@@ -240,6 +265,10 @@ public sealed class VideoSearchSession
 
     private void DiscardStaleSession()
     {
+        if (_searchOperation is not null && !_execution.IsResultCurrent(_searchOperation))
+        {
+            _searchRequest = null;
+        }
         if (_interpretationOperation is not null && !_execution.IsResultCurrent(_interpretationOperation))
         {
             ClearInterpretation();
