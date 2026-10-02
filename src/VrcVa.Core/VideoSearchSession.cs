@@ -146,11 +146,11 @@ public sealed class VideoSearchSession
         _retryableSearchOperationId = null;
     }
 
-    internal ExecutionOperation BeginSearch(VideoSearchRequest request)
+    internal ExecutionOperation BeginDirectSearch(Guid sessionId, Guid operationId)
     {
         lock (_sync)
         {
-            ExecutionOperation operation = FindNewOperation(request.SessionId, request.OperationId);
+            ExecutionOperation operation = FindNewOperation(sessionId, operationId);
             ClearInterpretation();
             _searchOperation = operation;
             _result = null;
@@ -162,7 +162,8 @@ public sealed class VideoSearchSession
         VideoSearchRequest request,
         VideoSearchBatch batch,
         TimeSpan searchDuration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? displayQuery = null)
     {
         lock (_sync)
         {
@@ -175,7 +176,7 @@ public sealed class VideoSearchSession
             }
 
             _retryableSearchOperationId = null;
-            _result = new VideoSearchResult(request, batch, searchDuration);
+            _result = new VideoSearchResult(request, batch, searchDuration, displayQuery);
             return _result;
         }
     }

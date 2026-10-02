@@ -57,6 +57,36 @@ public sealed class VideoSearchFlowTests
         Assert.Equal(1, fixture.Voice.Requests);
     }
 
+    [Fact]
+    public Task DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQuery() =>
+        VrFlowTestThread.RunAsync(DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQueryCore);
+
+    private static async Task DirectSearchAndRetry_OnlyStripTerminalJapaneseFullStopFromProviderQueryCore()
+    {
+        const string transcript = "内部。句点。 \r\n";
+        await using SearchFlowFixture fixture = new();
+        fixture.Voice.Response = (_, _) => Task.FromResult(VoiceFlowFixture.Success(transcript));
+        fixture.SearchResponse = (_, _) => throw new ScanException(
+            ScanFailureCode.VideoSearchTimedOut, ScanStage.TextHandling, "private provider data");
+        await fixture.Voice.RecordAsync();
+
+        Assert.True(fixture.Flow.TrySearch(false));
+        await fixture.Flow.WhenIdle;
+        Assert.Equal(VideoSearchFlowState.Failed, fixture.Flow.State);
+        Assert.Equal(transcript, fixture.Flow.Query);
+        Assert.Equal(["内部。句点 \r\n"], fixture.Queries);
+        Assert.Equal(0, fixture.Interpretations);
+
+        fixture.SearchResponse = (_, _) => Task.FromResult(SearchFlowFixture.Batch(1));
+        Assert.True(fixture.Flow.TrySearch(false, retry: true));
+        await fixture.Flow.WhenIdle;
+        Assert.Equal(VideoSearchFlowState.Candidates, fixture.Flow.State);
+        Assert.Equal(transcript, fixture.Flow.Query);
+        Assert.Equal(["内部。句点 \r\n", "内部。句点 \r\n"], fixture.Queries);
+        Assert.Equal(transcript, fixture.Voice.Flow.CurrentInput!.Transcript);
+        Assert.Equal(0, fixture.Interpretations);
+    }
+
     [Theory]
     [InlineData(0, false, 1)]
     [InlineData(1, true, 1)]

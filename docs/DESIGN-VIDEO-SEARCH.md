@@ -83,7 +83,7 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 
 ### 「そのまま検索」
 
-認識された文章をそのまま検索語としてyt-dlpに渡す。AIの解釈、言い換え、コマンド除去、別のモデル呼び出しは挟まない。空白のみ・長さ上限超過などの入力検証で送信を止めることと、検索語を勝手に書き換えることを区別する。CLI用の安全な引数化は内容の変更ではない。
+認識された文章は原文のまま保持・表示し、yt-dlpに渡す直接検索語だけから最後の非空白文字である日本語句点「。」を除く。句点より後ろの末尾空白は保持し、内部の「。」、英文ピリオド、その他の文字は変更しない。AIの解釈、言い換え、コマンド除去、別のモデル呼び出しは挟まない。除去後が空白のみになる入力や長さ上限超過などは既存の入力検証で送信を止める。CLI用の安全な引数化は内容の変更ではない。
 
 ### 「解釈して検索」
 
@@ -104,7 +104,7 @@ native intersectionから同一view逆変換、logical control、actionまでfak
 
 ### K1 core contracts — implemented, no external search
 
-`DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。`VideoSearchRequest.Query` は原文そのまま（空白・改行を含む4,000 UTF-8 byte以内）で、AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
+`DirectVideoSearchHandler` は `ITextFeatureHandler` として、共通gateで受け付けた現在のsession/operationだけを `IVideoSearchProvider` に渡す。直接検索の `VideoSearchRequest.Query` は原文から最後の非空白文字である日本語句点「。」だけを除き、末尾空白を保持した値（空白・改行を含む4,000 UTF-8 byte以内）とする。`VideoSearchResult.Query` と共通認識文は原文を保つ。直接検索の試行開始時に旧結果・解釈・再試行identityを失効させ、句点除去後の空queryが検証で拒否されても旧候補selectionを再利用できない。AI/capture/OCRに依存しない。`VideoSearchBatch` は検証済みmetadataを最大10件・重複なしでコピーし、providerのcollection変更が結果を変えない。無効/重複entryの除外と正常0件/全件不正の区別は、raw metadataを読むK2のadapterで行う。
 
 `VideoSearchResult` は不変のquery・session/operation ID・候補snapshotを持ち、5件ずつ最大2ページをメモリだけで返す。0件も空の1ページを表す。各 `VideoCandidate` は新しい候補IDと動画ID/title/任意thumbnail/正規watch URLを対応づける。`VideoSearchSession.TryResolveSelection` は現在のsession・検索operation・候補IDと `CopyWatchUrl` だけを照合し、任意URL/未知actionを受け付けない。新検索の開始時に旧候補を失効させ、取消/close/録り直し後の遅延結果を採用しない。K4のclipboard境界はこの正本をSTA書込み直前に再照合する。公開UIはK5/L2で接続済み。
 

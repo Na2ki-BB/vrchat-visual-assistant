@@ -6,13 +6,15 @@ public sealed class InterpretedVideoSearchHandlerTests
     public async Task Search_RetainsOriginalAndSeparatelyValidatedQuery()
     {
         Harness h = new();
+        h.Interpreter.Query = "解釈済み。";
         FeatureResult result = await h.Run();
         Assert.Equal(1, h.Interpreter.Calls);
         Assert.Equal(1, h.Provider.Calls);
         Assert.Equal(h.Input.Transcript, result.Sections[0].Text);
         Assert.Equal(h.Input.Transcript, h.Interpreter.Input!.Transcript);
-        Assert.Equal("架空曲 2024 ライブ", result.VideoSearch!.Query);
-        Assert.Equal("架空曲 2024 ライブ", h.Session.CurrentInterpretedQuery!.Query);
+        Assert.Equal("解釈済み。", h.Provider.Requests.Single().Query);
+        Assert.Equal("解釈済み。", result.VideoSearch!.Query);
+        Assert.Equal("解釈済み。", h.Session.CurrentInterpretedQuery!.Query);
         Assert.Null(h.Session.RetryableSearchOperationId);
         Assert.Equal(FeatureIds.InterpretedVideoSearch, result.FeatureId);
         Assert.Equal(FeatureDataBoundary.InputTextToOpenAi | FeatureDataBoundary.SearchTextToYouTube,
@@ -174,16 +176,63 @@ public sealed class InterpretedVideoSearchHandlerTests
         Assert.Null(h.Session.RetryableSearchOperationId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EmptyDirectQuery_ClearsPriorInterpretedStateResultRetryAndSelection(bool priorSearchFails)
+    {
+        Harness h = new("。");
+        h.Provider.Fail = priorSearchFails;
+        VideoCandidateAction? oldSelection = null;
+        if (priorSearchFails)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => h.Run());
+            Assert.NotNull(h.Session.RetryableSearchOperationId);
+        }
+        else
+        {
+            FeatureResult oldResult = await h.Run();
+            oldSelection = oldResult.VideoSearch!.Candidates[0].CreateSelectionAction();
+            Assert.Same(oldResult.VideoSearch, h.Session.CurrentResult);
+        }
+        Assert.NotNull(h.Session.CurrentInterpretedQuery);
+        int providerCalls = h.Provider.Calls;
+
+        h.Provider.Fail = false;
+        DirectVideoSearchHandler direct = new(h.Provider, h.Session);
+        ScanRequest request = ScanRequest.CreateText("test", FeatureIds.DirectVideoSearch, h.Input);
+        Assert.True(h.Execution.TryBeginOperation(h.Input.SessionId, request.CorrelationId, out ExecutionOperation? operation));
+        using (operation)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                direct.HandleAsync(h.Input, request, null, CancellationToken.None));
+        }
+
+        Assert.Null(h.Session.CurrentResult);
+        Assert.Null(h.Session.CurrentInterpretedQuery);
+        Assert.Null(h.Session.RetryableSearchOperationId);
+        Assert.Equal(providerCalls, h.Provider.Calls);
+        if (oldSelection is not null)
+        {
+            Assert.False(h.Session.TryResolveSelection(oldSelection, out _));
+        }
+    }
+
     private sealed class Harness
     {
         public ExecutionCoordinator Execution { get; } = new();
         public VideoSearchSession Session { get; }
         public FakeInterpreter Interpreter { get; } = new();
         public FakeProvider Provider { get; } = new();
-        public TextInputSession Input { get; } = TextInputSession.Create("  架空曲はカタカナで\r\n2024年のライブを探して  ");
+        public TextInputSession Input { get; }
         private readonly InterpretedVideoSearchHandler _handler;
         private bool _started;
-        public Harness() { Session = new(Execution); _handler = new(Interpreter, Provider, Session); }
+        public Harness(string transcript = "  架空曲はカタカナで\r\n2024年のライブを探して  ")
+        {
+            Input = TextInputSession.Create(transcript);
+            Session = new(Execution);
+            _handler = new(Interpreter, Provider, Session);
+        }
         public ScanRequest Request() => ScanRequest.CreateText("test", FeatureIds.InterpretedVideoSearch, Input);
         public async Task<FeatureResult> Run(ScanRequest? request = null, CancellationToken cancellationToken = default)
         {
@@ -204,11 +253,12 @@ public sealed class InterpretedVideoSearchHandlerTests
         public TextInputSession? Input { get; private set; }
         public Action? Callback { get; set; }
         public bool Fail { get; set; }
+        public string Query { get; set; } = "架空曲 2024 ライブ";
         public Task<SearchQueryInterpretation> InterpretAsync(TextInputSession input, CancellationToken cancellationToken)
         {
             Calls++; Input = input; Callback?.Invoke();
             if (Fail) { throw new ScanException(ScanFailureCode.SearchInterpretationFailed, ScanStage.SearchInterpretation, "fake failure"); }
-            return Task.FromResult(new SearchQueryInterpretation("架空曲 2024 ライブ"));
+            return Task.FromResult(new SearchQueryInterpretation(Query));
         }
     }
 
