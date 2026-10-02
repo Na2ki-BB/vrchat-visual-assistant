@@ -38,6 +38,21 @@ public sealed class YtDlpVideoSearchProviderTests
         Assert.All(factory.Finished, process => Assert.True(process.Disposed));
     }
 
+    [Theory]
+    [InlineData("Deprecated Feature: Support for Python version 3.10 has been deprecated. Please update to Python 3.11 or above\r\n", false)]
+    [InlineData("WARNING: synthetic provider warning\n", true)]
+    [InlineData("Deprecated Feature: Support for Python version 3.10 has been deprecated. Please update to Python 3.11 or above\nWARNING: additional warning\n", true)]
+    public async Task Search_OnlyExactBundledPythonLifecycleNoticeIsNotPartial(string standardError, bool expectedPartial)
+    {
+        FakeFactory factory = new(new FakeProcess("2026.08.19\n"),
+            new FakeProcess("{\"entries\":[{\"id\":\"sample00000\",\"title\":\"Title\"}]}", standardError));
+
+        VideoSearchBatch result = await Create(factory).SearchAsync(Request(), default);
+
+        Assert.Equal(expectedPartial, result.IsPartial);
+        Assert.All(factory.Finished, process => Assert.True(process.Disposed));
+    }
+
     [Fact]
     public void StartInfo_DropsPythonPluginAndProxyEnvironmentWithoutLoggingIt()
     {
