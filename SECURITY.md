@@ -22,7 +22,7 @@ This app must remain an external Windows utility. Reports proposing or depending
 
 Runtime logs intentionally exclude images, audio, transcripts, search queries, candidate titles/URLs, recognized/translated text, API keys, HTTP bodies, raw child-process stdout/stderr, exception messages, and VRChat identifiers.
 
-XSOverlay result notifications are sent only to `127.0.0.1` over its local External Message API. Their payload necessarily contains the OCR or translated text being displayed; it is not written to the project log or sent to an internet host by this renderer.
+XSOverlay notifications are sent only to `127.0.0.1` over its local External Message API. Normal SCAN uses them only for error assistance; model changes and explicit diagnostics may send short status notifications. OCR or translated text, audio, transcripts, and search queries are not sent to XSOverlay.
 
 With no stored text key and no explicit environment configuration, translation remains local OCR-only. The GUI can explicitly save a text key in Windows Credential Manager at `VrcVa/OpenAIApiKey`, enabling optional translation. Temporary translation mode requires both `VRCVA_TRANSLATION_PROVIDER=openai` and the process-scoped `VRCVA_OPENAI_API_KEY`. Generic keys such as `OPENAI_API_KEY` are never a fallback. Stored keys are restricted to the official OpenAI endpoint; only the explicit environment-based translation developer configuration supports a custom endpoint.
 
