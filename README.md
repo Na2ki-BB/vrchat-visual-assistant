@@ -157,7 +157,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-ocr-language
 
 1. SteamVR、Windows 版 VRChat、VRCVA の順に起動する
 2. 左手首の小さい `VRCVA` ランチャーを表示する
-3. 右手の水色の照準点を操作項目へ合わせ、トリガーで `SCAN` を選ぶ
+3. 右手の水色の照準点を操作項目へ合わせ、トリガーで `翻訳 SCAN` を選ぶ
 4. SteamVR 内の結果パネルで内容を確認する
 
 結果パネルを表示したままでも、VRChat の歩行用入力は維持されます。右トリガーは VRChat にも届くため、ワールド側の操作が同時に発生する場合があります。
@@ -168,7 +168,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-ocr-language
 
 VRCVA の「画面の翻訳」タブで OpenAI API キーを入力し、「暗号化して保存」を押します。キーは Windows 資格情報マネージャーの `VrcVa/OpenAIApiKey` に保存され、次回の SCAN から反映されます。
 
-キーを削除すると、以後はローカル OCR のみになります。一般的な `OPENAI_API_KEY` 環境変数は自動利用しません。
+保存キーを削除し、`VRCVA_*` の一時翻訳設定もない場合は、以後ローカル OCR のみになります。一般的な `OPENAI_API_KEY` 環境変数は自動利用しません。
 
 ## 音声から動画を探す
 
@@ -234,7 +234,7 @@ VRCVA の「画面の翻訳」タブで OpenAI API キーを入力し、「暗�
 | そのまま検索 | YouTube（固定版 `yt-dlp` 経由） | 認識文を基にした検索語 | OpenAI の追加送信はないが、直前の音声文字起こしは有料 |
 | 解釈して検索 | OpenAI Responses API、続いて YouTube | 認識文、続いて生成された検索語 | 音声文字起こしに加え、検索語の解釈も従量課金 |
 | 候補画像 | `i.ytimg.com` / `img.youtube.com` | サムネイル取得リクエスト | YouTube の外部通信 |
-| XSOverlay 通知 | `127.0.0.1` | 表示する結果またはエラー | 同じ PC 内だけ。XSOverlay は任意 |
+| XSOverlay 通知 | `127.0.0.1` | エラー、モデル切替、明示診断などの短い状態通知 | 同じ PC 内だけ。通常 SCAN の OCR・翻訳本文は送信しない |
 | OSC トリガー | この PC の OSC / OSCQuery | トリガー値 | 既定で無効。DNS-SD のサービス名とポートは LAN に広告される |
 
 OpenAI API の利用料金は ChatGPT のサブスクリプションとは別です。料金、モデル、データ保持条件は変更されるため、利用前に [OpenAI API Pricing](https://developers.openai.com/api/docs/pricing)、[API のデータ管理](https://developers.openai.com/api/docs/guides/your-data)、[Usage Dashboard](https://platform.openai.com/usage) を確認してください。VRCVA の上限は 1 回の起動中の誤操作を抑えるためのもので、月額予算を保証しません。
@@ -245,7 +245,7 @@ OpenAI API の利用料金は ChatGPT のサブスクリプションとは別で
 - 翻訳: 10 送信
 - 検索語の AI 解釈: 10 送信
 
-失敗、キャンセル、手動再送でも、通信を開始した処理は計数されることがあります。自動再試行は行いません。アプリを再起動するとカウンターは戻るため、API 側でも利用上限を設定してください。
+失敗、キャンセル、手動再送でも、通信を開始した処理は計数されることがあります。自動再試行は行いません。アプリを再起動するとカウンターは戻るため、API 側でも利用上限を設定してください。VRCVA 専用の OpenAI Project を作り、[spend limit](https://developers.openai.com/api/docs/guides/spend-limits) を設定することを推奨します。利用額の集計には遅延があり、設定額をわずかに超える場合があります。
 
 ### 保存されるもの
 
@@ -270,7 +270,7 @@ OpenAI API の利用料金は ChatGPT のサブスクリプションとは別で
 | 「OCR 結果（翻訳未設定）」 | 正常です。OpenAI 未設定時は認識した英語だけを表示します |
 | OpenAI キー未設定・認証・レート制限 | 対象機能のキー、API 権限、API 側の支払い設定と利用上限を確認してください |
 | SteamVR の結果パネルが出ない | SteamVR を先に起動してください。処理結果はデスクトップ画面にも残ります |
-| 左手首ランチャーが出ない | SteamVR を先に起動し、旧 VRCVA プロセスが残っていないか確認してください |
+| 左手首ランチャーが出ない | VRCVA を終了し、SteamVR → VRCVA の順で起動し直してください。旧 VRCVA プロセスが残っていないかも確認してください |
 | 録音できない | 音声同意、音声専用キー、既定の通信マイク、Windows のマイク許可、物理ミュートを確認してください |
 | 動画検索を設定できない | `yt-dlp.exe` の場所、バージョン、SHA-256 を確認してください |
 | ホットキーを登録できない | 他アプリとの競合を避けるため、`VRCVA_HOTKEY` を変更して再起動してください |
@@ -296,7 +296,7 @@ OpenAI API の利用料金は ChatGPT のサブスクリプションとは別で
 
 | 環境変数 | 既定値 | 用途 |
 | --- | --- | --- |
-| `VRCVA_TRANSLATION_PROVIDER` | `none` | `openai` を指定した場合だけ一時的な翻訳設定を有効化 |
+| `VRCVA_TRANSLATION_PROVIDER` | 未指定（保存キーあり: `openai` / なし: `none`） | 一時設定で `none` または `openai` を明示 |
 | `VRCVA_OPENAI_API_KEY` | なし | 一時的な翻訳専用キー。一般的な `OPENAI_API_KEY` は使わない |
 | `VRCVA_OPENAI_MODEL` | `gpt-5.6-luna` | 翻訳モデル。対応値は `gpt-5.6-luna` / `gpt-5.4-nano` |
 | `VRCVA_OPENAI_ENDPOINT` | 公式 Responses API | 開発用の翻訳エンドポイント |
@@ -309,6 +309,8 @@ OpenAI API の利用料金は ChatGPT のサブスクリプションとは別で
 | `VRCVA_OSC_TRIGGER_DEBOUNCE_MS` | `750` | 連続入力を無視する時間。100〜10000 ms |
 | `VRCVA_OSC_TRIGGER_TYPE` | `bool` | `bool` または `int` |
 | `VRCVA_OSC_TRIGGER_INT_VALUE` | `1` | `int` 使用時に SCAN と判定する値 |
+
+資格情報マネージャーへ保存したキーは、公式の `https://api.openai.com/v1/responses` にだけ送信されます。`VRCVA_OPENAI_ENDPOINT` で送信先を変更できるのは、`VRCVA_OPENAI_API_KEY` を同じプロセスに明示した開発用構成だけです。この場合、OCR テキストは指定した endpoint へ送信されるため、運営者とデータ取扱条件を自分で確認してください。
 
 OSC と OVR Advanced Settings を使う回復経路、個別診断コマンド、実機確認手順は [ローカル導入・実機確認ガイド](docs/LOCAL-SETUP-AND-TEST.md) を参照してください。
 
