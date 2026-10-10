@@ -30,6 +30,6 @@ Voice is disabled by default and requires separate opt-in plus a dedicated Crede
 
 Audio is held in memory and zeroed when released; a failed recording has a bounded, non-renewing retry lifetime. Transcripts, queries, candidates, and images are released on close or replacement, and are not persisted by VRCVA. Ordinary settings contain only non-secret preferences and limits. This is not a guarantee against OS paging, crash dumps, another process with the same user privileges, or provider-side retention. Official one-file yt-dlp may temporarily extract executable components. A copied URL remains in the Windows clipboard and may enter OS history/sync; VRCVA does not clear it on exit.
 
-See [current usage/privacy instructions](README.md#音声動画検索を始める前に) and [separate validation gates](TASKS.md#post-mvp-milestone-l--vr-integration-and-separate-acceptance-gates). Automated fake tests do not establish real-device or real-service acceptance.
+See [current usage/privacy instructions](README.md#外部通信データ料金) and [separate validation gates](TASKS.md#post-mvp-milestone-l--vr-integration-and-separate-acceptance-gates). Automated fake tests do not establish real-device or real-service acceptance.
 
 Provider keys must never be committed, logged, shown in screenshots, or pasted into issues or chat. A newly researched provider must not be implemented or enabled until the owner makes an explicit decision.
